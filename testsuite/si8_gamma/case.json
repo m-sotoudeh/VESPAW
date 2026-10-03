@@ -1,0 +1,79 @@
+{
+  "description": "Si 8-atom cubic cell, Gamma point only, PBE: Gamma/time-reversal path of all optimizers",
+  "inputs": [
+    "si8.cntl",
+    "si8.strc"
+  ],
+  "timeout": 900,
+  "defaults": {
+    "@NSTEP@": "300"
+  },
+  "runs": {
+    "dav_var": {
+      "subs": {
+        "@PSIDYN@": "OPTIMIZER='DAV' MIXER='VARIATIONAL' SAFEORTHO=F STOP=T"
+      }
+    },
+    "rmm_var": {
+      "subs": {
+        "@PSIDYN@": "OPTIMIZER='RMM' MIXER='VARIATIONAL' SAFEORTHO=F STOP=T"
+      }
+    },
+    "cg_var": {
+      "subs": {
+        "@PSIDYN@": "OPTIMIZER='CG' MIXER='VARIATIONAL' SAFEORTHO=F STOP=T"
+      }
+    },
+    "md": {
+      "subs": {
+        "@NSTEP@": "3000",
+        "@PSIDYN@": "STOP=T FRIC=0.02 SAFEORTHO=T\n    !AUTO FRIC(-)=0.3 FACT(-)=0.97 FRIC(+)=0.3 FACT(+)=1. MINFRIC=0.02 !END"
+      }
+    }
+  },
+  "agree": [
+    {
+      "runs": [
+        "dav_var",
+        "rmm_var",
+        "cg_var"
+      ],
+      "quantity": "energy",
+      "tol": 2e-06
+    },
+    {
+      "runs": [
+        "dav_var",
+        "md"
+      ],
+      "quantity": "energy",
+      "tol": 5e-06
+    },
+    {
+      "runs": [
+        "dav_var",
+        "rmm_var",
+        "cg_var",
+        "md"
+      ],
+      "quantity": "gap_ev",
+      "tol": 0.003
+    }
+  ],
+  "checks": [
+    {
+      "run": "dav_var",
+      "quantity": "energy",
+      "value": -31.5202106569,
+      "tol": 2e-06,
+      "reference": "DAV/RMM/CG agree to 2e-8 Ha; Car-Parrinello friction MD -31.6607114 Ha (stops on its energy criterion, 1.9e-6 above) -- established 2026-09-27 -- re-referenced 2026-09-29 after the default relativistic treatment changed from ZORA to energy-dependent scalar-relativistic (cross-optimizer agreement and finite-difference checks unchanged) -- re-referenced 2026-10-02 for the corrected PBE reduced gradient (TFAC ported from CP-PAW 2024; also fixed in the SCAN correlation code; TYPE=-10 reproduces the old values) -- re-referenced 2026-10-03: published PBE beta, SCAN-L PC07opt deorbitalization, spin-polarized SCAN correlation, CODATA 2018 constants (output now in eV; references stay in Hartree)"
+    },
+    {
+      "run": "dav_var",
+      "quantity": "gap_ev",
+      "value": 0.6023,
+      "tol": 0.002,
+      "reference": "same runs (MD 0.638 eV) -- re-referenced 2026-10-02 for the corrected PBE reduced gradient (TFAC ported from CP-PAW 2024; also fixed in the SCAN correlation code; TYPE=-10 reproduces the old values)"
+    }
+  ]
+}

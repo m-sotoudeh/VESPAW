@@ -1,0 +1,52 @@
+{
+  "description": "Tutorial example 1: H2O in a 10 AA box (PBE, 60 Ry, Gamma). SCF at a distorted geometry, then relaxation with damped dynamics.",
+  "inputs": [
+    "h2o.cntl",
+    "h2o.strc"
+  ],
+  "timeout": 1800,
+  "defaults": {
+    "@NSTEP@": "300",
+    "@START@": "T",
+    "@PSIDYN@": "OPTIMIZER='DAV' MIXER='VARIATIONAL' MIXG0SQ=0.05 SAFEORTHO=T STOP=T",
+    "@RDYN@": ""
+  },
+  "runs": {
+    "scf": {
+      "subs": {}
+    },
+    "relax": {
+      "stages": [
+        {
+          "subs": {}
+        },
+        {
+          "subs": {
+            "@START@": "F",
+            "@NSTEP@": "2000",
+            "@PSIDYN@": "STOP=T FRIC=0.02 SAFEORTHO=T\n    !AUTO FRIC(-)=0.3 FACT(-)=0.97 FRIC(+)=0.3 FACT(+)=1. MINFRIC=0.02 !END",
+            "@RDYN@": "  !RDYN STOP=T FRIC=0.05\n    !AUTO FRIC(-)=0.3 FACT(-)=0.97 FRIC(+)=0.3 FACT(+)=1. MINFRIC=0.05 !END\n  !END"
+          }
+        }
+      ]
+    }
+  },
+  "checks": [
+    {
+      "run": "scf",
+      "quantity": "energy",
+      "value": -17.3242875074,
+      "tol": 5e-06,
+      "reference": "2026-09-28 -- re-checked 2026-10-03 with the corrected functionals and CODATA 2018 constants"
+    },
+    {
+      "run": "relax",
+      "quantity": "energy",
+      "value": -17.3267510643,
+      "tol": 3e-05,
+      "reference": "2026-09-28; relaxed OH 0.971 AA, HOH 104.7 deg (PBE: 0.970, 104.2) -- re-checked 2026-10-03 with the corrected functionals and CODATA 2018 constants"
+    }
+  ],
+  "agree": [],
+  "known_issues": {}
+}

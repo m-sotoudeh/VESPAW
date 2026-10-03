@@ -1,0 +1,969 @@
+\documentclass[11pt,a4paper,oneside]{book}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{amsmath,amssymb,bm}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage[colorlinks=true,linkcolor=blue!50!black,citecolor=green!40!black,urlcolor=blue!60!black]{hyperref}
+\usepackage{xcolor}
+
+\newcommand{\vth}{\bm\theta}
+\newcommand{\vout}{\bm v_{\mathrm{out}}}
+\newcommand{\onec}{\mathrm{1c}}
+\newcommand{\pbezero}{PBE0r}
+\newcommand{\scanzero}{SCAN0r}
+\newcommand{\pbeslzero}{PBE-SL0r}
+\newcommand{\key}[1]{\texttt{#1}}
+\newcommand{\bra}[1]{\langle #1|}
+\newcommand{\ket}[1]{|#1\rangle}
+\newcommand{\braket}[2]{\langle #1|#2\rangle}
+\newcommand{\pt}{\tilde p}
+
+\title{\Huge VESPAW\\[0.5em]\Large Theory and Methods\\[2em]
+\normalsize Variational electronic structure with projector augmented waves}
+\author{Mohsen Sotoudeh}
+\date{Version of \today}
+
+\begin{document}
+\frontmatter
+\maketitle
+\tableofcontents
+
+\mainmatter
+% =====================================================================
+\chapter{Introduction}
+% =====================================================================
+
+VESPAW is a plane-wave electronic-structure code based on the projector
+augmented-wave (PAW) method~\cite{bloechl94_prb50_17953}. It is a fork of
+CP-PAW, the Car--Parrinello PAW code written by Peter E.~Bl\"ochl at
+Clausthal University of Technology. VESPAW keeps the PAW machinery,
+the setup generator, the Car--Parrinello dynamics and the input format of
+CP-PAW, and adds
+\begin{itemize}
+\item a \emph{variational} self-consistent-field (SCF) optimizer, whose
+  energies are upper bounds of the ground-state energy at every
+  iteration (Chapter~\ref{chap:variational});
+\item modern iterative eigensolvers (block Davidson, RMM-DIIS, conjugate
+  gradients) next to the original damped dynamics
+  (Chapter~\ref{chap:eigensolvers});
+\item local hybrid functionals of the \pbezero\ type and their
+  meta-GGA variants \pbeslzero\ and \scanzero, the SCAN family (SCAN-L and orbital-$\tau$
+  SCAN), and forces and stress for all of them
+  (Chapters~\ref{chap:dft}, \ref{chap:hybrids} and \ref{chap:forces});
+\item quality checks for PAW setups (ghost test, incompleteness warning,
+  kinetic-energy cutoff table), a rebuilt and audited setup library
+  (Chapter~\ref{chap:paw}), and a regression suite
+  (Chapter~\ref{chap:code}).
+\end{itemize}
+
+\paragraph{License.} CP-PAW is distributed under the GNU General Public
+License, version~3 (GPL-3.0), from its GitHub repository. VESPAW is a
+derivative of CP-PAW and is therefore distributed under the same license.
+The older notice ``(C) Copyright Clausthal University of Technology,
+licensed materials'' still found in the headers of the inherited source
+files predates the GPL release.
+
+\paragraph{How to read this book.} Chapters~\ref{chap:dft}--\ref{chap:paw}
+summarize the physics that VESPAW implements: density-functional theory,
+plane waves and the PAW method. Chapter~\ref{chap:hybrids} treats the local
+hybrid functionals. Chapters~\ref{chap:variational}
+and~\ref{chap:eigensolvers} describe how the Kohn--Sham equations are
+solved; this is where VESPAW differs most from other codes.
+Chapter~\ref{chap:forces} covers forces, stress and molecular dynamics,
+and Chapter~\ref{chap:code} the structure of the program. Input keywords
+are given in \key{typewriter} font; their complete description is in the
+input manual \texttt{doc/manual.tex}. Hartree atomic units are used
+throughout unless stated otherwise; cutoff energies are quoted in Rydberg,
+as in the input.
+
+\paragraph{Pitfalls.} Many sections end with a short list of pitfalls.
+They record errors that were actually found in the code and fixed, so that
+the reader understands which quantities are delicate and how they are
+tested.
+
+% =====================================================================
+\chapter{Density-functional theory}\label{chap:dft}
+% =====================================================================
+
+\section{Kohn--Sham equations}
+
+By the Hohenberg--Kohn theorem~\cite{HohenbergKohn1964} the ground-state
+energy of $N$ interacting electrons in an external potential
+$v_{\mathrm{ext}}$ is a functional of the density $n(\bm r)$. Kohn and
+Sham~\cite{KohnSham1965} write it in terms of non-interacting orbitals
+$\psi_n$ with occupations $f_n$,
+\begin{equation}
+  E[n] = \sum_n f_n \bra{\psi_n}-\tfrac12\nabla^2\ket{\psi_n}
+  + \int d^3r\, v_{\mathrm{ext}} n
+  + \frac12\iint d^3r\,d^3r'\,\frac{n(\bm r)n(\bm r')}{|\bm r-\bm r'|}
+  + E_{\mathrm{xc}}[n],
+  \qquad n(\bm r)=\sum_n f_n|\psi_n(\bm r)|^2 .
+\end{equation}
+Minimizing with orthonormal orbitals gives the Kohn--Sham equations
+\begin{equation}
+  \Bigl[-\tfrac12\nabla^2 + v_{\mathrm{eff}}(\bm r)\Bigr]\psi_n = \epsilon_n\psi_n,
+  \qquad
+  v_{\mathrm{eff}} = v_{\mathrm{ext}} + v_{\mathrm H}[n] + \frac{\delta E_{\mathrm{xc}}}{\delta n}.
+\end{equation}
+Because $v_{\mathrm{eff}}$ depends on the density, the equations must be
+solved self-consistently (Chapter~\ref{chap:variational}). A
+self-consistent solution is a stationary point of $E$ only if the
+potential is the functional derivative of the energy. This condition is
+easy to state and easy to violate in an implementation; VESPAW tests it
+routinely (Sec.~\ref{sec:consistency}).
+
+\section{Exchange-correlation functionals}
+
+\paragraph{LDA and GGA.} The local-density approximation uses the
+exchange-correlation energy per electron of the homogeneous electron gas,
+$E_{\mathrm{xc}}=\int n\,\epsilon_{\mathrm{xc}}(n)$ (PZ~\cite{perdew81_prb23_5048},
+PW92~\cite{perdew92_prb45_13244}). Generalized gradient approximations add a
+dependence on $|\nabla n|$; the default in VESPAW is
+PBE~\cite{perdew96_prl77_3865}. All functionals are selected by
+\key{!CONTROL!DFT TYPE}, as a number or a name, e.g.\ \key{TYPE='PBE'};
+the VASP \key{GGA} tags are accepted as names. Table~\ref{tab:functionals}
+lists them.
+
+\begin{table}[tb]
+\centering\small
+\caption{Exchange-correlation functionals of VESPAW. ``libxc'' marks
+functionals whose energy density agrees with libxc~7.1.2 (and the VASP
+implementation) to $\sim10^{-15}$ at every point of a grid in density,
+gradient, spin polarization and $\alpha$ (October 2026). The local
+hybrids are described in Chapter~\ref{chap:hybrids}.}
+\label{tab:functionals}
+\begin{tabular}{@{}r>{\raggedright\arraybackslash}p{2.3cm}>{\raggedright\arraybackslash}p{6.6cm}lc@{}}
+\toprule
+\key{TYPE} & name & functional & VASP & libxc \\
+\midrule
+\multicolumn{5}{@{}l}{\emph{LDA}}\\
+1  & \key{PZ}   & Perdew--Zunger~\cite{perdew81_prb23_5048} of Ceperley--Alder~\cite{ceperley80_prl45_566} & & \checkmark\\
+2  & \key{PW92} & Perdew--Wang 92~\cite{perdew92_prb45_13244} & & \checkmark\\
+3  &            & Slater exchange only & & \checkmark\\
+4  &            & X$_\alpha$, $\alpha=0.7$ & & \\
+\multicolumn{5}{@{}l}{\emph{GGA}}\\
+10 & \key{PBE}, \key{PE}    & PBE~\cite{perdew96_prl77_3865} & \key{GGA=PE} & \checkmark\\
+11 & \key{RPBE}, \key{RP}   & RPBE~\cite{hammer99_prb59_7413} & \key{GGA=RP} & \checkmark\\
+12 & \key{PW91}, \key{91}   & PW91 exchange and correlation~\cite{perdew92_prb46_6671} & \key{GGA=91} & \checkmark\\
+13 & \key{REVPBE}, \key{RE} & revPBE, $\kappa=1.245$~\cite{zhang98_prl80_890} & \key{GGA=RE} & \checkmark\\
+14 & \key{PBESOL}, \key{PS} & PBEsol~\cite{perdew08_prl100_136406} & \key{GGA=PS} & \checkmark\\
+5001 & \key{BLYP} & B88~\cite{becke88_pra38_3098} + LYP~\cite{lee88_prb37_785} & & \checkmark\\
+81 &  & BP86: PZ + B88 + P86~\cite{perdew86_prb33_8822} & & \checkmark\\
+8  &  & B88 + P86 on PW92 local correlation (non-standard) & & \\
+7, 71, 9 & & B88 exchange with PW92, PZ or PBE correlation & & \checkmark\\
+6  &  & B88 exchange only & & \checkmark\\
+\multicolumn{5}{@{}l}{\emph{meta-GGA}}\\
+21 & \key{SCAN} & SCAN, orbital $\tau$~\cite{sun15_prl115_036402} (with \key{TSCANDELOC=T}) & \key{METAGGA=SCAN} & \checkmark\\
+20 & \key{SCANL} & SCAN-L, deorbitalized~\cite{mejiarodriguez17_pra96_052512,perdew07_prb75_155109} & \key{METAGGA=SCANL} & \checkmark\\
+\multicolumn{5}{@{}l}{\emph{local hybrids} (Chapter~\ref{chap:hybrids})}\\
+   & \pbezero   & PBE + onsite exact exchange & & \\
+   & \pbeslzero & PBE; onsite SCAN-L/exact exchange & & \\
+   & \scanzero  & SCAN + onsite exact exchange & & \\
+\multicolumn{5}{@{}l}{\emph{for testing and reproducing old results}}\\
+$-10$ & & PBE before the 2024/2026 corrections (see text) & & \\
+$-12$ & & PBE exchange + PW91 correlation (old type 12) & & \\
+5002 & & PBE with exchange scaled by 0.75 & & \\
+10001--7 & & single components (PZ, PW92, P86, PBE, PW91 correlation; PBE, RPBE exchange) & & \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Parameters.} The constants follow the original publications
+and agree with libxc and VASP: $\beta=0.06672455060314922$ in PBE
+correlation and in $\mu=\beta\pi^2/3$ of PBE exchange (before October 2026
+VESPAW used $\beta=\nu C_c(0)=0.0667263$, kept by \key{TYPE=-10} together
+with the pre-2024 reduced gradient, $t^2$ too small by a factor 0.62);
+PW91 keeps $\beta=\nu C_c(0)$, as in VASP; PBEsol uses $\mu=10/81$ and
+$\beta=0.046$; SCAN-L uses the optimized Perdew--Constantin parameters
+$a=1.784720$, $b=0.258304$ of Ref.~\cite{mejiarodriguez17_pra96_052512};
+the spin interpolation of SCAN correlation uses
+$G_c(\zeta)=[1-2.363(d_x(\zeta)-1)](1-\zeta^{12})$, with 2.363 as in VASP
+and libxc (the SCAN supplement quotes 2.3631). Unit conversions use
+CODATA~2018 (1~Hartree $=27.211386$~eV, 1~bohr $=0.529177211$~\AA).
+Plane-wave hybrids with full exact exchange (PBE0, HSE06, SCAN0, B3LYP)
+are not yet available.
+
+\paragraph{Meta-GGAs: SCAN, SCAN-L and TSCAN.} The SCAN
+functional~\cite{sun15_prl115_036402} depends in addition on the kinetic
+energy density $\tau=\frac12\sum_n f_n|\nabla\psi_n|^2$ through the
+iso-orbital indicator
+\begin{equation}
+  \alpha = \frac{\tau-\tau_W}{\tau_{\mathrm{unif}}},\qquad
+  \tau_W=\frac{|\nabla n|^2}{8n},\qquad
+  \tau_{\mathrm{unif}}=\tfrac{3}{10}(3\pi^2)^{2/3}n^{5/3}.
+\end{equation}
+VESPAW provides two routes:
+\begin{itemize}
+\item \textbf{SCAN-L} (\key{TYPE='SCANL'}), the deorbitalized SCAN of
+  Mej\'{\i}a-Rodr\'{\i}guez and Trickey~\cite{mejiarodriguez17_pra96_052512,mejiarodriguez18_prb98_115161},
+  in which $\alpha$ is approximated from $n$, $|\nabla n|$ and $\nabla^2 n$.
+  The functional depends on the Laplacian of the density, so its potential
+  contains second-derivative terms (see below).
+\item \textbf{TSCAN} (\key{TYPE='SCAN'} with \key{TSCANDELOC=T}), the
+  orbital-dependent SCAN with the true $\tau$. The Hamiltonian then
+  contains the operator $-\frac12\nabla\cdot v_\tau\nabla$ with
+  $v_\tau=\partial e_{\mathrm{xc}}/\partial\tau$. In the PAW spheres the
+  one-center $\tau$ is built from the partial waves, including its
+  non-spherical parts.
+\end{itemize}
+
+\paragraph{Functional derivatives.} For a semilocal energy
+$E=\int e(n,|\nabla n|^2,\nabla^2 n)\,d^3r$ the potential is the full
+Euler--Lagrange derivative
+\begin{equation}
+  v = \frac{\partial e}{\partial n}
+  - \nabla\cdot\Bigl(2\frac{\partial e}{\partial|\nabla n|^2}\nabla n\Bigr)
+  + \nabla^2\frac{\partial e}{\partial \nabla^2 n}.
+  \label{eq:euler}
+\end{equation}
+For GGAs the last term is absent; for SCAN-L it is essential. Where the
+energy carries a spatial weight (the double counting of the local
+hybrids, Sec.~\ref{sec:pbesl0r}), the weight stands \emph{inside} the
+derivatives. In the spherical one-center expansion the divergence
+becomes $r^{-2}(r^2 A)'$; in the non-spherical case the weak form is
+used, projecting $\partial e/\partial\nabla n$ onto the radial and
+tangential gradients of each spherical harmonic.
+
+\paragraph{Pitfall.} Before September 2026, the one-center SCAN-L and
+TSCAN potentials kept only the first term of Eq.~\eqref{eq:euler}.
+Self-consistent solutions were then not stationary points of the energy:
+the variational optimizer found lower energies without reaching
+self-consistency, and for TSCAN it did not converge at all. The
+consistency test of Sec.~\ref{sec:consistency} exposed both.
+
+\section{Spin}
+
+Collinear spin polarization (\key{!STRUCTURE!OCCUPATIONS NSPIN=2}) uses two
+sets of orbitals and the spin densities $n_\uparrow,n_\downarrow$; the
+code works internally with total and spin density $(n,m)$.
+Non-collinear magnetism uses two-component spinors. For exchange, the
+spin-scaling relation
+\begin{equation}
+  E_x[n_\uparrow,n_\downarrow]=\tfrac12\bigl(E_x[2n_\uparrow]+E_x[2n_\downarrow]\bigr)
+  \label{eq:spinscaling}
+\end{equation}
+is exact and allows any spin-unpolarized exchange functional to be
+applied to a spin-polarized density. VESPAW uses it for the exchange of
+the SCAN family, on the grid and in the one-center terms. Correlation
+does not obey Eq.~\eqref{eq:spinscaling}; SCAN correlation is evaluated
+for the spin densities with the spin-interpolation of
+Ref.~\cite{sun15_prl115_036402}: $\phi(\zeta)$ in the gradient term,
+$G_c(\zeta)$ in the single-orbital limit, and $\alpha$ divided by
+$d_s(\zeta)=[(1+\zeta)^{5/3}+(1-\zeta)^{5/3}]/2$ with the total $\tau$.
+For SCAN-L, the spin-resolved kinetic energy densities are deorbitalized
+separately, $\tau[n_\uparrow,n_\downarrow]=\frac12(\tau[2n_\uparrow]+\tau[2n_\downarrow])$,
+as in libxc.
+
+\section{Finite temperature}
+
+For metals and for systems with near-degenerate states, VESPAW minimizes
+the Mermin free energy~\cite{Mermin1965}
+\begin{equation}
+  A = E[\{\psi_n\},\{f_n\}] - T S[\{f_n\}],\qquad
+  S=-k_B\sum_n\bigl[f_n\ln f_n+(1-f_n)\ln(1-f_n)\bigr],
+  \label{eq:mermin}
+\end{equation}
+with Fermi occupations $f_n=[1+e^{(\epsilon_n-\mu)/k_BT}]^{-1}$ at fixed
+electron number. The electronic temperature is set in \key{!CONTROL!MERMIN
+T[K]}. It acts as a smearing parameter; the free energy $A$, not $E$, is
+the variational quantity.
+
+% =====================================================================
+\chapter{Plane waves and Brillouin-zone sampling}\label{chap:planewaves}
+% =====================================================================
+
+\section{Bloch states and plane waves}
+
+In a crystal with lattice vectors $\bm T$ the orbitals are Bloch states,
+$\psi_{n\bm k}(\bm r+\bm T)=e^{i\bm k\cdot\bm T}\psi_{n\bm k}(\bm r)$,
+which are expanded in plane waves,
+\begin{equation}
+  \tilde\psi_{n\bm k}(\bm r)=\sum_{\bm G} c_{n\bm k}(\bm G)\,
+  e^{i(\bm k+\bm G)\cdot\bm r},
+  \qquad \tfrac12|\bm k+\bm G|^2\le E_{\mathrm{cut}} .
+\end{equation}
+In PAW only the smooth pseudo wave functions $\tilde\psi$ are expanded in
+plane waves (Chapter~\ref{chap:paw}).
+
+\section{Cutoffs and FFT grids}
+
+The wave-function cutoff is \key{!CONTROL!FOURIER EPWPSI} in Rydberg. The
+density contains products of wave functions and would need four times the
+cutoff; VESPAW uses \key{EPWRHO = CDUAL$\times$EPWPSI}. \key{CDUAL=4} is
+exact, \key{CDUAL=2} is usually sufficient and cheaper. Density and local
+potential live on a real-space grid; the Hamiltonian is applied to a
+wave function by transforming it to real space with a fast Fourier
+transform, multiplying by the potential and transforming back. In VESPAW
+these transforms are batched over blocks of 32 bands.
+
+Energies converge from above with the cutoff, but energy
+\emph{differences}, forces and stress converge faster. The required cutoff
+is set by the hardest PAW setup in the system; the setup generator
+prints an estimate (Sec.~\ref{sec:kintable}).
+
+\section{$k$-point sampling}
+
+Brillouin-zone integrals are replaced by sums over a Monkhorst--Pack
+mesh~\cite{MonkhorstPack1976}, \key{!STRUCTURE!KPOINTS DIV=$n_1$ $n_2$
+$n_3$}, with an optional shift, or by a target density \key{R}.
+Symmetry and time reversal ($\psi_{-\bm k}=\psi_{\bm k}^*$) reduce the
+number of irreducible points. Metals need dense meshes together with a
+finite electronic temperature; insulators converge quickly.
+
+\section{The $\Gamma$ point}
+
+At $\bm k=0$ the wave functions can be chosen real. CP-PAW exploits this
+by packing two real bands into one complex array (``super wave
+functions''), which halves the number of FFTs. An alternative half-sphere
+storage (\key{GAMMASUPER}) is experimental and not yet correct.
+
+% =====================================================================
+\chapter{The projector augmented-wave method}\label{chap:paw}
+% =====================================================================
+
+\section{The PAW transformation}
+
+The PAW method~\cite{bloechl94_prb50_17953} maps the true all-electron
+(AE) valence orbitals $\psi_n$, which oscillate strongly near the nuclei,
+onto smooth pseudo (PS) orbitals $\tilde\psi_n$ by a linear transformation
+\begin{equation}
+  \ket{\psi_n}=\ket{\tilde\psi_n}
+  +\sum_{R,i}\bigl(\ket{\phi_{R,i}}-\ket{\tilde\phi_{R,i}}\bigr)
+  \braket{\pt_{R,i}}{\tilde\psi_n}.
+\end{equation}
+Here $\phi_{R,i}$ are AE partial waves (solutions of the atomic
+Schr\"odinger equation at reference energies), $\tilde\phi_{R,i}$ the
+corresponding PS partial waves, which agree with $\phi_{R,i}$ outside an
+augmentation radius $r_c$, and $\pt_{R,i}$ projector functions, localized
+within $r_c$ and dual to the PS partial waves,
+$\braket{\pt_{R,i}}{\tilde\phi_{R,j}}=\delta_{ij}$. The index $i$ collects
+the angular momentum $(\ell,m)$ and a counter $\nu$ over partial waves of
+the same $\ell$. The number of partial waves per $\ell$ is set by
+\key{!STRUCTURE!SPECIES NPRO}.
+
+Expectation values split into a plane-wave part and one-center
+corrections,
+\begin{equation}
+  \langle A\rangle = \sum_n f_n\bra{\tilde\psi_n}\tilde A\ket{\tilde\psi_n}
+  + \sum_R\sum_{ij}D_{R,ij}\bigl(\bra{\phi_{R,j}}A\ket{\phi_{R,i}}
+  -\bra{\tilde\phi_{R,j}}\tilde A\ket{\tilde\phi_{R,i}}\bigr),
+  \qquad
+  D_{R,ij}=\sum_n f_n\braket{\pt_{R,i}}{\tilde\psi_n}\braket{\tilde\psi_n}{\pt_{R,j}},
+\end{equation}
+and the total energy becomes $E=\tilde E+\sum_R(E^1_R-\tilde E^1_R)$: a
+plane-wave term plus, for each atom, the difference of an AE and a PS
+one-center energy evaluated on radial grids. The orbitals are orthonormal
+with respect to the overlap operator
+\begin{equation}
+  \hat O = 1+\sum_{R,ij}\ket{\pt_{R,i}}\Delta O_{R,ij}\bra{\pt_{R,j}},
+  \qquad
+  \Delta O_{R,ij}=\braket{\phi_{R,i}}{\phi_{R,j}}-\braket{\tilde\phi_{R,i}}{\tilde\phi_{R,j}},
+\end{equation}
+so the Kohn--Sham equations take the generalized form
+$\tilde H\ket{\tilde\psi_n}=\epsilon_n\hat O\ket{\tilde\psi_n}$ with
+\begin{equation}
+  \tilde H=-\tfrac12\nabla^2+\tilde v(\bm r)
+  +\sum_{R,ij}\ket{\pt_{R,i}}\Delta H_{R,ij}\bra{\pt_{R,j}} .
+\end{equation}
+
+\section{Compensation charges, core and local potential}
+
+The electrostatics of the one-center densities is handled by
+compensation charges $\hat n_R$ (Gaussians of width set by
+\key{RCSM/RCOV}) that reproduce the multipole moments of
+$n^1_R-\tilde n^1_R$, so that the long-range electrostatics is carried by
+the smooth density $\tilde n+\hat n$ on the plane-wave grid. The
+one-center expansions are truncated at $\ell\le$ \key{LRHOX}. Core
+electrons are frozen in their atomic state. For the exchange-correlation
+energy, which is non-linear in the density, a pseudized core density
+(\key{!CORE POW RC}) is added to the smooth density. The local
+pseudopotential is constructed by pseudizing the AE potential inside a
+radius (\key{!POT POW RC}).
+
+\section{Setup construction}\label{sec:setups}
+
+A PAW \emph{setup} contains, for one element, the partial waves,
+projectors, core densities and local potential. VESPAW builds setups at
+run time from a short parameter block (\key{!SPECIES!AUGMENT}), or reads
+them from the library \texttt{vespaw\_pot}. Three construction types exist:
+\begin{itemize}
+\item \key{HBS}: the scheme of Bl\"ochl's later CP-PAW versions. The
+  first partial wave of each $\ell$ is the lowest valence state; further
+  partial waves are obtained from the nodeless (``$\dot\phi$-like'')
+  construction at higher energies, bounded by a box of radius
+  \key{RBOX/RCOV}.
+\item \key{NDLSS}: an older nodeless scheme.
+\item \key{KERKER}: Kerker-type pseudization.
+\end{itemize}
+The radii are given in units of the covalent radius of the element:
+\key{RCL/RCOV} for the partial waves, \key{RCSM/RCOV} for the compensation
+charge, \key{RC/RCOV} in \key{!POT} and \key{!CORE}.
+
+\paragraph{Semicore states.} When shallow core states are treated as
+valence (e.g.\ Cu $3s3p$, \key{ZV=19}), an angular momentum has two
+valence states, $3s$ and $4s$. Each valence bound state then receives its
+own partial wave at its own energy; only further partial waves are box
+states. With a semicore state below it, the PS $4s$ orbital need not have
+a node, because it is orthogonal to the PS $3s$ only through $\hat O$. The
+setup test therefore identifies PS states by their energy, not by their
+node count.
+
+\section{Quality checks}\label{sec:setupchecks}
+
+A setup is an approximation, and a bad one fails silently: calculations
+converge to wrong answers. The generator therefore reports three checks.
+
+\paragraph{Ghost test.} The atomic PAW Hamiltonian of each $\ell$ is
+diagonalized in a basis of 120 spherical Bessel functions inside a large
+sphere. Its lowest levels must match the AE valence levels. A level far
+below the lowest AE reference is a \emph{ghost state}; the generator
+prints \texttt{WARNING: GHOST STATE IN SETUP}. The overlap matrix in this
+basis must be positive definite; if it is not, the setup is unusable.
+
+\paragraph{Incompleteness warning.} With only one partial wave per
+$\ell$, the local potential may bind a state far below the valence level
+whose wave function lies largely outside the span of the projectors.
+Such components receive no one-center correction. In a solid they can
+sink into the potential well of the compensation charge, and the
+calculation converges to a collapsed state far below the physical
+minimum. This happened for NiO with a single-projector Ni setup: the
+collapse deepened with the cutoff and disappeared with a second $s$
+projector. The generator prints \texttt{WARNING: INCOMPLETE SETUP} when
+the lowest state of the local potential lies more than 0.5~H below the
+valence reference with a single projector.
+
+\paragraph{Kinetic-energy cutoff table.}\label{sec:kintable} As in the
+VASP setup generator, the kinetic energy of each PS valence orbital that
+lies above a cutoff is computed from its Fourier transform, weighted by
+the occupation and summed. The generator prints the error as a function of
+the cutoff, from 20~eV to about 290~Ry, and suggests \texttt{ENMAX} and
+\texttt{ENMIN} (errors of 6 and 13~meV), or states that they are not
+reached. The PS orbitals are tapered to zero before the box wall to avoid
+a spurious kink.
+
+\section{The setup library}
+
+\texttt{vespaw\_pot} contains one species block per element and variant.
+Its audit (\texttt{vespaw\_pot/AUDIT.md}) lists each setup with its
+status (OK, incomplete, ghost, unusable) and the recommended replacement.
+The flagged setups were rebuilt as HBS setups with two projectors per
+$\ell$. Validation in solids shows that the frozen-semicore $3d$ setups
+(Fe, Cu) reproduce AE-PBE lattice constants only to about 1\%, and that
+the error grows with the augmentation radius; a semicore Cu setup with
+small radii reaches 0.5\% at a high cutoff. Accurate soft $3d$ setups are
+an open problem (see the audit).
+
+% =====================================================================
+\chapter{Local hybrid functionals}\label{chap:hybrids}
+% =====================================================================
+
+Hybrid functionals admix a fraction $a_x$ of exact exchange and cure
+much of the band-gap problem of semilocal functionals, but in a
+plane-wave basis exact exchange is one to two orders of magnitude more
+expensive than a GGA. Local hybrids of the \pbezero\
+type~\cite{bloechl11_prb84_205101,sotoudeh17_prb95_235150} keep only the
+onsite part of the exchange correction, evaluated in a basis of local
+orbitals, at nearly semilocal cost.
+
+\section{Local orbitals}
+
+Each atom carries natural tight-binding orbitals (NTBOs)
+$\chi_a$~\cite{andersen84_prl53_2571,bloechl11_prb84_205101}. Inside the
+augmentation sphere of radius \key{RAUG/RCOV} the head function of an
+orbital is an augmented screened Hankel function, a combination of an AE
+partial wave $\phi$ and its energy derivative $\dot\phi$,
+\begin{equation}
+  K^{\mathrm{aug}} = \phi\,k_\phi+\dot\phi\,k_{\dot\phi},
+\end{equation}
+matched to a Hankel function with $\kappa^2$ set by \key{K2}. In the
+spheres of the neighbours it is continued by screened Bessel functions
+$\bar J^{\mathrm{aug}}=\dot\phi\,j_{\dot\phi}$ with the structure constants
+$\bar S$. Exponential tails (\key{TAILLAMBDA}, \key{RTAIL/RCOV}) and a
+cutoff (\key{RTAILCUT/RCOV}) make the orbitals short ranged. The
+orbitals considered per $\ell$ are selected by \key{NOFL}.
+
+\section{Projection onto the local orbitals}\label{sec:projection}
+
+The onsite density matrix
+$D^\sigma_{ab}=\sum_n f_{n\sigma}\braket{\chi_a}{\psi_{n\sigma}}\braket{\psi_{n\sigma}}{\chi_b}$
+requires the coefficients of the wave functions in the local-orbital
+basis. Inside the spheres the one-center expansion
+$\psi^1=\sum_i\phi_i\braket{\pt_i}{\tilde\psi}$ is fitted by local
+orbitals in the least-squares sense,
+\begin{equation}
+  \bm c = \bigl[\bra{\chi}\Theta\ket{\chi}\bigr]^{-1}
+          \bra{\chi}\Theta\ket{\phi}\braket{\pt}{\tilde\psi},
+\end{equation}
+where $\Theta$ restricts integrals to the spheres. Both overlaps are
+computed with the exact $\chi$ inside the spheres, i.e.\ with
+$K^{\mathrm{aug}}$ and $\bar J^{\mathrm{aug}}$ as radial functions.
+
+\paragraph{Pitfall.} The original implementation represented $\chi$ by
+its partial-wave expansion $\braket{\pt}{\tilde\chi}$. The $\dot\phi$
+component of $\chi$ converges slowly in that expansion, so the fitted
+orbital lacked norm and the density matrix overcounted charge: 13--15
+electrons on Ni in NiO instead of about 7. The hybrid energy and the gap
+then changed with the number of projectors (NiO \pbezero\ gap 3.96,
+4.08, 4.10~eV for 2, 3, 4 $d$ projectors). With the exact overlaps they
+are converged (2.99, 3.00, 3.00~eV). The old fit can be restored with the
+environment variable \texttt{VESPAW\_NTBO\_OLDPROJ=1} for comparison.
+
+\section{\pbezero}
+
+\pbezero\ keeps only the onsite terms of the PBE0 exchange correction,
+\begin{equation}
+  E_{\mathrm{xc}}^{\pbezero} = E_{\mathrm{xc}}^{\mathrm{PBE}}[n]
+  + a_x\bigl(E_x^{\mathrm{HF},\onec} - E_x^{\mathrm{PBE},\onec}\bigr),
+  \qquad
+  E_x^{\mathrm{HF},\onec} = -\frac12\sum_\sigma\sum_{abcd}
+  D_{ac}^\sigma D_{bd}^\sigma U_{abcd},
+  \label{eq:pbe0r}
+\end{equation}
+with the onsite Coulomb tensor $U$ of the local orbitals. The
+double-counting term $E_x^{\mathrm{PBE},\onec}$ is the PBE exchange of the
+local-orbital density, obtained from the full one-center density with the
+weight $w(r)=(n_{\mathrm{loc}}/n_{\mathrm{all}})^2$. Core--valence exchange
+can be included (\key{CV=T}). The mixing $a_x$ is set globally by
+\key{!CONTROL!DFT!NTBO HFWEIGHT} and per species by \key{LHFWEIGHT}. The
+exchange correction enters the Hamiltonian in two places: the one-center
+PAW Hamiltonian $\Delta H$ (derivative with respect to the full one-center
+density) and an operator in the local-orbital basis (derivative with
+respect to $D$).
+
+\section{\pbeslzero}\label{sec:pbesl0r}
+
+\pbeslzero\ (called \scanzero\ before October 2026) replaces the semilocal
+onsite exchange by SCAN-L exchange while keeping PBE for the delocalized
+part and for all correlation:
+\begin{align}
+  E_{\mathrm{xc}}^{\pbeslzero} &= E_{\mathrm{xc}}^{\mathrm{PBE}}[n]
+  - E_x^{\mathrm{PBE},\onec}
+  + a_x E_x^{\mathrm{HF},\onec} + (1-a_x) E_x^{\mathrm{SCAN},\onec}
+  \nonumber\\
+  &= E_{\mathrm{xc}}^{\mathrm{PBE}}[n]
+  + \underbrace{\bigl(E_x^{\mathrm{SCAN},\onec}-E_x^{\mathrm{PBE},\onec}\bigr)}_{\text{swap term}}
+  + a_x\bigl(E_x^{\mathrm{HF},\onec} - E_x^{\mathrm{SCAN},\onec}\bigr).
+  \label{eq:pbesl0r}
+\end{align}
+The swap term is not scaled by $a_x$. \pbeslzero\ is selected by
+\key{!NTBO MODUS='HYBRID' HFWEIGHT=$a_x$ DCTYPE='SCANL'} with a PBE base
+functional. A consistent implementation requires:
+\begin{enumerate}
+\item the swap term in both Hamiltonian channels (one-center and
+  local-orbital), at full weight;
+\item the full Euler--Lagrange potential of the onsite SCAN-L exchange,
+  Eq.~\eqref{eq:euler}, with the weight $w$ inside the derivatives;
+\item exact spin scaling, Eq.~\eqref{eq:spinscaling}. Evaluating the
+  onsite SCAN-L exchange for the spin-summed density replaces
+  spin-polarized PBE exchange by unpolarized SCAN-L exchange in the swap
+  term and removes a fraction $1-a_x$ of the onsite exchange splitting;
+  magnetic gaps collapse (NiO 1.0 instead of 2.0~eV);
+\item the exact local-orbital projection of Sec.~\ref{sec:projection}.
+\end{enumerate}
+All four were found by checking that the variational optimizer and
+damped dynamics reach the same state (Sec.~\ref{sec:consistency}).
+
+\section{\scanzero}\label{sec:scan0r}
+
+\scanzero\ uses SCAN with the orbital kinetic energy density everywhere,
+for the plane-wave density and in the spheres, for exchange and
+correlation, and replaces a fraction $a_x$ of the onsite SCAN exchange of
+the local orbitals by exact exchange:
+\begin{equation}
+  E_{\mathrm{xc}}^{\scanzero} = E_{\mathrm{xc}}^{\mathrm{SCAN}}[n,\tau]
+  + a_x\bigl(E_x^{\mathrm{HF},\onec} - E_x^{\mathrm{SCAN},\onec}\bigr).
+  \label{eq:scan0r}
+\end{equation}
+It is the meta-GGA analogue of \pbezero, Eq.~\eqref{eq:pbe0r}, without a
+swap term, and is selected by \key{TYPE='SCAN' TSCANDELOC=T} with
+\key{!NTBO MODUS='HYBRID' HFWEIGHT=$a_x$}. The double counting
+$E_x^{\mathrm{SCAN},\onec}$ uses the onsite $\tau$ of the local orbitals,
+is spin scaled, and by default contains exchange only (\key{TSCANCORR=T}
+adds SCAN correlation). Exchange-only spin scaling and the
+spin-polarized correlation of Chapter~\ref{chap:dft} apply as for SCAN.
+
+% =====================================================================
+\chapter{Self-consistency: the variational optimizer}\label{chap:variational}
+% =====================================================================
+
+\section{The problem with density mixing}
+
+The standard SCF cycle alternates between solving the Kohn--Sham
+equations in a fixed potential and building a new input potential by
+mixing the input and output densities or potentials (Pulay/DIIS
+\cite{Pulay1980}, Anderson~\cite{Anderson1965}, with Kerker
+preconditioning~\cite{Kerker1981}). The energy along this path is a
+Harris--Foulkes-type estimate~\cite{Harris1985,FoulkesHaydock1989}; it is
+not an upper bound and need not decrease. Mixing can stagnate, oscillate,
+or converge to an excited state, and nothing in the iteration signals
+it. VESPAW offers density mixing (\key{MIXER='PULAY'} or
+\key{'ANDERSON'}) but uses a variational optimizer by default.
+
+\section{Free energy as a function of the Hamiltonian}\label{sec:route1}
+
+We minimize the Mermin free energy, Eq.~\eqref{eq:mermin}, in the PAW
+form. The parameters of the Hamiltonian are collected in a vector
+\begin{equation}
+  \vth = \bigl(\tilde v(\bm r),\; v_\tau(\bm r),\; \{\Delta H_{R,ij}\}\bigr).
+\end{equation}
+For given $\vth$ we determine the eigenstates $\psi_n(\vth)$ of
+$\tilde H[\vth]$ and the Fermi occupations $f_n(\vth)$ at fixed $N$, and
+define
+\begin{equation}
+  \mathcal{A}(\vth) = A\bigl[\{\psi_n(\vth)\},\{f_n(\vth)\}\bigr].
+\end{equation}
+Because $\psi_n(\vth)$ and $f_n(\vth)$ form an admissible ensemble,
+$\mathcal{A}(\vth)$ is an upper bound of the minimum of $A$ for every
+$\vth$. At self-consistency, where $\vth$ equals the parameters
+$\vout[\vth]$ built from the output state, the bound is attained.
+Following Gonze~\cite{Gonze1996},
+\begin{equation}
+  \frac{\partial \mathcal{A}}{\partial \vth}
+  = \chi(\vth)\,\bigl(\vout[\vth]-\vth\bigr),
+\end{equation}
+with $\chi$ the static independent-particle response. Since $\chi$ is
+negative semidefinite, the residual $\bm r=\vout-\vth$, and any
+positive-definite preconditioned version $K\bm r$, is a descent
+direction; $\chi$ never has to be built. The Kerker filter
+$K(G)=G^2/(G^2+q_0^2)$ is applied to the plane-wave part of the residual,
+with $q_0^2$ set by \key{MIXG0SQ} (default 1.5~bohr$^{-2}$). The default is
+made for solids. For molecules and slabs with large vacuum it damps the
+long-wavelength components so strongly that the gains of a step fall
+below the noise of the iterative eigensolver, and the line search
+stalls; use $q_0^2\approx0.05$--0.1 there.
+
+\section{The gauge direction}
+
+A uniform shift $\tilde H\to\tilde H+c\hat O$ shifts all eigenvalues and
+the Fermi level by $c$ and leaves orbitals and occupations unchanged. In
+parameter space it is the direction $\bm s=(1,0,\{\Delta O_{R,ij}\})$, and
+$\mathcal A(\vth+c\bm s)=\mathcal A(\vth)$ exactly. The two halves of
+$\bm s$ are updated by different rules (Kerker on the grid, damped steps
+in $\Delta H$). If $\bm s$ is not treated explicitly, they drift apart and
+act as a spurious potential step between spheres and interstitial (Si:
+convergence to an excited state 28~mH above the ground state). VESPAW
+therefore
+\begin{enumerate}
+\item projects $\bm s$ out of every residual, and
+\item after each step moves $\vth$ along $\bm s$ so that its mean grid
+  potential equals that of the output state.
+\end{enumerate}
+The second step does not change any energy, but without it $\vth$ keeps
+its starting gauge while the true potential moves: eigenvalues and Fermi
+level are then offset (0.49~eV in Si), and with them the Lagrange
+multipliers in forces and stress (Chapter~\ref{chap:forces}).
+
+\section{Line search and acceptance}
+
+Steps are proposed by an Anderson extrapolation built from
+\emph{accepted} points only. A trial $\vth'$ is accepted if
+$\mathcal A(\vth')\le\mathcal A_{\mathrm{best}}+\epsilon$; otherwise the
+step is halved towards the best point. After five consecutive rejections
+the best point is re-evaluated (``re-anchoring''), because its energy may
+stem from an eigensolution that was not fully converged.
+
+\begin{algorithm}[t]
+\caption{Hamiltonian-space variational SCF (Route 1).}
+\begin{algorithmic}[1]
+\State $\vth_0\gets\vout[\psi_{\mathrm{start}}]$; hold fixed for a short eigensolver warm-up
+\Loop
+  \State diagonalize $\tilde H[\vth]$ (Davidson, RMM-DIIS or CG); Fermi occupations at fixed $N$
+  \State evaluate $\mathcal A(\vth)$ at the output state; build $\vout$
+  \State $\bm r\gets\vout-\vth$; project out $\bm s$
+  \If{$\mathcal A(\vth)\le\mathcal A_{\mathrm{best}}+\epsilon$}
+    \State accept; add $(\vth,K\bm r)$ to the history; stop if converged
+    \State $\vth\gets$ Anderson proposal
+  \Else
+    \State $\vth\gets\frac12(\vth+\vth_{\mathrm{best}})$ \Comment{re-anchor after 5 rejections}
+  \EndIf
+  \State re-gauge $\vth$ along $\bm s$ to the mean grid potential of $\vout$
+\EndLoop
+\end{algorithmic}
+\end{algorithm}
+
+Convergence is reached when the mean-square grid residual is below
+\key{MIXTOL} (and the one-center residual below its square root), or when
+two consecutive accepted energies differ by less than \key{EDIFF}. Route 1
+is selected by \key{!PSIDYN MIXER='VARIATIONAL'} together with
+\key{OPTIMIZER='DAV'}, \key{'RMM'} or \key{'CG'}; it is the default mixer.
+
+\paragraph{Hybrid operators.} The onsite hybrid operator of
+Chapter~\ref{chap:hybrids} depends on the orbitals through $D$, not only
+on the density. It is taken from the current state rather than
+line-searched; including its matrix elements in $\vth$ left a residual
+that did not decay.
+
+\section{Route 2: direct joint minimization}
+
+As an alternative (\key{OPTIMIZER='EDFT'}), $A$ is minimized directly with
+respect to the orbitals and an auxiliary Hamiltonian $H^{\mathrm{aux}}$
+whose eigenvalues define the occupations, in the spirit of ensemble
+DFT~\cite{MarzariVanderbiltPayne1997,FreysoldtBoeckNeugebauer2009}. The
+orbital direction is the Teter-preconditioned~\cite{TeterPayneAllan1989}
+projected residual combined by Polak--Ribi\`ere conjugate gradients; the
+direction for $H^{\mathrm{aux}}$ is $H^{\mathrm{phys}}-H^{\mathrm{aux}}$.
+Trial points are built by L\"owdin orthonormalization and rotated into
+the eigenbasis of $H^{\mathrm{aux}}$; step lengths come from a quadratic
+model, with the same acceptance and re-anchoring logic as Route~1. The
+orbital direction is computed from a Kerker-preconditioned Hamiltonian.
+With this preconditioning Route~2 currently stops about $5\times10^{-6}$~H
+above the minimum on Si; without it (\texttt{VESPAW\_EDFTVAR\_NOKERKER=1}) it
+reaches the minimum.
+
+\section{The consistency test}\label{sec:consistency}
+
+The variational optimizer minimizes the energy. Damped Car--Parrinello
+dynamics (Chapter~\ref{chap:eigensolvers}) and density mixing converge to
+a self-consistent state. The two coincide only if the Hamiltonian is the
+derivative of the energy. Agreement between them, to $10^{-6}$~H or
+better, is therefore a sharp test of any new functional or
+implementation: a missing potential term shows up as the variational
+optimizer finding energies \emph{below} the self-consistent state without
+converging. The regression suite (Chapter~\ref{chap:code}) applies this
+test to every case.
+
+% =====================================================================
+\chapter{Eigensolvers and dynamics}\label{chap:eigensolvers}
+% =====================================================================
+
+For Route~1 the eigenstates of $\tilde H[\vth]$ must be found at every
+iteration. They are warm-started from the previous iteration and
+converged iteratively. All solvers work with the generalized problem
+$\tilde H\psi=\epsilon\hat O\psi$ and apply $\tilde H$ and $\hat O$ in
+blocks of bands.
+
+\section{Block Davidson}
+
+\key{OPTIMIZER='DAV'}. Each band is extended by a preconditioned
+correction vector $(\tilde H-\epsilon\hat O)\psi$; the new vectors are
+projected out of \emph{all} current bands (twice), vectors lost to
+cancellation are dropped, and the extended basis is canonically
+orthogonalized with an eigenvalue cutoff of $10^{-10}$. A Rayleigh--Ritz
+step in this subspace gives the new bands. Converged bands are locked.
+The implementation keeps seven wave-function-sized arrays. Davidson is
+robust from any start and is the reference solver.
+
+\paragraph{Pitfall.} An earlier Davidson orthogonalized only against
+converged bands and stabilized the near-singular overlap with a shift;
+the returned orbitals were not orthonormal, which produced energies below
+the minimum and split degenerate states.
+
+\section{RMM-DIIS}
+
+\key{OPTIMIZER='RMM'}. Residual minimization with direct inversion in the
+iterative subspace~\cite{WoodZunger1985,KresseFurthmuller1996PRB}
+minimizes the norm of the residual of each band separately, without
+orthogonalization against other bands, and is therefore cheap and
+parallel. It converges to the eigenvector nearest the starting guess.
+Started from random orbitals it converges to wrong states, so the first
+\key{RMMDELAY} iterations (default 8) use Davidson. Bands are processed
+in blocks of 32 (\key{NRMMX} inner sweeps). RMM-DIIS is the fastest
+option for large systems (Si$_{64}$: 247~s vs 386~s for Davidson).
+
+\paragraph{Pitfall.} With the onsite hybrid, RMM-DIIS reaches the correct
+energy but can miss the lowest empty band (MgO \pbeslzero\ gap 6.54 instead
+of 4.23~eV). Take band gaps of hybrid calculations from Davidson.
+
+\section{Conjugate gradients}
+
+\key{OPTIMIZER='CG'}. Band-by-band preconditioned conjugate-gradient
+minimization of the Rayleigh quotient with orthogonalization to the
+lower bands, followed by a subspace rotation. Reliable, slower than the
+block methods for many bands.
+
+\section{Car--Parrinello dynamics with friction}
+
+The original CP-PAW optimizer (\key{OPTIMIZER='MD'}, the default when no
+eigensolver is chosen) treats the wave-function coefficients as classical
+degrees of freedom with a fictitious mass~\cite{CarParrinello1985},
+\begin{equation}
+  m_\psi\ddot{\tilde\psi}_n=-\tilde H\tilde\psi_n
+  +\sum_m\hat O\tilde\psi_m\Lambda_{mn}-\gamma\,m_\psi\dot{\tilde\psi}_n,
+\end{equation}
+with Lagrange multipliers $\Lambda$ that keep the orbitals orthonormal and
+a friction $\gamma$ (\key{!PSIDYN FRIC}). With friction the dynamics
+relaxes into the ground state. The ``autopilot'' (\key{!PSIDYN!AUTO})
+lowers the friction when the energy decreases and raises it when it
+increases. Damped dynamics is slow but very robust, converges to the
+self-consistent state for any functional, and serves as the reference
+in the consistency test. \key{SAFEORTHO=T} orthogonalizes such that the
+energy is conserved; it should not be used with variable occupations.
+
+% =====================================================================
+\chapter{Forces, stress and molecular dynamics}\label{chap:forces}
+% =====================================================================
+
+\section{Forces}
+
+The force on atom $R$ is the total derivative of the energy with respect
+to its position. At a stationary point of the energy the orbital
+response drops out (Hellmann--Feynman~\cite{Feynman1939}). In PAW the
+projectors, the compensation charges and the one-center terms move with
+the atom, and the orthonormality constraint depends on the positions
+through $\hat O$:
+\begin{equation}
+  \bm F_R=-\frac{\partial E}{\partial\bm R}\Big|_{\mathrm{explicit}}
+  -\sum_{nm}\Lambda_{mn}\,\bra{\tilde\psi_n}\frac{\partial\hat O}{\partial\bm R}\ket{\tilde\psi_m}
+  \times(\text{occupation weights}),
+\end{equation}
+where the first term contains the derivatives of $\Delta H$, the projectors
+and the compensation charges. In Car--Parrinello dynamics $\Lambda$ comes
+from the orthonormality constraint. For the eigensolvers the orbitals are
+Ritz vectors, and $\Lambda=\mathrm{diag}(\epsilon_n)$.
+
+\paragraph{Pitfalls.} Before September 2026 the eigensolvers did not set
+$\Lambda$ at all, so the constraint term was missing (0.5\% error in the
+Si force), and with the variational mixer the eigenvalues carried the
+gauge offset of the previous chapter. Both are now fixed, and forces
+agree with finite differences of the energy to $10^{-4}$ relative
+(regression case \texttt{si\_forces}).
+
+\section{Stress}
+
+The stress tensor is the derivative of the energy with respect to a
+homogeneous strain $\epsilon$,
+\begin{equation}
+  \sigma_{\alpha\beta}=-\frac1V\frac{\partial E}{\partial\epsilon_{\alpha\beta}},
+\end{equation}
+following Nielsen and Martin~\cite{NielsenMartin1985}; positive values
+mean that the cell wants to expand, and the pressure is
+$\mathrm{tr}\,\sigma/3$. It contains kinetic, Hartree, exchange-correlation,
+projector and compensation-charge terms, and the same constraint term as
+the forces.
+
+The analytic stress is taken at a fixed set of plane waves (the basis
+strains with the cell). A finite difference at fixed cutoff changes the
+basis and contains the \emph{Pulay stress}, which vanishes as the cutoff
+grows (Si: 2\% at 25~Ry, 0.5\% at 50~Ry). Lattice constants from
+energy-volume curves need converged cutoffs for the same reason.
+
+\paragraph{Output.} \key{!CONTROL!GENERIC FORCES=T STRESS=T} evaluates
+forces and stress also for fixed atoms and a fixed cell and prints them at
+full precision at the end of the run (\texttt{FORCE}, \texttt{STRESS},
+\texttt{PRESSURE[GPA]} lines).
+
+\section{Structure relaxation and molecular dynamics}
+
+Atomic motion is controlled by \key{!CONTROL!RDYN}. With friction
+(\key{FRIC}, \key{!RDYN!AUTO}) the atoms relax into a minimum; without
+friction they follow Newton's equations. The cell shape can be relaxed or
+propagated with \key{!CONTROL!CELL MOVE=T}~\cite{NielsenMartin1985}.
+
+\paragraph{Car--Parrinello vs Born--Oppenheimer MD.} In Car--Parrinello
+MD the wave functions are propagated together with the atoms and stay
+close to the ground state if their fictitious mass is small enough
+(adiabaticity~\cite{BloechlParrinello1992}). The time step must resolve
+the fastest wave-function motion. In Born--Oppenheimer MD the electrons
+are converged at each step (with an eigensolver and Route~1); the time
+step is set by the ions, but each step costs a full SCF.
+
+\paragraph{Thermostats.} Temperature is controlled by Nos\'e--Hoover
+thermostats~\cite{Nose1984} on the atoms (\key{!RDYN!THERMOSTAT T[K]}) and,
+in Car--Parrinello MD, on the wave functions~\cite{Bloechl2002}
+(\key{!PSIDYN!THERMOSTAT}), which removes the heat that leaks from the
+ions into the fictitious electronic motion.
+
+% =====================================================================
+\chapter{Structure of the code}\label{chap:code}
+% =====================================================================
+
+\section{Source files}
+
+\begin{center}
+\begin{tabular}{@{}ll@{}}
+\toprule
+File & Content \\
+\midrule
+\texttt{vespaw.f90}, \texttt{vespaw\_driver.f90} & main program, time-step loop, reports \\
+\texttt{vespaw\_ioroutines.f90} & reading \texttt{.cntl}/\texttt{.strc} input \\
+\texttt{vespaw\_waves1.f90}, \texttt{vespaw\_waves2.f90} & wave functions, density, $H\psi$, forces, total energy \\
+\texttt{vespaw\_cg.f90} & Davidson, RMM-DIIS, CG \\
+\texttt{vespaw\_mixer.f90} & variational, Pulay and Anderson mixers \\
+\texttt{vespaw\_edft.f90} & Route~2 (EDFT) \\
+\texttt{vespaw\_potential.f90} & plane-wave potential, electrostatics, XC on the grid \\
+\texttt{vespaw\_augmentation.f90} & one-center (PAW sphere) terms \\
+\texttt{vespaw\_setups.f90} & setup construction and tests \\
+\texttt{vespaw\_lmto.f90} & local orbitals, \pbezero, \pbeslzero, \scanzero \\
+\texttt{vespaw\_scantau.f90}, \texttt{vespaw\_scannsph.f90} & SCAN with orbital $\tau$, non-spherical one-center SCAN \\
+\texttt{vespaw\_dft.f90} & exchange-correlation functionals \\
+\texttt{vespaw\_atoms.f90}, \texttt{vespaw\_cell.f90} & ionic and cell dynamics \\
+\texttt{vespaw\_occupations.f90} & occupations, Mermin \\
+\bottomrule
+\end{tabular}
+\end{center}
+The code is organized in CP-PAW's object style: each module keeps its
+data in a Fortran module and is accessed through \texttt{OBJECT\$SET},
+\texttt{\$GET} and action routines.
+
+\section{One SCF step}
+
+\begin{enumerate}
+\item \texttt{PAW} (driver) calls \texttt{TIMESTEP}, which calls
+  \texttt{WAVES\$ETOT}.
+\item \texttt{WAVES\$ETOT}: projections $\braket{\pt}{\tilde\psi}$, density
+  and one-center density matrices; plane-wave potential
+  (\texttt{WAVES\_VOFRHO}); one-center potentials and $\Delta H$
+  (\texttt{AUGMENTATION}); hybrid terms (\texttt{LMTO}); forces and
+  stress (\texttt{WAVES\$FORCE}).
+\item Variational mixer (\texttt{WAVES\_VARMIXHAMILTONIAN}): the output
+  Hamiltonian and the energy are handed to the line search, which returns
+  $\vth$ for the next diagonalization.
+\item Eigensolver (\texttt{DAVIDSON\$STATE\_BY\_BLOCK},
+  \texttt{RMM\$STATE\_BY\_BLOCK}, \texttt{CG\$STATE\_BY\_STATE}) or, for
+  dynamics, $H\psi$ and propagation.
+\item Reports (\texttt{PRINFO}), capture of forces and stress, and the
+  switch of all dynamical variables to the next step.
+\end{enumerate}
+
+\section{Input}
+
+The \texttt{.cntl} and \texttt{.strc} files are read into linked lists
+(\texttt{LINKEDLIST\$...}). Blocks start with \texttt{!NAME} and end with
+\texttt{!END}; a block whose name is changed (e.g.\
+\texttt{!ORBPOT\_OFF}) is ignored. \texttt{READ=F} inside a block also
+switches the block off. The routines \texttt{READIN\_*} in
+\texttt{vespaw\_ioroutines.f90} transfer the values to the modules.
+
+\section{Adding a functional}
+
+\begin{enumerate}
+\item Implement energy density and potential in \texttt{vespaw\_dft.f90}
+  (or a module of its own), register a type name in
+  \texttt{READIN\_DFTTYPEFROMNAME}.
+\item Provide the one-center evaluation (\texttt{vespaw\_augmentation.f90}),
+  with the full potential, Eq.~\eqref{eq:euler}.
+\item Verify: energy vs finite difference of the potential along a
+  density change; variational optimizer vs damped dynamics
+  (Sec.~\ref{sec:consistency}); forces and stress vs finite differences.
+\item Add a regression case.
+\end{enumerate}
+
+\section{Adding an optimizer}
+
+Optimizers are dispatched on \texttt{OPTIMIZERTYPE} in \texttt{WAVES\$ETOT}.
+A new eigensolver must return orthonormal Ritz vectors and their Ritz
+values in \texttt{THIS\%EIGVAL} (used for the Lagrange multipliers of the
+forces). It should be tested against Davidson on the whole regression
+suite.
+
+\section{Regression suite}
+
+\texttt{regression/run.py} runs all cases (\texttt{regression/*/case.json})
+or selected ones (\texttt{run.py CASE:RUN}). A case has template inputs
+with \texttt{@PLACEHOLDER@} substitutions, several runs (optimizers,
+cold and seeded starts, multi-stage runs sharing a restart file), checks
+against reference values, agreement tests between runs, finite-difference
+tests of forces and stress, and a list of known issues. The cases cover
+PBE Si (all optimizers), hot Al (metal, Mermin), Si$_8$ at $\Gamma$, NiO
+AFM (PBE, PBE+$U$, \pbezero, \pbeslzero, \scanzero, TSCAN), MgO
+\pbeslzero, TSCAN Si, spin--orbit Si, a polar slab with dipole
+correction, space-group symmetry, and forces and stress. Every change to the code should leave the suite passing.
+
+\backmatter
+\bibliographystyle{unsrtnat}
+\bibliography{theory}
+\end{document}

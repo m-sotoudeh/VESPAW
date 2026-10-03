@@ -1,0 +1,30 @@
+vespaw:
+  schema: 1
+
+system:
+  structure: POSCAR
+
+electronic:
+  xc:
+    functional: PBE
+  basis:
+    wavefunction_cutoff: 25 Ry
+  kpoints:
+    mesh: [1, 1, 1]
+
+scf:
+  max_iterations: 200
+  diagonalizer:
+    method: cg
+
+ions:
+  mode: static
+
+# Exercises the raw: passthrough (see python/vespaw/yaml_input.py):
+# CDUAL overrides the structured lowering's own !FOURIER CDUAL=2.0, and
+# !MERMIN is a block the structured schema has no field for at all.
+raw:
+  FOURIER:
+    CDUAL: 2.5
+  MERMIN:
+    READ: false

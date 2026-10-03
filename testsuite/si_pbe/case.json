@@ -1,0 +1,99 @@
+{
+  "description": "Si diamond, PBE, 6x6x6 k-points, NDLSS setup: all SCF optimizers must reach the same variational minimum",
+  "inputs": [
+    "si.cntl",
+    "si.strc"
+  ],
+  "timeout": 900,
+  "defaults": {
+    "@NSTEP@": "300"
+  },
+  "runs": {
+    "dav_var": {
+      "subs": {
+        "@PSIDYN@": "OPTIMIZER='DAV' MIXER='VARIATIONAL' SAFEORTHO=T STOP=T"
+      }
+    },
+    "rmm_var": {
+      "subs": {
+        "@PSIDYN@": "OPTIMIZER='RMM' MIXER='VARIATIONAL' SAFEORTHO=T STOP=T"
+      }
+    },
+    "cg_var": {
+      "subs": {
+        "@PSIDYN@": "OPTIMIZER='CG' MIXER='VARIATIONAL' SAFEORTHO=T STOP=T"
+      }
+    },
+    "edft_var": {
+      "subs": {
+        "@PSIDYN@": "OPTIMIZER='EDFT' MIXER='VARIATIONAL' SAFEORTHO=T STOP=T"
+      }
+    },
+    "dav_pulay": {
+      "subs": {
+        "@PSIDYN@": "OPTIMIZER='DAV' MIXER='PULAY' SAFEORTHO=T STOP=T"
+      }
+    },
+    "md": {
+      "subs": {
+        "@NSTEP@": "3000",
+        "@PSIDYN@": "STOP=T FRIC=0.02 SAFEORTHO=T\n    !AUTO FRIC(-)=0.3 FACT(-)=0.97 FRIC(+)=0.3 FACT(+)=1. MINFRIC=0.02 !END"
+      }
+    }
+  },
+  "checks": [
+    {
+      "run": "dav_var",
+      "quantity": "energy",
+      "value": -7.973100798,
+      "tol": 2e-06,
+      "reference": "Route 1 (DAV, RMM, CG) and Route 2 agree to 1e-6 Ha; Car-Parrinello friction MD -8.0070277 Ha (stopped on its energy criterion) -- the dev notes 2026-09-23 -- re-referenced 2026-09-29 after the default relativistic treatment changed from ZORA to energy-dependent scalar-relativistic (cross-optimizer agreement and finite-difference checks unchanged) -- re-referenced 2026-10-02 for the corrected PBE reduced gradient (TFAC ported from CP-PAW 2024; also fixed in the SCAN correlation code; TYPE=-10 reproduces the old values)"
+    },
+    {
+      "run": "dav_var",
+      "quantity": "gap_ev",
+      "value": 0.7097,
+      "tol": 0.002,
+      "reference": "same runs; band gap on the Gamma-centred 6x6x6 mesh -- re-referenced 2026-10-02 for the corrected PBE reduced gradient (TFAC ported from CP-PAW 2024; also fixed in the SCAN correlation code; TYPE=-10 reproduces the old values)"
+    },
+    {
+      "run": "dav_pulay",
+      "quantity": "energy",
+      "value": -7.9731016602,
+      "tol": 1e-05,
+      "reference": "density mixing evaluates the energy at the mixed density; guards the Kerker G=0 bug (stalled 92 mHa too high before 2026-09-23) -- re-referenced 2026-09-29 after the default relativistic treatment changed from ZORA to energy-dependent scalar-relativistic (cross-optimizer agreement and finite-difference checks unchanged) -- re-referenced 2026-10-02 for the corrected PBE reduced gradient (TFAC ported from CP-PAW 2024; also fixed in the SCAN correlation code; TYPE=-10 reproduces the old values)"
+    },
+    {
+      "run": "md",
+      "quantity": "energy",
+      "value": -7.9730993196,
+      "tol": 5e-06,
+      "reference": "independent optimizer (Car-Parrinello friction); converges slowly, hence looser tolerance -- re-referenced 2026-09-29 after the default relativistic treatment changed from ZORA to energy-dependent scalar-relativistic (cross-optimizer agreement and finite-difference checks unchanged) -- re-referenced 2026-10-02 for the corrected PBE reduced gradient (TFAC ported from CP-PAW 2024; also fixed in the SCAN correlation code; TYPE=-10 reproduces the old values)"
+    }
+  ],
+  "agree": [
+    {
+      "runs": [
+        "dav_var",
+        "rmm_var",
+        "cg_var",
+        "edft_var"
+      ],
+      "quantity": "energy",
+      "tol": 2e-06
+    },
+    {
+      "runs": [
+        "dav_var",
+        "rmm_var",
+        "cg_var",
+        "edft_var"
+      ],
+      "quantity": "gap_ev",
+      "tol": 0.002
+    }
+  ],
+  "known_issues": {
+    "edft_var": "Route 2 with its default Kerker-preconditioned direction stops ~4.5e-6 Ha above the minimum: late steps become short (0.3 vs 2-5 without Kerker) and the energy/slope stop criterion triggers while GNORM is still ~5e-6. Without Kerker (VESPAW_EDFTVAR_NOKERKER=1) it reaches -8.0070290 Ha. Found by this suite 2026-09-27; present since ef3dc60."
+  }
+}

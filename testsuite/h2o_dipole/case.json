@@ -1,0 +1,65 @@
+{
+  "description": "Polar H2O layer (4.5x4.5 A, 2x2x1 k) in an 18 A cell with the dipole correction (DIPOLECORR=T, Bengtsson; step placed in the largest vacuum gap). The correction energy 2*pi*m^2/Omega is +1.36 mH at 12 A and +0.89 mH at 18 A (scales as 1/Omega). Also guards the variational SCF in large vacuum (gauge alignment of theta and the vacuum mask): before 2026-09-29 Davidson+VARIATIONAL stalled 75 mH above the minimum here",
+  "inputs": [
+    "w.cntl",
+    "w.strc"
+  ],
+  "timeout": 1800,
+  "defaults": {
+    "@NSTEP@": "600",
+    "@DIP@": "T",
+    "@PSIDYN@": "OPTIMIZER='DAV' MIXER='VARIATIONAL' SAFEORTHO=T STOP=T EDIFF=1.E-8"
+  },
+  "runs": {
+    "dip_dav": {
+      "subs": {}
+    },
+    "nodip_dav": {
+      "subs": {
+        "@DIP@": "F"
+      }
+    },
+    "dip_md": {
+      "subs": {
+        "@NSTEP@": "3000",
+        "@PSIDYN@": "STOP=T FRIC=0.02 SAFEORTHO=T EDIFF=1.E-8\n    !AUTO FRIC(-)=0.3 FACT(-)=0.97 FRIC(+)=0.3 FACT(+)=1. MINFRIC=0.02 !END"
+      }
+    }
+  },
+  "checks": [
+    {
+      "run": "dip_dav",
+      "quantity": "energy",
+      "value": -17.3107939178,
+      "tol": 3e-05,
+      "reference": "2026-09-29 friction MD -17.3615942, EDFT -17.3615918 Ha; the vacuum mask leaves ~1e-5 H -- re-referenced 2026-10-02 for the corrected PBE reduced gradient (TFAC ported from CP-PAW 2024; also fixed in the SCAN correlation code; TYPE=-10 reproduces the old values)"
+    },
+    {
+      "run": "nodip_dav",
+      "quantity": "energy",
+      "value": -17.3116650038,
+      "tol": 3e-05,
+      "reference": "2026-09-29 friction MD -17.3624794, Pulay -17.3623995, EDFT -17.3624720 Ha -- re-referenced 2026-10-02 for the corrected PBE reduced gradient (TFAC ported from CP-PAW 2024; also fixed in the SCAN correlation code; TYPE=-10 reproduces the old values)"
+    },
+    {
+      "run": "dip_dav",
+      "quantity": "iterations",
+      "value": 100,
+      "tol": 100,
+      "reference": "converged in 82-143 iterations (stalled for 600 before the fix)"
+    }
+  ],
+  "agree": [
+    {
+      "runs": [
+        "dip_dav",
+        "dip_md"
+      ],
+      "quantity": "energy",
+      "tol": 3e-05
+    }
+  ],
+  "known_issues": {
+    "dip_dav": "the SCF residual floors at ~5e-3 H^2 from the erratic GGA potential of the density tail in the vacuum; the energy criterion (EDIFF) stops the run ~1e-5 H above the minimum"
+  }
+}

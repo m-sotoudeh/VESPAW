@@ -1,0 +1,19 @@
+# SB -- PAW setup (HBS construction), rebuilt 2026-09-27
+# Replaces sb_ndlss_v0 (see AUDIT.md), which the setup audit flagged.
+# Parameters: CP-PAW parameters/stp.cntl entry SB_HBS; projectors
+#   NPRO=2 2 2 (two per s/p/d channel: the recipe that removed
+#   the NiO incompleteness collapse, the dev notes 2026-09-27).
+# Checked: builds for an isolated atom (PBE) with no ghost state and no
+#   incompleteness warning. NOT yet validated in solids (lattice constants,
+#   cutoff convergence) unless stated in AUDIT.md.
+#
+  !SPECIES NAME='SB' NPRO=2 2 2 LRHOX=4 RAD/RCOV=1.2
+    !AUGMENT ID='SB_HBS' EL='SB' ZV=5. TYPE='HBS'
+             RBOX/RCOV=1.2 RCSM/RCOV=0.25
+             RCL/RCOV= 0.75 0.75 0.75 0.75
+             LAMBDA= 6. 6. 6. 6.
+      !GRID DMIN=1.E-6 DMAX=0.1 RMAX=10. !END
+      !POT  POW=3. RC/RCOV=0.67 !END
+      !CORE POW=3. RC/RCOV=0.67 !END
+    !END
+  !END

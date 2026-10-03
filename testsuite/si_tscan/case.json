@@ -1,0 +1,80 @@
+{
+  "description": "Si diamond, TSCAN (orbital-tau SCAN, TSCANDELOC=T), 6x6x6 k: variational SCF must converge and agree with friction MD (Route 1 did not converge before the onsite SCAN gradient-potential fix of 2026-09-27)",
+  "inputs": [
+    "si.cntl",
+    "si.strc"
+  ],
+  "timeout": 900,
+  "defaults": {
+    "@NSTEP@": "300"
+  },
+  "runs": {
+    "dav_var": {
+      "subs": {
+        "@PSIDYN@": "OPTIMIZER='DAV' MIXER='VARIATIONAL' SAFEORTHO=T STOP=T"
+      }
+    },
+    "rmm_var": {
+      "subs": {
+        "@PSIDYN@": "OPTIMIZER='RMM' MIXER='VARIATIONAL' SAFEORTHO=T STOP=T"
+      }
+    },
+    "md": {
+      "subs": {
+        "@NSTEP@": "3000",
+        "@PSIDYN@": "STOP=T FRIC=0.02 SAFEORTHO=T\n    !AUTO FRIC(-)=0.3 FACT(-)=0.97 FRIC(+)=0.3 FACT(+)=1. MINFRIC=0.02 !END"
+      }
+    }
+  },
+  "checks": [
+    {
+      "run": "dav_var",
+      "quantity": "energy",
+      "value": -8.3723801291,
+      "tol": 3e-06,
+      "reference": "2026-09-27 after the onsite SCAN gradient-term fix; MD -8.4009275 (stops early). Before the fix Route 1 did not converge and the best energy was -8.40076. -- re-referenced 2026-09-29 after the default relativistic treatment changed from ZORA to energy-dependent scalar-relativistic (cross-optimizer agreement and finite-difference checks unchanged) -- re-referenced 2026-10-02 for the corrected PBE reduced gradient (TFAC ported from CP-PAW 2024; also fixed in the SCAN correlation code; TYPE=-10 reproduces the old values)"
+    },
+    {
+      "run": "dav_var",
+      "quantity": "gap_ev",
+      "value": 1.0395,
+      "tol": 0.003,
+      "reference": "same"
+    },
+    {
+      "run": "dav_var",
+      "quantity": "iterations",
+      "value": 16,
+      "tol": 15,
+      "reference": "converges in ~16 iterations; >31 means Route 1 is struggling again"
+    }
+  ],
+  "agree": [
+    {
+      "runs": [
+        "dav_var",
+        "rmm_var"
+      ],
+      "quantity": "energy",
+      "tol": 3e-06
+    },
+    {
+      "runs": [
+        "dav_var",
+        "md"
+      ],
+      "quantity": "energy",
+      "tol": 1e-05
+    },
+    {
+      "runs": [
+        "dav_var",
+        "rmm_var",
+        "md"
+      ],
+      "quantity": "gap_ev",
+      "tol": 0.005
+    }
+  ],
+  "known_issues": {}
+}

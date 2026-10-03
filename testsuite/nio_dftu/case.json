@@ -1,0 +1,111 @@
+{
+  "description": "NiO AFM-II, PBE+U (Dudarev, U-J=6.3 eV on Ni d, occupation matrix from the all-electron partial waves inside the covalent radius): the +U Hamiltonian must be the exact derivative of E_U, so Davidson, RMM and Car-Parrinello friction MD reach the same energy",
+  "inputs": [
+    "nio.cntl",
+    "nio.strc"
+  ],
+  "timeout": 1800,
+  "defaults": {
+    "@NINTBO@": "",
+    "@HFWEIGHT@": ""
+  },
+  "runs": {
+    "dav_var": {
+      "stages": [
+        {
+          "subs": {
+            "@START@": "T",
+            "@NSTEP@": "300",
+            "@ORBPOT@": "ORBPOT",
+            "@PSIDYN@": "STOP=F FRIC=0.02 SAFEORTHO=T\n    !AUTO FRIC(-)=0.3 FACT(-)=0.97 FRIC(+)=0.3 FACT(+)=1. MINFRIC=0.02 !END\n "
+          }
+        },
+        {
+          "subs": {
+            "@START@": "F",
+            "@NSTEP@": "300",
+            "@ORBPOT@": "ORBPOT_OFF",
+            "@PSIDYN@": "OPTIMIZER='DAV' MIXER='VARIATIONAL' SAFEORTHO=T STOP=T"
+          }
+        }
+      ]
+    },
+    "rmm_var": {
+      "stages": [
+        {
+          "subs": {
+            "@START@": "T",
+            "@NSTEP@": "300",
+            "@ORBPOT@": "ORBPOT",
+            "@PSIDYN@": "STOP=F FRIC=0.02 SAFEORTHO=T\n    !AUTO FRIC(-)=0.3 FACT(-)=0.97 FRIC(+)=0.3 FACT(+)=1. MINFRIC=0.02 !END\n "
+          }
+        },
+        {
+          "subs": {
+            "@START@": "F",
+            "@NSTEP@": "300",
+            "@ORBPOT@": "ORBPOT_OFF",
+            "@PSIDYN@": "OPTIMIZER='RMM' MIXER='VARIATIONAL' SAFEORTHO=T STOP=T"
+          }
+        }
+      ]
+    },
+    "md": {
+      "stages": [
+        {
+          "subs": {
+            "@START@": "T",
+            "@NSTEP@": "300",
+            "@ORBPOT@": "ORBPOT",
+            "@PSIDYN@": "STOP=F FRIC=0.02 SAFEORTHO=T\n    !AUTO FRIC(-)=0.3 FACT(-)=0.97 FRIC(+)=0.3 FACT(+)=1. MINFRIC=0.02 !END\n "
+          }
+        },
+        {
+          "subs": {
+            "@START@": "F",
+            "@NSTEP@": "4000",
+            "@ORBPOT@": "ORBPOT_OFF",
+            "@PSIDYN@": "STOP=T FRIC=0.02 SAFEORTHO=T\n    !AUTO FRIC(-)=0.3 FACT(-)=0.97 FRIC(+)=0.3 FACT(+)=1. MINFRIC=0.02 !END\n "
+          }
+        }
+      ]
+    }
+  },
+  "checks": [
+    {
+      "run": "dav_var",
+      "quantity": "energy",
+      "value": -111.2176971727,
+      "tol": 3e-06,
+      "reference": "2026-09-29, DAV -111.4305049133, RMM -111.4305048401, friction MD -111.4305048793 Ha -- re-referenced 2026-10-02 after the scalar-relativistic partial waves were made consistent (one DREL per l at the valence energy; HBS setups shift by ~-11 mHa, NiO+U/hybrid gaps by ~-0.09 eV) -- re-referenced 2026-10-02 for the corrected PBE reduced gradient (TFAC ported from CP-PAW 2024; also fixed in the SCAN correlation code; TYPE=-10 reproduces the old values)"
+    },
+    {
+      "run": "dav_var",
+      "quantity": "gap_ev",
+      "value": 2.9427,
+      "tol": 0.01,
+      "reference": "same runs; PBE+U literature for U_eff=6.3 eV: 3.0-3.2 eV (PBE 1.51 eV) -- re-referenced 2026-10-02 after the scalar-relativistic partial waves were made consistent (one DREL per l at the valence energy; HBS setups shift by ~-11 mHa, NiO+U/hybrid gaps by ~-0.09 eV) -- re-referenced 2026-10-02 for the corrected PBE reduced gradient (TFAC ported from CP-PAW 2024; also fixed in the SCAN correlation code; TYPE=-10 reproduces the old values)"
+    }
+  ],
+  "agree": [
+    {
+      "runs": [
+        "dav_var",
+        "rmm_var",
+        "md"
+      ],
+      "quantity": "energy",
+      "tol": 5e-06
+    },
+    {
+      "runs": [
+        "dav_var",
+        "rmm_var",
+        "md"
+      ],
+      "quantity": "gap_ev",
+      "tol": 0.01
+    }
+  ],
+  "known_issues": {}
+}

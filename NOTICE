@@ -1,0 +1,18 @@
+VESPAW
+Copyright (C) 2026 Mohsen Sotoudeh
+
+VESPAW is derived from CP-PAW, the projector augmented-wave code of
+Peter E. Bloechl (Clausthal University of Technology), which is
+distributed under the GNU General Public License, version 3.
+Copyright of the inherited CP-PAW code remains with its authors.
+
+The modifications and additions of VESPAW (variational self-consistent
+field optimizers, local hybrid functionals PBE0r, PBE-SL0r and SCAN0r,
+DFT+U, spin-orbit coupling, dipole correction, space-group symmetry,
+MPI support of the new solvers, the PAW setup library, the
+regression suite and the tooling) are distributed under the same
+license, GPL-3.0 (see LICENSE).
+
+This program is distributed in the hope that it will be useful, but
+WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.

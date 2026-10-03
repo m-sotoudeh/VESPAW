@@ -1,0 +1,108 @@
+{
+  "description": "MgO rocksalt (primitive, 4x4x4 k, 30 Ry, NDLSS setups of tests/mgo): PBE-SL0r (PBE + onsite hybrid with SCAN-L double counting) from a cold start with Davidson+variational SCF and with friction MD (seeded from a converged PBE state), plus PBE0r and PBE for the hybrid shifts. KNOWN LIMITATION: RMM with the onsite hybrid reaches the correct energy but misses the lowest empty band (gap 6.54 instead of 4.23 eV; plain PBE RMM is fine), so its gap is not checked.",
+  "inputs": [
+    "mgo.cntl",
+    "mgo.strc"
+  ],
+  "timeout": 1800,
+  "defaults": {
+    "@NSTEP@": "300",
+    "@NTBO@": "    !NTBO MODUS='HYBRID' HFWEIGHT=0.25 DCTYPE='SCANL' K2=-0.25 SCALERCUT=2. !END\n",
+    "@PSIDYN@": "OPTIMIZER='DAV' MIXER='VARIATIONAL' SAFEORTHO=T STOP=T",
+    "@START@": "T"
+  },
+  "runs": {
+    "scan0r_dav": {
+      "subs": {}
+    },
+    "scan0r_rmm": {
+      "subs": {
+        "@PSIDYN@": "OPTIMIZER='RMM' MIXER='VARIATIONAL' SAFEORTHO=T STOP=T"
+      }
+    },
+    "scan0r_md": {
+      "stages": [
+        {
+          "subs": {
+            "@NTBO@": "",
+            "@PSIDYN@": "OPTIMIZER='DAV' MIXER='VARIATIONAL' SAFEORTHO=T STOP=T"
+          }
+        },
+        {
+          "subs": {
+            "@NSTEP@": "4000",
+            "@PSIDYN@": "STOP=T FRIC=0.02 SAFEORTHO=T\n    !AUTO FRIC(-)=0.3 FACT(-)=0.97 FRIC(+)=0.3 FACT(+)=1. MINFRIC=0.02 !END",
+            "@START@": "F"
+          }
+        }
+      ]
+    },
+    "pbe0r_dav": {
+      "subs": {
+        "@NTBO@": "    !NTBO MODUS='HYBRID' HFWEIGHT=0.25 K2=-0.25 SCALERCUT=2. !END\n"
+      }
+    },
+    "pbe_dav": {
+      "subs": {
+        "@NTBO@": ""
+      }
+    }
+  },
+  "checks": [
+    {
+      "run": "scan0r_dav",
+      "quantity": "energy",
+      "value": -55.2383312541,
+      "tol": 2e-06,
+      "reference": "2026-09-27 after the SCAN-L onsite potential fix; DAV+VARIATIONAL, RMM+VARIATIONAL and PBE-seeded friction MD agree to 6e-8 Ha. Before the fix the variational optimizer never converged (SCAN0r potential was not the derivative of its energy) and MD/Pulay converged to a non-stationary point (-55.058708 Ha, 4.393 eV). -- re-referenced 2026-09-29 after the default relativistic treatment changed from ZORA to energy-dependent scalar-relativistic (cross-optimizer agreement and finite-difference checks unchanged) -- re-referenced 2026-10-02 for the corrected PBE reduced gradient (TFAC ported from CP-PAW 2024; also fixed in the SCAN correlation code; TYPE=-10 reproduces the old values) -- re-referenced 2026-10-03: published PBE beta, SCAN-L PC07opt deorbitalization, spin-polarized SCAN correlation, CODATA 2018 constants (output now in eV; references stay in Hartree)"
+    },
+    {
+      "run": "scan0r_dav",
+      "quantity": "gap_ev",
+      "value": 4.124,
+      "tol": 0.01,
+      "reference": "same; PBE 4.4269 eV, PBE0r 4.1386 eV in this setup -- re-referenced 2026-10-02 for the corrected PBE reduced gradient (TFAC ported from CP-PAW 2024; also fixed in the SCAN correlation code; TYPE=-10 reproduces the old values)"
+    },
+    {
+      "run": "pbe0r_dav",
+      "quantity": "energy",
+      "value": -55.0802450838,
+      "tol": 2e-06,
+      "reference": "2026-09-27 -- re-referenced 2026-09-29 after the default relativistic treatment changed from ZORA to energy-dependent scalar-relativistic (cross-optimizer agreement and finite-difference checks unchanged) -- re-referenced 2026-10-02 for the corrected PBE reduced gradient (TFAC ported from CP-PAW 2024; also fixed in the SCAN correlation code; TYPE=-10 reproduces the old values) -- re-referenced 2026-10-03: published PBE beta, SCAN-L PC07opt deorbitalization, spin-polarized SCAN correlation, CODATA 2018 constants (output now in eV; references stay in Hartree)"
+    },
+    {
+      "run": "pbe_dav",
+      "quantity": "energy",
+      "value": -55.1103453971,
+      "tol": 2e-06,
+      "reference": "2026-09-27 -- re-referenced 2026-09-29 after the default relativistic treatment changed from ZORA to energy-dependent scalar-relativistic (cross-optimizer agreement and finite-difference checks unchanged) -- re-referenced 2026-10-02 for the corrected PBE reduced gradient (TFAC ported from CP-PAW 2024; also fixed in the SCAN correlation code; TYPE=-10 reproduces the old values) -- re-referenced 2026-10-03: published PBE beta, SCAN-L PC07opt deorbitalization, spin-polarized SCAN correlation, CODATA 2018 constants (output now in eV; references stay in Hartree)"
+    }
+  ],
+  "agree": [
+    {
+      "runs": [
+        "scan0r_dav",
+        "scan0r_rmm"
+      ],
+      "quantity": "energy",
+      "tol": 2e-06
+    },
+    {
+      "runs": [
+        "scan0r_dav",
+        "scan0r_md"
+      ],
+      "quantity": "energy",
+      "tol": 1e-05
+    },
+    {
+      "runs": [
+        "scan0r_dav",
+        "scan0r_md"
+      ],
+      "quantity": "gap_ev",
+      "tol": 0.01
+    }
+  ],
+  "known_issues": {}
+}

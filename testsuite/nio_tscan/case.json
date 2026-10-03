@@ -1,0 +1,118 @@
+{
+  "description": "NiO AFM-II, spin-polarized orbital-tau SCAN (TSCANDELOC=T): exercises the spin-polarized SCAN correlation and the spin-scaled exchange on the grid and in the one-center terms (added 2026-10-02 with the spin-polarized SCAN correlation). DAV, RMM and friction MD must reach the same energy, which requires the potentials to be the derivatives of the energy.",
+  "inputs": [
+    "nio.cntl",
+    "nio.strc"
+  ],
+  "timeout": 3600,
+  "defaults": {
+    "@NINTBO@": "",
+    "@HFWEIGHT@": ""
+  },
+  "runs": {
+    "dav_var": {
+      "stages": [
+        {
+          "subs": {
+            "@START@": "T",
+            "@NSTEP@": "300",
+            "@ORBPOT@": "ORBPOT",
+            "@PSIDYN@": "STOP=F FRIC=0.02 SAFEORTHO=T\n    !AUTO FRIC(-)=0.3 FACT(-)=0.97 FRIC(+)=0.3 FACT(+)=1. MINFRIC=0.02 !END\n "
+          }
+        },
+        {
+          "subs": {
+            "@START@": "F",
+            "@NSTEP@": "300",
+            "@ORBPOT@": "ORBPOT_OFF",
+            "@PSIDYN@": "OPTIMIZER='DAV' MIXER='VARIATIONAL' SAFEORTHO=T STOP=T"
+          }
+        }
+      ]
+    },
+    "rmm_var": {
+      "stages": [
+        {
+          "subs": {
+            "@START@": "T",
+            "@NSTEP@": "300",
+            "@ORBPOT@": "ORBPOT",
+            "@PSIDYN@": "STOP=F FRIC=0.02 SAFEORTHO=T\n    !AUTO FRIC(-)=0.3 FACT(-)=0.97 FRIC(+)=0.3 FACT(+)=1. MINFRIC=0.02 !END\n "
+          }
+        },
+        {
+          "subs": {
+            "@START@": "F",
+            "@NSTEP@": "300",
+            "@ORBPOT@": "ORBPOT_OFF",
+            "@PSIDYN@": "OPTIMIZER='RMM' MIXER='VARIATIONAL' SAFEORTHO=T STOP=T"
+          }
+        }
+      ]
+    },
+    "md": {
+      "stages": [
+        {
+          "subs": {
+            "@START@": "T",
+            "@NSTEP@": "300",
+            "@ORBPOT@": "ORBPOT",
+            "@PSIDYN@": "STOP=F FRIC=0.02 SAFEORTHO=T\n    !AUTO FRIC(-)=0.3 FACT(-)=0.97 FRIC(+)=0.3 FACT(+)=1. MINFRIC=0.02 !END\n "
+          }
+        },
+        {
+          "subs": {
+            "@START@": "F",
+            "@NSTEP@": "4000",
+            "@ORBPOT@": "ORBPOT_OFF",
+            "@PSIDYN@": "STOP=T FRIC=0.02 SAFEORTHO=T\n    !AUTO FRIC(-)=0.3 FACT(-)=0.97 FRIC(+)=0.3 FACT(+)=1. MINFRIC=0.02 !END\n "
+          }
+        }
+      ]
+    }
+  },
+  "agree": [
+    {
+      "runs": [
+        "dav_var",
+        "rmm_var"
+      ],
+      "quantity": "energy",
+      "tol": 3e-06
+    },
+    {
+      "runs": [
+        "dav_var",
+        "md"
+      ],
+      "quantity": "energy",
+      "tol": 1e-05
+    },
+    {
+      "runs": [
+        "dav_var",
+        "rmm_var",
+        "md"
+      ],
+      "quantity": "gap_ev",
+      "tol": 0.02
+    }
+  ],
+  "known_issues": {},
+  "checks": [
+    {
+      "run": "dav_var",
+      "quantity": "energy",
+      "value": -112.1341491196,
+      "tol": 3e-06,
+      "reference": "first reference 2026-10-03 (DAV/RMM/friction MD agree)"
+    },
+    {
+      "run": "dav_var",
+      "quantity": "gap_ev",
+      "value": 2.1715,
+      "tol": 0.01,
+      "reference": "first reference 2026-10-03 (DAV/RMM/friction MD agree)"
+    }
+  ]
+}

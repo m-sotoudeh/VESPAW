@@ -1,0 +1,44 @@
+{
+  "description": "Tutorial example 6: Car-Parrinello molecular dynamics of Si8 with 2x2x2 k-points (PBE, 25 Ry; Gamma-only sampling of this small cell makes distorted structures lower in energy than diamond). Stage 1 converges the electrons; stage 2 runs 500 steps of 10 a.u. (0.24 fs) with a Nose thermostat at 1000 K.",
+  "inputs": [
+    "si8.cntl",
+    "si8.strc"
+  ],
+  "timeout": 1800,
+  "defaults": {
+    "@NSTEP@": "100",
+    "@DT@": "5.0",
+    "@START@": "T",
+    "@PSIDYN@": "OPTIMIZER='DAV' MIXER='VARIATIONAL' SAFEORTHO=T STOP=T",
+    "@RDYN@": ""
+  },
+  "runs": {
+    "md": {
+      "stages": [
+        {
+          "subs": {}
+        },
+        {
+          "subs": {
+            "@START@": "F",
+            "@NSTEP@": "500",
+            "@DT@": "10.0",
+            "@PSIDYN@": "STOP=T FRIC=0. SAFEORTHO=T",
+            "@RDYN@": "  !RDYN STOP=T RANDOM[K]=2000.\n    !THERMOSTAT T[K]=1000. FREQ[THZ]=10. !END\n  !END"
+          }
+        }
+      ]
+    }
+  },
+  "checks": [
+    {
+      "run": "md",
+      "quantity": "energy",
+      "value": -31.8363887749,
+      "tol": 0.003,
+      "reference": "2026-09-28; energy after 500 MD steps (trajectory-dependent, loose tolerance); conserved energy drift 2e-4 H -- re-checked 2026-10-03 with the corrected functionals and CODATA 2018 constants"
+    }
+  ],
+  "agree": [],
+  "known_issues": {}
+}

@@ -1,0 +1,17 @@
+!DCNTL
+  !FILES
+    !FILE ID='PDOS' EXT=F NAME='si.pdos' !END
+  !END
+  !GENERIC MODE='TETRA' PREFIX='dos_' !END
+  !GRID DE[EV]=0.02 !END
+  !WEIGHT ID='total' TYPE='TOTAL' !END
+  !WEIGHT ID='si_s'
+    !ATOM NAME='SI1' TYPE='S' !END
+    !ATOM NAME='SI2' TYPE='S' !END
+  !END
+  !WEIGHT ID='si_p'
+    !ATOM NAME='SI1' TYPE='P' !END
+    !ATOM NAME='SI2' TYPE='P' !END
+  !END
+!END
+!EOB

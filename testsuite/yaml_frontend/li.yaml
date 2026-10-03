@@ -1,0 +1,21 @@
+vespaw:
+  schema: 1
+
+system:
+  structure: POSCAR
+
+electronic:
+  xc:
+    functional: PBE
+  basis:
+    wavefunction_cutoff: 25 Ry
+  kpoints:
+    mesh: [1, 1, 1]
+
+scf:
+  max_iterations: 200
+  diagonalizer:
+    method: cg
+
+ions:
+  mode: static

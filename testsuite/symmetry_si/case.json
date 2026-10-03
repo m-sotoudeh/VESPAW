@@ -1,0 +1,73 @@
+{
+  "description": "Space-group symmetry (!KPOINTS SYMMETRY=T) on a low-symmetry Si cell (SI2 displaced by 0.05 AA along x, 8 operations with non-lattice translations, so the density is symmetrized in reciprocal space): irreducible k-points plus symmetrized density, density matrices, forces and stress must reproduce the full-mesh run",
+  "inputs": [
+    "si.cntl",
+    "si.strc"
+  ],
+  "timeout": 900,
+  "defaults": {
+    "@NSTEP@": "300",
+    "@PSIDYN@": "OPTIMIZER='DAV' MIXER='VARIATIONAL' SAFEORTHO=T STOP=T EDIFF=1.E-10 MIXTOL=1.E-12",
+    "@SYM@": "T"
+  },
+  "runs": {
+    "full": {
+      "subs": {
+        "@SYM@": "F"
+      }
+    },
+    "sym": {
+      "subs": {}
+    },
+    "sym_rmm": {
+      "subs": {
+        "@PSIDYN@": "OPTIMIZER='RMM' MIXER='VARIATIONAL' SAFEORTHO=T STOP=T EDIFF=1.E-10 MIXTOL=1.E-12"
+      }
+    }
+  },
+  "checks": [],
+  "agree": [
+    {
+      "runs": [
+        "full",
+        "sym",
+        "sym_rmm"
+      ],
+      "quantity": "energy",
+      "tol": 5e-09
+    },
+    {
+      "runs": [
+        "full",
+        "sym",
+        "sym_rmm"
+      ],
+      "quantity": "force:SI2:x",
+      "tol": 2e-06,
+      "note": "GGA grid aliasing: the full-mesh/irreducible difference falls from 1.0e-6 to 6.9e-7 to 8.5e-8 H/bohr for CDUAL=2,3,4 (2026-10-02)"
+    },
+    {
+      "runs": [
+        "full",
+        "sym",
+        "sym_rmm"
+      ],
+      "quantity": "dedeps:23",
+      "tol": 1e-06
+    },
+    {
+      "runs": [
+        "full",
+        "sym",
+        "sym_rmm"
+      ],
+      "quantity": "dedeps_trace",
+      "tol": 1e-05
+    }
+  ],
+  "known_issues": {},
+  "notes": {
+    "dedeps:23": "guards the strained-spherical-harmonics fix (2026-09-29): the projector stress used G_i d/dG_j instead of its symmetric part, so single k-points were not covariant and the off-diagonal stress from the irreducible wedge was off by 5.7e-5 H",
+    "dedeps_trace": "stress is not variational; its SCF convergence error (~1e-6 H per component) sets this tolerance"
+  }
+}

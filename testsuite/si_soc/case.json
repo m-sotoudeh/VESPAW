@@ -1,0 +1,73 @@
+{
+  "description": "Si diamond, PBE, 6x6x6 k, noncollinear spinors (NSPIN=3): without spin-orbit coupling the collinear energy is reproduced; with SPINORBIT=T the Gamma valence band splits into j=3/2 (4) and j=1/2 (2) with Delta_so=48 meV (exp. 44 meV). Guards the spin-flip block of the spinor Hamiltonian (DH_DN,UP=DH_X+I*DH_Y)",
+  "inputs": [
+    "si.cntl",
+    "si.strc"
+  ],
+  "timeout": 1200,
+  "defaults": {
+    "@NSTEP@": "300",
+    "@SO@": "T"
+  },
+  "runs": {
+    "nc_dav": {
+      "subs": {
+        "@SO@": "F",
+        "@PSIDYN@": "OPTIMIZER='DAV' MIXER='VARIATIONAL' SAFEORTHO=T STOP=T"
+      }
+    },
+    "so_dav": {
+      "subs": {
+        "@PSIDYN@": "OPTIMIZER='DAV' MIXER='VARIATIONAL' SAFEORTHO=T STOP=T"
+      }
+    },
+    "so_md": {
+      "subs": {
+        "@NSTEP@": "3000",
+        "@PSIDYN@": "STOP=T FRIC=0.02 SAFEORTHO=T\n    !AUTO FRIC(-)=0.3 FACT(-)=0.97 FRIC(+)=0.3 FACT(+)=1. MINFRIC=0.02 !END"
+      }
+    }
+  },
+  "checks": [
+    {
+      "run": "nc_dav",
+      "quantity": "energy",
+      "value": -7.9731003455,
+      "tol": 2e-07,
+      "reference": "collinear si_pbe dav_var -- re-referenced 2026-10-02 for the corrected PBE reduced gradient (TFAC ported from CP-PAW 2024; also fixed in the SCAN correlation code; TYPE=-10 reproduces the old values) -- re-referenced 2026-10-03: published PBE beta, SCAN-L PC07opt deorbitalization, spin-polarized SCAN correlation, CODATA 2018 constants (output now in eV; references stay in Hartree)"
+    },
+    {
+      "run": "so_dav",
+      "quantity": "energy",
+      "value": -7.9731150741,
+      "tol": 2e-06,
+      "reference": "2026-09-29 -- re-referenced 2026-10-02 for the corrected PBE reduced gradient (TFAC ported from CP-PAW 2024; also fixed in the SCAN correlation code; TYPE=-10 reproduces the old values)"
+    },
+    {
+      "run": "so_dav",
+      "quantity": "gap_ev",
+      "value": 0.6938,
+      "tol": 0.002,
+      "reference": "PBE gap 0.7906 eV lowered by Delta_so/3=16 meV -- re-referenced 2026-10-02 for the corrected PBE reduced gradient (TFAC ported from CP-PAW 2024; also fixed in the SCAN correlation code; TYPE=-10 reproduces the old values)"
+    }
+  ],
+  "agree": [
+    {
+      "runs": [
+        "so_dav",
+        "so_md"
+      ],
+      "quantity": "energy",
+      "tol": 1e-05
+    },
+    {
+      "runs": [
+        "so_dav",
+        "so_md"
+      ],
+      "quantity": "gap_ev",
+      "tol": 0.002
+    }
+  ],
+  "known_issues": {}
+}

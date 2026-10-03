@@ -1,0 +1,65 @@
+{
+  "description": "Tutorial example 3: fcc Al (PBE, 30 Ry): k-point convergence of the free energy at an electronic temperature of 1000 K, and 300 K at the converged mesh.",
+  "inputs": [
+    "al.cntl",
+    "al.strc"
+  ],
+  "timeout": 900,
+  "defaults": {
+    "@K@": "6",
+    "@TK@": "1000."
+  },
+  "runs": {
+    "k4": {
+      "subs": {
+        "@K@": "4"
+      }
+    },
+    "k6": {
+      "subs": {
+        "@K@": "6"
+      }
+    },
+    "k8": {
+      "subs": {
+        "@K@": "8"
+      }
+    },
+    "k12": {
+      "subs": {
+        "@K@": "12"
+      }
+    },
+    "k12_T300": {
+      "subs": {
+        "@K@": "12",
+        "@TK@": "300."
+      }
+    }
+  },
+  "checks": [
+    {
+      "run": "k6",
+      "quantity": "energy",
+      "value": -2.108147179,
+      "tol": 2e-06,
+      "reference": "same as regression/al_hot -- re-checked 2026-10-03 with the corrected functionals and CODATA 2018 constants"
+    },
+    {
+      "run": "k12",
+      "quantity": "energy",
+      "value": -2.1059893348,
+      "tol": 2e-06,
+      "reference": "2026-09-28 -- re-checked 2026-10-03 with the corrected functionals and CODATA 2018 constants"
+    },
+    {
+      "run": "k12_T300",
+      "quantity": "energy",
+      "value": -2.1058380621,
+      "tol": 2e-06,
+      "reference": "2026-09-28 -- re-checked 2026-10-03 with the corrected functionals and CODATA 2018 constants"
+    }
+  ],
+  "agree": [],
+  "known_issues": {}
+}

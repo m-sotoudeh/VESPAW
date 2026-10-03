@@ -1,0 +1,5 @@
+{
+  "description": "Same bcc-Li POSCAR/input.yaml as yaml_frontend, plus a raw: block overriding !FOURIER CDUAL and adding a !MERMIN block with no structured schema field -- guards the raw: passthrough in vespaw.yaml_input against regression. Converged value (2026-09-23), cross-checked against MIXER='VARIATIONAL' to <1 uHa; tolerance 1e-5 because a converged energy is only defined to ~EDIFF, while the old 10-iteration value depended on every detail of the mixer trajectory. -- re-referenced 2026-09-29 after the default relativistic treatment changed from ZORA to energy-dependent scalar-relativistic (cross-optimizer agreement and finite-difference checks unchanged) -- re-referenced 2026-10-02 for the corrected PBE reduced gradient (TFAC ported from CP-PAW 2024; also fixed in the SCAN correlation code; TYPE=-10 reproduces the old values)",
+  "energy_ha": -1.0132516257,
+  "tolerance_ha": 1e-05
+}

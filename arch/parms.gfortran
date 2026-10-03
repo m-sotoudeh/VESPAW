@@ -1,0 +1,311 @@
+#########################################################################################
+##
+##
+## parameter file for configuration of PAW environment
+##
+##
+##
+##
+##
+## for: CENTRINO DUO 64BIT
+##
+##
+## none:
+##
+##
+##
+##
+##
+##
+##
+#########################################################################################
+#
+#########################################################################################
+##________________________________architecture (arbitrary name)________________________##
+##
+##
+ARCH="gfortran_openblas_fftw3"
+##
+##
+##-------------------------------------------------------------------------------------##
+## executables will be placed in bin/$ARCH.
+##
+## recommended use: ARCH=compilername_machinename.
+##
+##
+##
+#########################################################################################
+#
+#########################################################################################
+##_______________________________flag for parallelization______________________________##
+##
+##
+TPARALLEL="T"
+##
+##
+##-------------------------------------------------------------------------------------##
+## set to "T" to allow making parallel executables.
+##
+## set to "F" if no MPI libraray available
+##
+##
+##
+#########################################################################################
+#
+#
+#########################################################################################
+##________________special rules for the configure script and f90 preprocessor__________##
+##
+##
+SPECIAL="none"
+##
+##
+##-------------------------------------------------------------------------------------##
+## flag for exceptional rules in the make files for specific architectures
+##
+## use SPECIAL="none" if no special rules are used
+##
+## other options
+##
+##
+##
+##
+##
+#########################################################################################
+#
+#########################################################################################
+##___________________________DIRECTORIES containing LIBRARIES__________________________##
+##
+##
+BLASDIR="/usr/local/Cellar/openblas/0.3.9/"#"/usr/local/opt/openblas/"
+LAPACKDIR="/usr/local/opt/openblas/"
+FFTDIR="/usr/local/opt/"
+MPIDIR="/usr/local/"
+##
+##
+#
+#########################################################################################
+##_________________________________ include file for fftw______________________________##
+##
+##
+FFT_HEADER="${FFTDIR}/fftw/include/fftw3.f03"
+##
+##
+##-------------------------------------------------------------------------------------##
+## include file for fourier transform
+##
+## for FFTW version 1 and 2, the file to include is fortran/fftw_f77.i
+##
+## for FFTW version 3, the file to include is ...fftw3.f
+##
+##
+##
+#########################################################################################
+#
+#########################################################################################
+##_________________________________ include file for mpi "mpif.f90"
+##
+##
+MPI_HEADER="${MPIDIR}/include/mpif.h"
+##
+##
+##-------------------------------------------------------------------------------------##
+## for mpich the file to include is include/mpif.h
+##
+##
+#########################################################################################
+#
+#########################################################################################
+##________________F90 compiler and linker for scalar executables_______________________##
+##
+##
+COMPILER_SCALAR="gfortran -lgfortran -DCPPVAR_COMPILER_G95 -I/usr/local/opt/fftw/include/ -I/usr/include/ -I/usr/local/include -fopenmp"
+##
+##
+##-------------------------------------------------------------------------------------##
+## compiler call with all options that are identical for compilation and linking
+##
+## and that are independent of optimization, debugging profiling etc.
+##
+##
+##
+## for the g95 compiler include "g95" and options
+##
+##
+##
+#########################################################################################
+#
+#########################################################################################
+##_______________F90 compiler and linker for parallel executables______________________##
+##
+##
+COMPILER_PARALLEL="mpif90 -I${MPIDIR}/include -lgfortran -I/usr/include/ -I/usr/local/opt/fftw/include/ -I/usr/local/include "
+##
+##
+##-------------------------------------------------------------------------------------##
+## compiler call with all options that are identical for compilation and linking
+##
+## and that are independent of optimization, debugging profiling etc.
+##
+##
+##
+## for the g95 compiler include "g95" and options
+##
+##
+##
+#########################################################################################
+#
+#########################################################################################
+##___________________________standard compiler flags___________________________________##
+##
+##
+FCFLAGS_NONE="-c "
+##
+##
+##-------------------------------------------------------------------------------------##
+## includes generic flags for compilations as opposed to linking.
+##
+## FLAGS will be attached to COMPILER for all compilations
+##
+3##
+##
+## usually the value is simply " -c"
+##
+##
+##
+#########################################################################################
+#
+#########################################################################################
+#________________________________compiler flags for optimization_______________________##
+##
+##
+FCFLAGS_OPT="-c -O3 -march=native -funroll-loops -fomit-frame-pointer -fimplicit-none"
+##
+##
+##-------------------------------------------------------------------------------------##
+## special compiler options for the fast and fast_parallel executable.
+##
+## the compile command will be "COMPILER FLAGS OPTIMIZE"
+##
+## use here all compiler specific flags that may improve performance
+##
+##
+##
+## note that -O2 is usually standard and safe while -O3 can give wrong results
+##
+##
+##
+#########################################################################################
+#
+#########################################################################################
+##________________________________compiler flags for profiling________________________##
+##
+##
+FCFLAGS_PROF="-c -pg -O3 -funroll-loops"
+##
+##
+##-------------------------------------------------------------------------------------##
+## special compiler options for the paw_prof and ppaw_prof executable
+##
+## the compile command will be "COMPILER FLAGS PROF"
+##
+## use here all compiler specific flags that may improve performance used in
+##
+## OPTIMIZE and add -pg for profiling
+##
+##
+##
+## note that -O2 is usually standard and safe while -O3 can give wrong results
+##
+##
+##
+#########################################################################################
+#
+#########################################################################################
+#________________________________compiler flags for debugging__________________________##
+##
+##
+FCFLAGS_DBG="-c -g -fbounds-check -fimplicit-none "
+##
+##
+##-------------------------------------------------------------------------------------##
+## special compiler options for the paw_dbg and ppaw_dbg executable
+##
+## the compile command will be "COMPILER FLAGS DEBUG"
+##
+## use here all compiler specific flags for debugging and that perform checks
+##
+##
+##
+#########################################################################################
+#
+#########################################################################################
+#________________________________flags for linking_____________________________________##
+LDFLAGS_SCALAR="-I${OBJDIR} -I//usr/local/opt/fftw/include/  -L${OBJDIR} -L${LAPACKDIR}/lib -L${FFTDIR}/fftw/lib/ "
+##
+##
+##-------------------------------------------------------------------------------------##
+###########################################################################################
+#
+#########################################################################################
+#________________________________flags for linking_____________________________________##
+LDFLAGS_PARALLEL="-I${OBJDIR} -I/usr/local/opt/fftw/include/ -L${OBJDIR} -L${LAPACKDIR}/lib -L${FFTDIR}/fftw/lib/ -L${MPIDIR}"
+##
+##
+##
+##
+#########################################################################################
+#
+#########################################################################################
+#________________________________external libraries (sequential)
+##
+##
+LIBS_SCALAR="-lfftw3 -lgfortran -lopenblas -llapack -lpthread -lm -fopenmp -I/usr/include/ /usr/local/lib/libhdf5_hl_fortran.dylib /usr/local/lib/libhdf5_fortran.dylib /usr/local/lib/libhdf5_hl.dylib /usr/local/lib/libhdf5.dylib"
+##
+##
+##-------------------------------------------------------------------------------------##
+## g2c is a fortran-to-c compatibility library required by blas and lapack routines
+##
+##
+##
+#########################################################################################
+#
+#########################################################################################
+#____________________________external libraries (parallel)_____________________________##
+##
+##
+LIBS_PARALLEL="-lfftw3 -lgfortran -lopenblas -llapack -lpthread -lm -fopenmp -I/usr/include/ /usr/local/lib/libhdf5_hl_fortran.dylib /usr/local/lib/libhdf5_fortran.dylib /usr/local/lib/libhdf5_hl.dylib /usr/local/lib/libhdf5.dylib"
+##
+##
+##-------------------------------------------------------------------------------------##
+##
+##
+#########################################################################################
+#
+#########################################################################################
+##________________________________preprocessor variables_______________________________##
+##
+##
+CPPFLAGS="-DCPPVAR_FFT_FFTW3 -DCPPVAR_BLAS_OPENBLAS -DCPPVAR_HDF5 -DCPPVAR_U77 -DCPPVAR_COMPILER_G95 "
+##
+##
+##-------------------------------------------------------------------------------------##
+## library selectors for FFT
+##
+##
+#########################################################################################
+#
+#########################################################################################
+##________________________________file extension_______________________________________##
+##
+##
+FEXT="f90"
+##
+##
+##-------------------------------------------------------------------------------------##
+##
+## may be "f" or "f90"
+##
+##
+##
+#########################################################################################

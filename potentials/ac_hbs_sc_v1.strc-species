@@ -1,0 +1,22 @@
+# AC -- PAW setup (HBS construction), rebuilt 2026-09-27
+# Replaces ac_ndlss_v0 (see AUDIT.md), which the setup audit flagged.
+# Parameters: CP-PAW parameters/stp.cntl entry AC_HBS_SC; projectors
+#   NPRO=2 2 1 1 (two per s/p/d channel: the recipe that removed
+#   the NiO incompleteness collapse, the dev notes 2026-09-27).
+#   NOTE: the replaced setup ac_ndlss_v0 was standard;
+#   this one is semicore (different ZV), because
+#   no clean setup of the original variant was found.
+# Checked: builds for an isolated atom (PBE) with no ghost state and no
+#   incompleteness warning. NOT yet validated in solids (lattice constants,
+#   cutoff convergence) unless stated in AUDIT.md.
+#
+  !SPECIES NAME='AC' NPRO=2 2 1 1 LRHOX=4 RAD/RCOV=1.2
+    !AUGMENT ID='AC_HBS_SC' EL='AC' ZV=11. TYPE='HBS'
+             RBOX/RCOV=1.2 RCSM/RCOV=0.25
+             RCL/RCOV= 0.5 0.5 0.5 0.5
+             LAMBDA= 6. 6. 6. 6.
+      !GRID DMIN=1.E-6 DMAX=0.1 RMAX=10. !END
+      !POT  POW=3. RC/RCOV=0.5 !END
+      !CORE POW=3. RC/RCOV=0.5 !END
+    !END
+  !END

@@ -1,0 +1,1155 @@
+#
+SHELL=/bin/sh
+#
+#########################################################################
+##                                                                     ##
+##  make a paw executable and a paw library using gmake                ##
+##  ===================================================                ##
+##                                                                     ##
+#########################################################################
+##                                                                     ##
+##  Primary targets:                                                   ##
+##                                                                     ##
+##  directory structure                                                ##
+##    @THISDIR@/bin/@ARCH@       executables                            ##
+##    @THISDIR@/bin/@ARCH@/none  objects with simple compiler flags     ##
+##    @THISDIR@/bin/@ARCH@/fast  optimized objects                      ##
+##    @THISDIR@/bin/@ARCH@/prof  objects for profiling                  ##
+##    @THISDIR@/bin/@ARCH@/dbg   objects for debugging                  ##
+##    @THISDIR@/src              sources for CP-PAW main code           ##
+##    @THISDIR@/tools        directory containing Tools             ##
+##    @THISDIR@/src/buildtools/F90PP directory preprocessor etc         ##
+##                                                                     ##
+#########################################################################
+## The following block of variables is set by the configure            ##
+## script (AC_SUBST @...@ and sed-Commands var...)                     ##
+#########################################################################
+#
+#___________________________ the hardware architecture
+export ARCH=@ARCH@
+#___________________________ root directory of the PAW distribution
+export THISDIR=@THISDIR@
+#___________________________ object type (none,fast,dbg,prof)
+export OBJTYPE=varOBJTYPE
+#___________________________ path to the source files
+export SRCDIR=${THISDIR}/src
+#___________________________ path to the object files
+export OBJDIR=${THISDIR}/bin/${ARCH}/Objects/${OBJTYPE}
+#___________________________ path to the binaries
+export BINDIR=${THISDIR}/bin/${ARCH}
+#___________________________ path to the tool-directory
+export TOOLDIR=${THISDIR}/tools
+#___________________________ directory with blas library
+export BLASDIR=@BLASDIR@
+#___________________________ directory with lapack library
+export LAPACKDIR=@LAPACKDIR@
+#___________________________ directory with fft library
+export FFTDIR=@FFTDIR@
+#___________________________ directory with MPI library
+export MPIDIR=@MPIDIR@
+#___________________________ library archiver
+export LIBAR=@LIBAR@
+#___________________________header file for fft
+export FFT_HEADER=@FFT_HEADER@
+#___________________________header file for MPI
+export MPI_HEADER=@MPI_HEADER@
+#___________________________special treatment
+export SPECIAL=@SPECIAL@
+#___________________________ set to T, if this is Makefile.parallel
+export PARALLEL=varPARALLEL
+#___________________________ Fortran90 compiler + compiler flags
+ifeq (${PARALLEL},T)
+  export COMPILE=@COMPILE_PARALLEL@
+  export LINK=@LINK_PARALLEL@
+  export LIBS=@LIBS_PARALLEL@
+  export F90PP=${BINDIR}/f90pp @CPPFLAGS@ -DCPPVARIABLE_PARALLEL
+else
+  export COMPILE=@COMPILE_SCALAR@
+  export LINK=@LINK_SCALAR@
+  export LIBS=@LIBS_SCALAR@
+  export F90PP=${BINDIR}/f90pp @CPPFLAGS@
+endif
+#___________________________ the PAW-binary (inclusive path)
+export PAWX=@PAWX@
+#___________________________ the extension of files to be compiled
+export FEXT=@FEXT@
+#___________________________ the GNU make utility
+export MAKE=@MAKE@
+#
+##########################################################################
+##  define parameters                                                   ##
+##########################################################################
+ifeq (${PARALLEL},T)   #select parallel versus scalar vespaw_mpelib.f90
+  export MODE=_p
+else
+  export MODE=_s
+endif
+ifeq (${SPECIAL},IBM)
+  export POE_PREFIX=poe
+  export POE_SUFFIX=-proc 1 -nodes 1 -rmpool 0
+else
+  export POE_PREFIX=
+  export POE_SUFFIX=
+endif
+#
+# out of the file src/vespaw_mpelib.f a parallel _p and
+# a sequential _s version are produced
+#
+export MPE = ${OBJDIR}/vespaw_mpelib$(MODE).o
+#
+##########################################################################
+##  include files                                                       ##
+##########################################################################
+#
+# fftw_f77.i is an include file for the FFTW-library
+# in case FFTW is linked, this file has to be copied into the
+# object directory
+#
+ifneq ($(strip ${FFT_HEADER}),)
+  # copy includefile into object directory.
+  # fftw_f77.i for fftw2 and fftw3.f03 for fftw3
+  # new name is uppercase to allow global uppercasing of fortran code
+  #  FFTWINCLUDE=cp ${FFT_HEADER} ${OBJDIR}/fftw_f77.i
+  FFTWINCLUDE=cp ${FFT_HEADER} ${OBJDIR}/
+else
+  # not there, just create an empty file
+  FFTWINCLUDE= touch ${OBJDIR}/fftw_f77.i
+endif
+#
+# mpif.h is an include file for the MPICH-library
+# for parallel compilation, this file has to be copied into
+# the object directory. Not needed for IBM environment
+# the include file is usually named mpif.f90
+#
+ifeq (${PARALLEL},T)   #select parallel versus scalar vespaw_mpelib.f90
+  ifneq ($(strip ${MPI_HEADER}),)
+    # copy includefile into object directory
+    MPIINCLUDE=cp ${MPI_HEADER} ${OBJDIR}/mpif.h
+  else
+    # not there, just create an empty file
+    MPIINCLUDE= touch ${OBJDIR}/mpif.h
+  endif
+else
+  # not needed, just create an empty file to fool dependencies
+  MPIINCLUDE= touch ${OBJDIR}/mpif.h
+endif
+#
+# vespaw_mpelib.f holds the subroutines necessary for parallel execution
+# of the code. Via preprocessor variables, this source is split up into
+# two files, one for parallel and one for sequential execution. ($MODE is
+# defined in the if-statement above)
+# libpaw.a holds the object files and can be linked to any code which
+# needs a PAW subroutine (leave the # after libpaw.a)
+# MPE   = ${OBJDIR}/vespaw_mpelib$(MODE).o
+export PAWLIB= ${OBJDIR}/libpaw.a#
+export PAWLIBFULL= ${OBJDIR}/libpawfull.a#
+export PPAWLIB= ${OBJDIR}/libppaw.a#
+export PPAWLIBFULL= ${OBJDIR}/libppawfull.a#
+#
+#########################################################################
+## Definition of the targets                                           ##
+#########################################################################
+default: ${PAWX}
+#
+clean:
+	find ${OBJDIR}/* -maxdepth 0 \! -name Makefile -exec rm {} \;
+	rm -f ${PAWX}
+	rm -rf ${BINDIR}/*_tests
+#
+##########################################################################
+##  define object files kept in the library                             ##
+##########################################################################
+#
+export LOBJSF77 = \
+	 ${OBJDIR}/slatec.o
+export LOBJS = \
+        ${OBJDIR}/vespaw_trace.o \
+        ${OBJDIR}/vespaw_error.o \
+        ${OBJDIR}/vespaw_filehandler.o \
+        ${OBJDIR}/vespaw_clock.o \
+        ${OBJDIR}/vespaw_lock.o \
+        ${OBJDIR}/vespaw_timing.o \
+        ${OBJDIR}/vespaw_linkedlist.o \
+        ${OBJDIR}/vespaw_strings.o \
+        ${OBJDIR}/vespaw_dft.o \
+        ${OBJDIR}/vespaw_dftaddendum.o \
+        ${OBJDIR}/vespaw_constants.o \
+        ${OBJDIR}/vespaw_spherical.o \
+        ${OBJDIR}/vespaw_generalpurpose.o \
+        ${OBJDIR}/vespaw_report.o \
+        ${OBJDIR}/vespaw_periodictable.o \
+        ${OBJDIR}/vespaw_radial.o \
+        ${OBJDIR}/vespaw_schroedinger.o \
+        ${OBJDIR}/vespaw_atomlib.o \
+        ${OBJDIR}/vespaw_specialfunctions.o \
+        ${OBJDIR}/vespaw_usage.o \
+        ${OBJDIR}/vespaw_selftest.o \
+        ${OBJDIR}/vespaw_strcio.o \
+        ${OBJDIR}/vespaw_cell.o \
+        ${OBJDIR}/vespaw_pdos.o \
+        ${OBJDIR}/vespaw_banddata.o \
+        ${OBJDIR}/vespaw_library.o \
+        ${OBJDIR}/vespaw_polynom.o \
+        ${OBJDIR}/vespaw_dimer.o  \
+        ${OBJDIR}/vespaw_lmtobasics.o \
+        ${OBJDIR}/vespaw_debug.o \
+        ${OBJDIR}/vespaw_brillouin.o \
+        ${OBJDIR}/vespaw_gaussian.o \
+        ${OBJDIR}/vespaw_protreport.o 
+#
+##########################################################################
+##  define other objects                                                ##
+##########################################################################
+#
+OBJECTS1 = \
+	    ${OBJDIR}/vespaw_driver.o \
+           ${OBJDIR}/vespaw_thermostat.o \
+           ${OBJDIR}/vespaw_isolate.o \
+           ${OBJDIR}/vespaw_assist.o \
+           ${OBJDIR}/vespaw_lists.o \
+           ${OBJDIR}/vespaw_constraints.o \
+           ${OBJDIR}/vespaw_lmto.o \
+           ${OBJDIR}/vespaw_scantau.o \
+           ${OBJDIR}/vespaw_scannsph.o \
+           ${OBJDIR}/vespaw_scankinden.o \
+           ${OBJDIR}/vespaw_dmft.o \
+           ${OBJDIR}/vespaw_edft.o \
+           ${OBJDIR}/vespaw_fft.o
+#
+OBJECTS2 = \
+           ${OBJDIR}/vespaw_augmentation.o \
+           ${OBJDIR}/vespaw_softcore.o \
+           ${OBJDIR}/vespaw_classical.o \
+           ${OBJDIR}/vespaw_forcefield.o \
+           ${OBJDIR}/vespaw_atoms.o \
+           ${OBJDIR}/vespaw.o \
+           ${OBJDIR}/vespaw_efg.o \
+           ${OBJDIR}/vespaw_ioroutines.o \
+           ${OBJDIR}/vespaw_iotra.o \
+           ${OBJDIR}/vespaw_ionew.o \
+           ${OBJDIR}/vespaw_qmmm.o \
+           ${OBJDIR}/vespaw_cosmo.o \
+           ${OBJDIR}/vespaw_warmup.o \
+           ${OBJDIR}/vespaw_optfric.o
+#  the following is for the QMMM of Woo and Margl
+#          ${OBJDIR}/mm_vespaw_modules.o \
+#          ${OBJDIR}/mm_vespaw_core_mm.o \
+#          ${OBJDIR}/mm_vespaw_interface.o
+#          ${OBJDIR}/vespaw_md
+#
+OBJECTS3 = \
+           ${OBJDIR}/vespaw_setups.o \
+           ${OBJDIR}/vespaw_potential.o \
+           ${OBJDIR}/vespaw_occupations.o \
+           ${OBJDIR}/vespaw_pairpotential.o \
+           ${OBJDIR}/vespaw_graphics.o \
+           ${OBJDIR}/vespaw_waves1.o \
+           ${OBJDIR}/vespaw_waves2.o \
+           ${OBJDIR}/vespaw_mixer.o \
+           ${OBJDIR}/vespaw_cg.o \
+           ${OBJDIR}/vespaw_kpoints.o \
+           ${OBJDIR}/vespaw_vext.o \
+           ${OBJDIR}/vespaw_onsite.o \
+           ${OBJDIR}/vespaw_vdw.o \
+           ${OBJDIR}/vespaw_ci.o \
+           ${OBJDIR}/vespaw_opteels.o \
+#           ${OBJDIR}/vespaw_localize.o  #removed
+#           ${OBJDIR}/vespaw_pdos.o  #into library
+#          ${OBJDIR}/vespaw_optic.o \   # removed
+#
+export OBJECTS= ${OBJECTS1} ${OBJECTS2} ${OBJECTS3}
+#
+# Object for version information
+export OBJVERSION = \
+	      ${OBJDIR}/vespaw_version.o
+#
+# Object for source blob
+export SRCBLOB = \
+	   ${OBJDIR}/vespaw_srcblob.o
+#
+#
+#
+# Definition of objects for the compilation of the PAW-tools
+#
+# Objects for test code
+OBJMURNAGHAN = \
+          ${OBJDIR}/vespaw_murnaghan.o
+OBJSTPA = \
+          ${OBJDIR}/vespaw_stpa.o
+OBJSTPREPORT = \
+          ${OBJDIR}/vespaw_stpreport.o
+OBJLATTICE = \
+          ${OBJDIR}/vespaw_lattice.o
+OBJTEST = \
+          ${OBJDIR}/vespaw_oneatom.o \
+          ${OBJDIR}/vespaw_test.o \
+          ${OBJDIR}/vespaw_testlib.o
+
+# Objects for atomic setup tool
+OBJNEWATOM = \
+          ${OBJDIR}/vespaw_newatom.o
+# Objects for atomic setup tool
+OBJATOM = \
+          ${OBJDIR}/vespaw_diffgl.o \
+          ${OBJDIR}/vespaw_oldradial.o \
+          ${OBJDIR}/vespaw_atom.o
+# Objects for vespaw_tra.x
+OBJTRA =  \
+          ${OBJDIR}/vespaw_tra.o
+# Objects for vespaw_wave.x
+OBJWAVE=  \
+          ${OBJDIR}/vespaw_wave.o
+# Objects for vespaw_1davpot.x
+OBJ1DAVPOT=  \
+          ${OBJDIR}/vespaw_1davpot.o
+# Objects for vespaw_cmcwave.x
+OBJCMCWAVE=  \
+          ${OBJDIR}/vespaw_cmcwave.o
+# Objects for vespaw_grab.x
+OBJGRAB=  \
+          ${OBJDIR}/vespaw_grab.o
+# Objects for vespaw_dos.x
+OBJDOS=  \
+          ${OBJDIR}/vespaw_dos.o
+# Objects for vespaw_dosplot.x
+OBJDOSPLOT=  \
+          ${OBJDIR}/vespaw_dosplot.o
+# Objects for vespaw_bands.x
+OBJBANDS=  \
+          ${OBJDIR}/vespaw_bands.o
+# Objects for vespaw_preopt.x
+OBJPRE=  \
+          ${OBJDIR}/vespaw_preopt.o
+# Objects for vespaw_converttra.x
+OBJCONVERTTRA=  \
+          ${OBJDIR}/vespaw_converttra.o
+# Objects for vespaw_cleantra.x
+OBJCLEANTRA=  \
+          ${OBJDIR}/vespaw_cleantra.o
+# Objects for vespaw_strc.x
+OBJSTRC=  \
+          ${OBJDIR}/vespaw_strc.o
+# Objects for vespaw_toxyz.x
+OBJTOXYZ=  \
+          ${OBJDIR}/vespaw_toxyz.o
+# Objects for vespaw_tostrc.x
+OBJTOSTRC=  \
+          ${OBJDIR}/vespaw_tostrc.o
+# Objects for vespaw_tostrc.x
+OBJPOLYHEDRA=  \
+          ${OBJDIR}/vespaw_polyhedra.o
+
+
+#########################################################################
+##  create preprocessor                                                ##
+#########################################################################
+f90pp: ${BINDIR}/f90pp_tmplts.x  ${OBJDIR}/version_writeparmfile.o
+${BINDIR}/f90pp_tmplts.x: ${SRCDIR}/buildtools/F90PP/f90pp_tmplts.f90
+	${F90PP} -notemplates ${SRCDIR}/buildtools/F90PP/f90pp_tmplts.f90 > ${OBJDIR}/f90pp_tmplts_d.${FEXT}
+	${COMPILE} -o ${OBJDIR}/f90pp_tmplts.o ${OBJDIR}/f90pp_tmplts_d.${FEXT}
+	${LINK} -o ${BINDIR}/f90pp_tmplts.x ${OBJDIR}/f90pp_tmplts.o ${LIBS}
+
+${OBJDIR}/version_writeparmfile.o: ${BINDIR}/parmfilewriter.x
+	cat ${THISDIR}/parms.in_use | ${POE_PREFIX} ${BINDIR}/parmfilewriter.x ${POE_SUFFIX} >  ${OBJDIR}/version_writeparmfile.${FEXT}
+	${F90PP} -notemplates ${OBJDIR}/version_writeparmfile.${FEXT}> ${OBJDIR}/version_writeparmfile_d.${FEXT}
+	${COMPILE} -o ${OBJDIR}/version_writeparmfile.o ${OBJDIR}/version_writeparmfile_d.${FEXT}
+
+${BINDIR}/parmfilewriter.x: ${SRCDIR}/buildtools/F90PP/parmfilewriter.f90
+	${F90PP} -notemplates ${SRCDIR}/buildtools/F90PP/parmfilewriter.f90 > ${OBJDIR}/parmfilewriter_d.${FEXT}
+	${COMPILE} -o ${OBJDIR}/parmfilewriter.o ${OBJDIR}/parmfilewriter_d.${FEXT}
+	${LINK} -o ${BINDIR}/parmfilewriter.x ${OBJDIR}/parmfilewriter.o ${LIBS}
+#
+#########################################################################
+##  link files and produce executable PAWX                             ##
+#########################################################################
+#
+${PAWX} : ${SRCBLOB} f90pp ${OBJDIR}/fftw_f77.i ${OBJDIR}/mpif.h ${LOBJS} ${LOBJSF77} \
+                ${OBJDIR}/version_writeparmfile.o \
+                ${OBJVERSION} ${OBJECTS} ${MPE}
+	${LINK} -o ${PAWX} ${OBJECTS} ${OBJVERSION} ${SRCBLOB} ${LOBJS} ${LOBJSF77} ${OBJDIR}/version_writeparmfile.o ${MPE} ${LIBS}
+#
+#########################################################################
+##  build paw library                                                  ##
+#########################################################################
+${PAWLIB}: f90pp ${LOBJS} ${LOBJSF77} ${MPE} ${OBJDIR}/version_writeparmfile.o ${OBJVERSION}
+	$(LIBAR) cru $(PAWLIB) $(LOBJS) $(LOBJSF77) ${OBJDIR}/vespaw_mpelib_s.o ${OBJDIR}/version_writeparmfile.o
+
+${PPAWLIB}: f90pp ${LOBJS} ${LOBJSF77} ${MPE} ${OBJDIR}/version_writeparmfile.o ${OBJVERSION}
+	$(LIBAR) cru $(PPAWLIB) $(LOBJS) $(LOBJSF77) ${OBJDIR}/vespaw_mpelib_p.o ${OBJDIR}/version_writeparmfile.o
+#
+#########################################################################
+##  build full paw library and optionally exclude objects              ##
+##  this target can be used to create a library of all objects         ##
+##  additionally on can exclude objects using the EXCLUDE parameter    ##
+##  for example: make libfull EXCLUDE="vespaw_classical.o vespaw_setups.o"   ##
+##  The object  vespaw.o will allways be excluded, because it contains a   ##
+##  main program.                                                      ##
+##  This library can then be linked to a main program, like libpaw.a   ##
+#########################################################################
+${PAWLIBFULL}: f90pp ${OBJECTS} ${SRCBLOB} ${LOBJS} ${LOBJSF77} ${MPE} ${OBJDIR}/version_writeparmfile.o ${OBJVERSION}
+	$(LIBAR) cru $(PAWLIBFULL) ${OBJECTS} ${OBJVERSION} ${SRCBLOB} $(LOBJS) $(LOBJSF77) ${OBJDIR}/vespaw_mpelib_s.o ${OBJDIR}/version_writeparmfile.o
+	$(LIBAR) -dv ${PAWLIBFULL} vespaw.o
+	for EX in ${EXCLUDE}; do ar -dv ${PAWLIBFULL} $$EX;done
+
+${PPAWLIBFULL}: f90pp ${OBJECTS} ${SRCBLOB} ${LOBJS} ${LOBJSF77} ${MPE} ${OBJDIR}/version_writeparmfile.o ${OBJVERSION}
+	$(LIBAR) cru $(PPAWLIBFULL) ${OBJECTS} ${OBJVERSION} ${SRCBLOB} $(LOBJS) $(LOBJSF77) ${OBJDIR}/vespaw_mpelib_p.o ${OBJDIR}/version_writeparmfile.o
+	$(LIBAR) -dv ${PPAWLIBFULL} vespaw.o
+	for EX in ${EXCLUDE}; do ar -dv ${PPAWLIBFULL} $$EX;done
+#
+#########################################################################
+##  build Tools                                                        ##
+#########################################################################
+#
+${BINDIR}/vespaw_murnaghan.x: ${OBJMURNAGHAN} ${PAWLIB}
+	${LINK} -o ${BINDIR}/vespaw_murnaghan.x ${OBJMURNAGHAN} -L${OBJDIR} -lpaw ${LIBS}
+#
+clean_murnaghan:
+	rm -f ${OBJMURNAGHAN} ${BINDIR}/vespaw_murnaghan.x
+#
+${BINDIR}/vespaw_stpreport.x: ${OBJSTPREPORT} ${PAWLIB} ${BINDIR}/vespaw_stpa.x
+	${LINK} -o ${BINDIR}/vespaw_stpreport.x ${OBJSTPREPORT} -L${OBJDIR} -lpaw ${LIBS}
+#
+clean_stpreport:
+	rm -f ${OBJSTPREPORT} ${BINDIR}/vespaw_stpreport.x
+#
+${BINDIR}/vespaw_stpa.x: ${OBJSTPA} ${PAWLIB} 
+	${LINK} -o ${BINDIR}/vespaw_stpa.x ${OBJSTPA} -L${OBJDIR} -lpaw ${LIBS}
+#
+clean_stpa:
+	rm -f ${OBJSTPA} ${BINDIR}/vespaw_stpa.x
+#
+${BINDIR}/vespaw_test.x: ${OBJTEST} ${PAWLIB} 
+	${LINK} -o ${BINDIR}/vespaw_test.x ${OBJTEST} -L${OBJDIR} -lpaw ${LIBS}
+#
+clean_test:
+	rm -f ${OBJTEST} ${BINDIR}/vespaw_test.x
+#
+${BINDIR}/vespaw_lattice.x: ${OBJLATTICE} ${PAWLIB} ${OBJDIR}/vespaw_setupread.o
+	${LINK} -o ${BINDIR}/vespaw_lattice.x ${OBJLATTICE} ${OBJDIR}/vespaw_setupread.o -L${OBJDIR} -lpaw ${LIBS}
+#
+clean_lattice:
+	rm -f ${OBJLATTICE} ${BINDIR}/vespaw_lattice.x
+#
+${BINDIR}/vespaw_newatom.x: ${OBJNEWATOM} ${PAWLIB} ${OBJDIR}/vespaw_setupread.o
+	${LINK} -o ${BINDIR}/vespaw_newatom.x ${OBJNEWATOM} ${OBJDIR}/vespaw_setupread.o -L${OBJDIR} -lpaw ${LIBS}
+#
+clean_newatom:
+	rm -f ${OBJNEWATOM} ${BINDIR}/vespaw_newatom.x
+#
+${BINDIR}/vespaw_atom.x: ${OBJATOM} ${PAWLIB}
+	${LINK} -o ${BINDIR}/vespaw_atom.x ${OBJATOM} -lpaw ${LIBS}
+#
+clean_atom:
+	rm -f ${OBJATOM}; rm -f ${BINDIR}/vespaw_atom.x
+#
+${BINDIR}/vespaw_tra.x: ${OBJTRA} ${PAWLIB}
+	${LINK} -o ${BINDIR}/vespaw_tra.x ${OBJTRA} ${OBJDIR}/vespaw_forcefield.o ${OBJDIR}/vespaw_classical.o -L${OBJDIR} -lpaw ${LIBS}
+#
+clean_tra:
+	rm -f ${OBJTRA}; rm -f ${BINDIR}/vespaw_tra.x
+#
+${BINDIR}/vespaw_wave.x: ${OBJWAVE} ${PAWLIB}
+	${LINK} -o ${BINDIR}/vespaw_wave.x ${OBJWAVE} -L${OBJDIR} -lpaw ${LIBS}
+#
+clean_wave:
+	rm -f ${OBJWAVE}; rm -f ${BINDIR}/vespaw_wave.x
+#
+${BINDIR}/vespaw_1davpot.x: ${OBJ1DAVPOT} ${PAWLIB}
+	${LINK} -o ${BINDIR}/vespaw_1davpot.x ${OBJ1DAVPOT} -L${OBJDIR} -lpaw ${LIBS}
+#
+clean_1davpot:
+	rm -f ${OBJ1DAVPOT}; rm -f ${BINDIR}/vespaw_1davpot.x
+#
+${BINDIR}/vespaw_cmcwave.x: ${OBJCMCWAVE} ${PAWLIB}
+	${LINK} -o ${BINDIR}/vespaw_cmcwave.x ${OBJCMCWAVE} -L${OBJDIR}  -lpaw ${LIBS}
+#
+clean_cmcwave:
+	rm -f ${OBJCMCWAVE}; rm -f ${BINDIR}/vespaw_cmcwave.x
+#
+${BINDIR}/vespaw_grab.x: ${OBJGRAB} ${PAWLIB}
+	${LINK} -o ${BINDIR}/vespaw_grab.x ${OBJGRAB} -L${OBJDIR}  -lpaw ${LIBS}
+#
+clean_grab:
+	rm -f ${OBJGRAB}; rm -f ${BINDIR}/vespaw_grab.x
+#
+${BINDIR}/vespaw_dos.x: ${OBJDOS} ${PAWLIB}
+	${LINK} -o ${BINDIR}/vespaw_dos.x ${OBJDOS} -L${OBJDIR}  -lpaw ${LIBS}
+#
+clean_dos:
+	rm -f ${OBJDOS}; rm -f ${BINDIR}/vespaw_dos.x
+#
+${BINDIR}/vespaw_dosplot.x: ${OBJDOSPLOT} ${PAWLIB}
+	${LINK} -o ${BINDIR}/vespaw_dosplot.x ${OBJDOSPLOT} -L${OBJDIR}  -lpaw ${LIBS}
+#
+clean_dosplot:
+	rm -f ${OBJDOSPLOT}; rm -f ${BINDIR}/vespaw_dosplot.x
+#
+${BINDIR}/vespaw_bands.x: ${OBJBANDS} ${PAWLIBFULL}
+	${LINK} -o ${BINDIR}/vespaw_bands.x ${OBJBANDS} -L${OBJDIR}  -lpawfull ${LIBS}
+#
+${BINDIR}/vespaw_bands_mpi.x: ${OBJBANDS} ${PPAWLIBFULL}
+	${LINK} -o ${BINDIR}/vespaw_bands_mpi.x ${OBJBANDS} -L${OBJDIR}  -lppawfull ${LIBS}
+#
+clean_bands:
+	rm -f ${OBJBANDS}; rm -f ${BINDIR}/vespaw_bands.x
+	rm -f ${OBJBANDS}; rm -f ${BINDIR}/vespaw_bands_mpi.x
+#
+${BINDIR}/vespaw_preopt.x: ${OBJPRE} ${PAWLIB}
+	${LINK} -o ${BINDIR}/vespaw_preopt.x ${OBJPRE}  ${OBJDIR}/vespaw_forcefield.o ${OBJDIR}/vespaw_classical.o -L${OBJDIR}  -lpaw ${LIBS}
+#
+clean_preopt:
+	rm -f ${OBJPRE}; rm -f ${BINDIR}/vespaw_preopt.x
+#
+${BINDIR}/vespaw_converttra.x: ${OBJCONVERTTRA} ${PAWLIB}
+	${LINK} -o ${BINDIR}/vespaw_converttra.x ${OBJCONVERTTRA} -L${OBJDIR}  -lpaw ${LIBS}
+#
+clean_converttra:
+	rm -f ${OBJCONVERTTRA}; rm -f ${BINDIR}/vespaw_converttra.x
+#
+${BINDIR}/vespaw_cleantra.x: ${OBJCLEANTRA} ${PAWLIB}
+	${LINK} -o ${BINDIR}/vespaw_cleantra.x ${OBJCLEANTRA} -L${OBJDIR}  -lpaw ${LIBS}
+#
+clean_cleantra:
+	rm -f ${OBJCLEANTRA}; rm -f ${BINDIR}/vespaw_cleantra.x
+#
+${BINDIR}/vespaw_strc.x: ${OBJSTRC} ${PAWLIB}
+	${LINK} -o ${BINDIR}/vespaw_strc.x ${OBJSTRC} -L${OBJDIR} -lpaw ${LIBS}
+#
+clean_strc:
+	rm -f ${OBJSTRC}; rm -f ${BINDIR}/vespaw_strc.x
+#
+${BINDIR}/vespaw_toxyz.x: ${OBJTOXYZ} ${PAWLIB}
+	${LINK} -o ${BINDIR}/vespaw_toxyz.x ${OBJTOXYZ} -L${OBJDIR} -lpaw ${LIBS}
+#
+clean_toxyz:
+	rm -f ${OBJTOXYZ}; rm -f ${BINDIR}/vespaw_toxyz.x
+#
+${BINDIR}/vespaw_tostrc.x: ${OBJTOSTRC} ${PAWLIB}
+	${LINK} -o ${BINDIR}/vespaw_tostrc.x ${OBJTOSTRC} -L${OBJDIR} -lpaw ${LIBS}
+#
+clean_tostrc:
+	rm -f ${OBJTOSTRC}; rm -f ${BINDIR}/vespaw_tostrc.x
+#
+${BINDIR}/vespaw_polyhedra.x: ${OBJPOLYHEDRA} ${PAWLIB}
+	${LINK} -o ${BINDIR}/vespaw_polyhedra.x ${OBJPOLYHEDRA} -L${OBJDIR} -lpaw ${LIBS}
+#
+clean_polyhedra:
+	rm -f ${OBJPOLYHEDRA}; rm -f ${BINDIR}/vespaw_polyhedra.x
+#
+# copy include files if necessary (controlled by if-statements above)
+#
+${OBJDIR}/fftw_f77.i:
+	${FFTWINCLUDE}
+#
+${OBJDIR}/mpif.h:
+	${MPIINCLUDE}
+#
+#########################################################################
+##  execute tests                                                      ##
+#########################################################################
+#
+tests: ${PAWX} varOBJTYPE_tests
+varOBJTYPE_tests: ${PAWX} 
+	rm -rf ${BINDIR}/varOBJTYPE_tests;cp -r ${THISDIR}/tests ${BINDIR}/varOBJTYPE_tests;cd ${BINDIR}/varOBJTYPE_tests;${MAKE} all
+#
+#${OBJDIR}/mm_vespaw_f77.o
+#########################################################################
+##  compile code files independent of parameter                        ##
+##  and place the objects in OBJDIR                                    ##
+#########################################################################
+.PHONY: ${OBJVERSION} ${SRCBLOB}
+#
+#__special rule for parallel interface because of preprocessor___________
+${MPE} : ${OBJDIR}/%$(MODE).o: ${SRCDIR}/%.f90 ${OBJDIR}/mpif.h
+	${F90PP} $< >${OBJDIR}/$*$(MODE)_d.${FEXT}
+	${COMPILE} -o $@ ${OBJDIR}/$*$(MODE)_d.${FEXT}
+#
+# generate version information __________________________________________
+$(OBJVERSION): ${OBJDIR}/%.o: ${SRCDIR}/%.f90 
+	${F90PP} $< >${OBJDIR}/$*_d.${FEXT}
+	bash ${SRCDIR}/buildtools/Version/getversion.sh ${OBJDIR}/$*_d.${FEXT}
+	${COMPILE} -o $@ ${OBJDIR}/$*_d.${FEXT}
+#
+# generate source blob __________________________________________________
+${SRCBLOB}:
+	rm -f vespaw_srcblob vespaw_srcblob.o
+	tar -czf vespaw_srcblob ${SRCDIR} ${THISDIR}/parms.in_use
+ifeq ($(shell uname -s),Linux) 
+	ld -r -b binary -o vespaw_srcblob.o vespaw_srcblob
+endif
+ifeq ($(shell uname -s),Darwin)
+	touch vespaw_srcblob_dummy.f90
+	${COMPILE} -o vespaw_srcblob_dummy.o vespaw_srcblob_dummy.f90
+	ld -r -o vespaw_srcblob.o -sectcreate binary pawsrcblob_bin vespaw_srcblob vespaw_srcblob_dummy.o
+endif
+#
+#__general rule for object files_________________________________________
+$(OBJECTS) $(LOBJS): ${OBJDIR}/%.o: ${SRCDIR}/%.f90
+	${F90PP} $< >${OBJDIR}/$*_d.${FEXT}
+	${COMPILE} -o $@ ${OBJDIR}/$*_d.${FEXT}
+#
+#__vespaw_scantau.f90 needs -notemplates: f90pp_tmplts.x segfaults on it for__
+#__an unidentified reason (no actual F90PP template syntax is used in it,_
+#__so -notemplates is a legitimate workaround, not a skip of real work)___
+#__-- see SCAN0r notes
+${OBJDIR}/vespaw_scantau.o: ${SRCDIR}/vespaw_scantau.f90
+	${F90PP} -notemplates $< >${OBJDIR}/vespaw_scantau_d.${FEXT}
+	${COMPILE} -o $@ ${OBJDIR}/vespaw_scantau_d.${FEXT}
+#
+#__vespaw_scannsph.f90 needs -notemplates too, same reason as vespaw_scantau.f90_
+${OBJDIR}/vespaw_scannsph.o: ${SRCDIR}/vespaw_scannsph.f90
+	${F90PP} -notemplates $< >${OBJDIR}/vespaw_scannsph_d.${FEXT}
+	${COMPILE} -o $@ ${OBJDIR}/vespaw_scannsph_d.${FEXT}
+#__vespaw_scankinden.f90 needs -notemplates too, same reason as vespaw_scantau.f90_
+${OBJDIR}/vespaw_scankinden.o: ${SRCDIR}/vespaw_scankinden.f90
+	${F90PP} -notemplates $< >${OBJDIR}/vespaw_scankinden_d.${FEXT}
+	${COMPILE} -o $@ ${OBJDIR}/vespaw_scankinden_d.${FEXT}
+#__vespaw_edft.f90 needs -notemplates too, same reason as vespaw_scantau.f90 --_
+#__confirmed 2026-09-06 to segfault f90pp_tmplts.x even at the file's state___
+#__before that day's EDFT$HAUXSTEP_MVPEXACT addition, so this is not caused___
+#__by any specific subroutine, just the file having grown past whatever_______
+#__triggers the same unidentified template-expander issue as the three above_
+${OBJDIR}/vespaw_edft.o: ${SRCDIR}/vespaw_edft.f90
+	${F90PP} -notemplates $< >${OBJDIR}/vespaw_edft_d.${FEXT}
+	${COMPILE} -o $@ ${OBJDIR}/vespaw_edft_d.${FEXT}
+#
+#__general rule for object files fortran 77______________________________
+$(LOBJSF77): ${OBJDIR}/%.o: ${SRCDIR}/%.f
+	cp $< ${OBJDIR}/$*_d.f
+	$(COMPILE:-fimplicit-none=) -o $@ ${OBJDIR}/$*_d.f
+	#${COMPILE} -o $@ ${OBJDIR}/$*_d.f
+#
+#__compile the tools____________________________________________________
+#
+${OBJMURNAGHAN}: ${OBJDIR}/%.o : ${TOOLDIR}/Murnaghan/%.f90
+#	${F90PP} $< >${OBJDIR}/$*_d.${FEXT}
+	echo doing murnaghan
+	cp $< ${OBJDIR}/$*_d.${FEXT}
+	${COMPILE} -o $@ ${OBJDIR}/$*_d.${FEXT}
+#
+${OBJSTPREPORT}: ${OBJDIR}/%.o : ${TOOLDIR}/Stpa/%.f90
+#	${F90PP} $< >${OBJDIR}/$*_d.${FEXT}
+	cp $< ${OBJDIR}/$*_d.${FEXT}
+	${COMPILE} -o $@ ${OBJDIR}/$*_d.${FEXT}
+#
+${OBJSTPA}: ${OBJDIR}/%.o : ${TOOLDIR}/Stpa/%.f90
+	${F90PP} $< >${OBJDIR}/$*_d.${FEXT}
+	${COMPILE} -o $@ ${OBJDIR}/$*_d.${FEXT}
+#
+${OBJTEST}: ${OBJDIR}/%.o : ${TOOLDIR}/Test/%.f90
+	${F90PP} $< >${OBJDIR}/$*_d.${FEXT}
+	${COMPILE} -o $@ ${OBJDIR}/$*_d.${FEXT}
+#
+${OBJLATTICE}: ${OBJDIR}/%.o : ${TOOLDIR}/Atomnew/%.f90
+	${F90PP} $< >${OBJDIR}/$*_d.${FEXT}
+	${COMPILE} -o $@ ${OBJDIR}/$*_d.${FEXT}
+#
+${OBJNEWATOM}: ${OBJDIR}/%.o : ${TOOLDIR}/Atomnew/%.f90
+	${F90PP} $< >${OBJDIR}/$*_d.${FEXT}
+	${COMPILE} -o $@ ${OBJDIR}/$*_d.${FEXT}
+#
+${OBJATOM}: ${OBJDIR}/%.o : ${TOOLDIR}/Atom/%.f90
+	${F90PP} $< >${OBJDIR}/$*_d.${FEXT}
+	${COMPILE} -o $@ ${OBJDIR}/$*_d.${FEXT}
+#
+${OBJTRA}: ${OBJDIR}/%.o : ${TOOLDIR}/Tra/%.f90
+	${F90PP} $< >${OBJDIR}/$*_d.${FEXT}
+	${COMPILE} -o $@ ${OBJDIR}/$*_d.${FEXT}
+#
+${OBJWAVE}: ${OBJDIR}/%.o : ${TOOLDIR}/Wave/%.f90
+	${F90PP} $< >${OBJDIR}/$*_d.${FEXT}
+	${COMPILE} -o $@ ${OBJDIR}/$*_d.${FEXT}
+#
+${OBJ1DAVPOT}: ${OBJDIR}/%.o : ${TOOLDIR}/Wave/%.f90
+	${F90PP} $< >${OBJDIR}/$*_d.${FEXT}
+	${COMPILE} -o $@ ${OBJDIR}/$*_d.${FEXT}
+#
+${OBJCMCWAVE}: ${OBJDIR}/%.o : ${TOOLDIR}/Wave/%.f90
+	${F90PP} $< >${OBJDIR}/$*_d.${FEXT}
+	${COMPILE} -o $@ ${OBJDIR}/$*_d.${FEXT}
+#
+${OBJGRAB}: ${OBJDIR}/%.o : ${TOOLDIR}/Grab/%.f90
+	${F90PP} $< >${OBJDIR}/$*_d.${FEXT}
+	${COMPILE} -o $@ ${OBJDIR}/$*_d.${FEXT}
+#
+${OBJDOS}: ${OBJDIR}/%.o : ${TOOLDIR}/PDoS/%.f90
+	${F90PP} $< >${OBJDIR}/$*_d.${FEXT}
+	${COMPILE} -o $@ ${OBJDIR}/$*_d.${FEXT}
+#
+${OBJDOSPLOT}: ${OBJDIR}/%.o : ${TOOLDIR}/PDoS/%.f90
+	${F90PP} $< >${OBJDIR}/$*_d.${FEXT}
+	${COMPILE} -o $@ ${OBJDIR}/$*_d.${FEXT}
+#
+${OBJBANDS}: ${OBJDIR}/%.o : ${TOOLDIR}/Bands/%.f90
+	${F90PP} $< >${OBJDIR}/$*_d.${FEXT}
+	${COMPILE} -o $@ ${OBJDIR}/$*_d.${FEXT}
+#
+${OBJPRE}: ${OBJDIR}/%.o : ${TOOLDIR}/Preopt/%.f90
+	${F90PP} $< >${OBJDIR}/$*_d.${FEXT}
+	${COMPILE} -o $@ ${OBJDIR}/$*_d.${FEXT}
+#
+${OBJCONVERTTRA}: ${OBJDIR}/%.o : ${TOOLDIR}/Tra/%.f90
+	${F90PP} $< >${OBJDIR}/$*_d.${FEXT}
+	${COMPILE} -o $@ ${OBJDIR}/$*_d.${FEXT}
+#
+${OBJCLEANTRA}: ${OBJDIR}/%.o : ${TOOLDIR}/Tra/%.f90
+	${F90PP} $< >${OBJDIR}/$*_d.${FEXT}
+	${COMPILE} -o $@ ${OBJDIR}/$*_d.${FEXT}
+#
+${OBJSTRC}: ${OBJDIR}/%.o : ${TOOLDIR}/Strc/%.f90
+	${F90PP} $< >${OBJDIR}/$*_d.${FEXT}
+	${COMPILE} -o $@ ${OBJDIR}/$*_d.${FEXT}
+#
+${OBJTOXYZ}: ${OBJDIR}/%.o : ${TOOLDIR}/Strc/%.f90
+	${F90PP} $< >${OBJDIR}/$*_d.${FEXT}
+	${COMPILE} -o $@ ${OBJDIR}/$*_d.${FEXT}
+#
+${OBJTOSTRC}: ${OBJDIR}/%.o : ${TOOLDIR}/Strc/%.f90
+	${F90PP} $< >${OBJDIR}/$*_d.${FEXT}
+	${COMPILE} -o $@ ${OBJDIR}/$*_d.${FEXT}
+#
+${OBJPOLYHEDRA}: ${OBJDIR}/%.o : ${TOOLDIR}/Polyhedra/%.f90
+	${F90PP} $< >${OBJDIR}/$*_d.${FEXT}
+	${COMPILE} -o $@ ${OBJDIR}/$*_d.${FEXT}
+#########################################################################
+##  include dependencies through mod files                             ##
+#########################################################################
+ifeq ($(ALLDEP),T)
+ ${OBJDIR}/vespaw_filehandler.o:   ${OBJDIR}/vespaw_strings.o
+ ${OBJDIR}/vespaw_linkedlist.o:    ${OBJDIR}/vespaw_strings.o
+ ${OBJDIR}/vespaw_periodictable.o: ${OBJDIR}/vespaw_strings.o
+ ${OBJDIR}/vespaw_ioroutines.o:    ${OBJDIR}/vespaw_strings.o
+ ${OBJDIR}/vespaw_trace.o:         ${OBJDIR}/vespaw_strings.o
+#
+ ${OBJDIR}/vespaw_timing.o:        ${OBJDIR}/vespaw_mpelib${MODE}.o
+ ${OBJDIR}/vespaw_linkedlist.o:    ${OBJDIR}/vespaw_mpelib${MODE}.o
+ ${OBJDIR}/vespaw_report.o:        ${OBJDIR}/vespaw_mpelib${MODE}.o
+ ${OBJDIR}/vespaw_waves1.o:        ${OBJDIR}/vespaw_mpelib${MODE}.o
+ ${OBJDIR}/vespaw_waves2.o:        ${OBJDIR}/vespaw_mpelib${MODE}.o
+ ${OBJDIR}/vespaw_augmentation.o:  ${OBJDIR}/vespaw_mpelib${MODE}.o
+ ${OBJDIR}/vespaw.o:               ${OBJDIR}/vespaw_mpelib${MODE}.o
+ ${OBJDIR}/vespaw_constraints.o:   ${OBJDIR}/vespaw_mpelib${MODE}.o
+ ${OBJDIR}/vespaw_potential.o:     ${OBJDIR}/vespaw_mpelib${MODE}.o
+ ${OBJDIR}/vespaw_pairpotential.o: ${OBJDIR}/vespaw_mpelib${MODE}.o
+ ${OBJDIR}/vespaw_isolate.o:       ${OBJDIR}/vespaw_mpelib${MODE}.o
+ ${OBJDIR}/vespaw_qmmm.o:          ${OBJDIR}/vespaw_mpelib${MODE}.o
+ ${OBJDIR}/vespaw_thermostat.o:    ${OBJDIR}/vespaw_mpelib${MODE}.o
+ ${OBJDIR}/vespaw_occupations.o:   ${OBJDIR}/vespaw_mpelib${MODE}.o
+ ${OBJDIR}/vespaw_ionew.o:         ${OBJDIR}/vespaw_mpelib${MODE}.o
+ ${OBJDIR}/vespaw_atoms.o:         ${OBJDIR}/vespaw_mpelib${MODE}.o
+ ${OBJDIR}/vespaw_classical.o:     ${OBJDIR}/vespaw_mpelib${MODE}.o
+ ${OBJDIR}/vespaw_thermostat.o:    ${OBJDIR}/vespaw_mpelib${MODE}.o
+ ${OBJDIR}/vespaw_debug.o:         ${OBJDIR}/vespaw_mpelib${MODE}.o
+ ${OBJDIR}/vespaw_debug.o:          ${OBJDIR}/vespaw_waves1.o
+ ${OBJDIR}/vespaw_debug.o:          ${OBJDIR}/vespaw_waves2.o
+
+ ${OBJDIR}/vespaw_dimer.o:         ${OBJDIR}/vespaw_mpelib${MODE}.o
+
+
+ ${OBJDIR}/vespaw_ioroutines.o:    ${OBJDIR}/vespaw_periodictable.o
+ ${OBJDIR}/vespaw_atomlib.o:       ${OBJDIR}/vespaw_periodictable.o
+ ${OBJDIR}/vespaw_schroedinger.o:  ${OBJDIR}/vespaw_periodictable.o
+
+ ${OBJDIR}/vespaw_ioroutines.o:    ${OBJDIR}/vespaw_linkedlist.o
+ ${OBJDIR}/vespaw_constraints.o:   ${OBJDIR}/vespaw_linkedlist.o
+ ${OBJDIR}/vespaw_occupations.o:   ${OBJDIR}/vespaw_linkedlist.o
+ ${OBJDIR}/vespaw_waves1.o:        ${OBJDIR}/vespaw_linkedlist.o
+ ${OBJDIR}/vespaw_waves2.o:        ${OBJDIR}/vespaw_linkedlist.o
+ ${OBJDIR}/vespaw_efg.o:           ${OBJDIR}/vespaw_linkedlist.o
+ ${OBJDIR}/vespaw_setups.o:        ${OBJDIR}/vespaw_linkedlist.o
+
+ ${OBJDIR}/vespaw_atoms.o:         ${OBJDIR}/vespaw_report.o
+ ${OBJDIR}/vespaw_ionew.o:         ${OBJDIR}/vespaw_report.o
+ ${OBJDIR}/vespaw_occupations.o:   ${OBJDIR}/vespaw_report.o
+ ${OBJDIR}/vespaw_qmmm.o:          ${OBJDIR}/vespaw_report.o
+ ${OBJDIR}/vespaw_classical.o:     ${OBJDIR}/vespaw_report.o
+ ${OBJDIR}/vespaw_thermostat.o:    ${OBJDIR}/vespaw_report.o
+
+ ${OBJDIR}/vespaw_ioroutines.o:    ${OBJDIR}/vespaw_clock.o
+ ${OBJDIR}/vespaw_ionew.o:         ${OBJDIR}/vespaw_waves1.o
+ ${OBJDIR}/vespaw_ionew.o:         ${OBJDIR}/vespaw_waves2.o
+
+ ${OBJDIR}/vespaw_waves2.o:        ${OBJDIR}/vespaw_waves1.o
+
+ ${OBJDIR}/vespaw_cg.o:               ${OBJDIR}/vespaw_waves1.o
+
+ ${OBJDIR}/vespaw_ioroutines.o:    ${OBJDIR}/vespaw_forcefield.o
+# ${OBJDIR}/vespaw_optic.o:		${OBJDIR}/vespaw_fft.o
+# ${OBJDIR}/vespaw_optic.o:		${OBJDIR}/vespaw_waves.o
+ ${OBJDIR}/vespaw_qmmm.o:          ${OBJDIR}/vespaw_report.o
+
+ ${OBJDIR}/vespaw_dmft.o:          ${OBJDIR}/vespaw_lmto.o
+ ${OBJDIR}/vespaw_dmft.o:          ${OBJDIR}/vespaw_waves1.o
+
+ ${OBJDIR}/vespaw_library.o:      ${OBJDIR}/fftw_f77.i
+endif
+##########################################################################
+#   machine-generated dependencies
+#
+#   the dependencies are generated by the shell script "finddep"
+#   which must be run in the directory where it lies (src/buildtools/F90PP)
+#   the resulting file "dependencies" in that directory is copied here...
+###########################################################################
+ ## file:src/vespaw_assist.f90
+ DIALS_MODULE.mod : ${OBJDIR}/vespaw_assist.o
+ AUTOPILOT_MODULE.mod : ${OBJDIR}/vespaw_assist.o
+ ## file:src/vespaw_atomlib.f90
+ ${OBJDIR}/vespaw_atomlib.o : PERIODICTABLE_MODULE.mod
+ ## file:src/vespaw_atoms.f90
+ ${OBJDIR}/vespaw_atoms.o : MPE_MODULE.mod
+ ${OBJDIR}/vespaw_atoms.o : RESTART_INTERFACE.mod
+ ATOMS_MODULE.mod : ${OBJDIR}/vespaw_atoms.o
+ ## file:src/vespaw_augmentation.f90
+ ${OBJDIR}/vespaw_augmentation.o : MPE_MODULE.mod
+ AUGMENTATION_MODULE.mod : ${OBJDIR}/vespaw_augmentation.o
+ EXPERTNAL1CPOT_MODULE.mod : ${OBJDIR}/vespaw_augmentation.o
+ SCAN_X_MODULE.mod : ${OBJDIR}/vespaw_augmentation.o
+ SCAN_C_MODULE.mod : ${OBJDIR}/vespaw_augmentation.o
+ DEORB_ALPHA_MODULE.mod : ${OBJDIR}/vespaw_augmentation.o
+ ## file:src/vespaw_scantau.f90 (special -notemplates rule above; deps not auto-scanned)
+ ${OBJDIR}/vespaw_scantau.o : SCAN_X_MODULE.mod
+ ${OBJDIR}/vespaw_scantau.o : SCAN_C_MODULE.mod
+ ${OBJDIR}/vespaw_scantau.o : DEORB_ALPHA_MODULE.mod
+ ## file:src/vespaw_scannsph.f90 (special -notemplates rule above; deps not auto-scanned)
+ ${OBJDIR}/vespaw_scannsph.o : SCAN_X_MODULE.mod
+ ${OBJDIR}/vespaw_scannsph.o : SCAN_C_MODULE.mod
+ ${OBJDIR}/vespaw_scannsph.o : DEORB_ALPHA_MODULE.mod
+ NSPH_SCAN_MODULE.mod :  ${OBJDIR}/vespaw_scannsph.o
+ ## file:src/vespaw_brillouin.f90
+ BRILLOUIN_MODULE.mod : ${OBJDIR}/vespaw_brillouin.o
+ ## file:src/vespaw_cell.f90
+ ${OBJDIR}/vespaw_cell.o : RESTART_INTERFACE.mod
+ ${OBJDIR}/vespaw_cell.o : MPE_MODULE.mod
+ CELL_MODULE.mod : ${OBJDIR}/vespaw_cell.o
+ ## file:src/vespaw_cg.f90
+ ${OBJDIR}/vespaw_cg.o : WAVES_MODULE.mod
+ ${OBJDIR}/vespaw_cg.o : MPE_MODULE.mod
+ CG_INTERFACE_MODULE.mod : ${OBJDIR}/vespaw_cg.o
+ ## file:src/vespaw_classical.f90
+ ${OBJDIR}/vespaw_classical.o : MPE_MODULE.mod
+ ${OBJDIR}/vespaw_classical.o : PERIODICTABLE_MODULE.mod
+ CLASSICAL_MODULE.mod : ${OBJDIR}/vespaw_classical.o
+ UFFTABLE_MODULE.mod : ${OBJDIR}/vespaw_classical.o
+ ## file:src/vespaw_clock.f90
+ CLOCK_MODULE.mod : ${OBJDIR}/vespaw_clock.o
+ ## file:src/vespaw_constants.f90
+ CONSTANTS_MODULE.mod : ${OBJDIR}/vespaw_constants.o
+ ## file:src/vespaw_constraints.f90
+ ${OBJDIR}/vespaw_constraints.o : LINKEDLIST_MODULE.mod
+ ${OBJDIR}/vespaw_constraints.o : MPE_MODULE.mod
+ CONSTRAINTS_MODULE.mod : ${OBJDIR}/vespaw_constraints.o
+ SYMMETRIZE_MODULE.mod : ${OBJDIR}/vespaw_constraints.o
+ ## file:src/vespaw_cosmo.f90
+ ${OBJDIR}/vespaw_cosmo.o : RESTART_INTERFACE.mod
+ ${OBJDIR}/vespaw_cosmo.o : MPE_MODULE.mod
+ ${OBJDIR}/vespaw_cosmo.o : PERIODICTABLE_MODULE.mod
+ COSMO_MODULE.mod : ${OBJDIR}/vespaw_cosmo.o
+ ## file:src/vespaw_debug.f90
+ ${OBJDIR}/vespaw_debug.o : MPE_MODULE.mod
+ ${OBJDIR}/vespaw_debug.o : WAVES_MODULE.mod
+ DEBUG_MODULE.mod : ${OBJDIR}/vespaw_debug.o
+ ## file:src/vespaw_dftaddendum.f90
+ NEWDFT_MODULE.mod : ${OBJDIR}/vespaw_dftaddendum.o
+ ## file:src/vespaw_dft.f90
+ DFT_MODULE.mod : ${OBJDIR}/vespaw_dft.o
+ TABLE1D_MODULE.mod : ${OBJDIR}/vespaw_dft.o
+ EXCHANGE_MODULE.mod : ${OBJDIR}/vespaw_dft.o
+ PERDEWZUNGER_MODULE.mod : ${OBJDIR}/vespaw_dft.o
+ BARTHHEDIN_MODULE.mod : ${OBJDIR}/vespaw_dft.o
+ PERDEW_MODULE.mod : ${OBJDIR}/vespaw_dft.o
+ PERDEWWANG91L_MODULE.mod : ${OBJDIR}/vespaw_dft.o
+ PERDEWWANG91G_MODULE.mod : ${OBJDIR}/vespaw_dft.o
+ PBE_MODULE.mod : ${OBJDIR}/vespaw_dft.o
+ LYP88_MODULE.mod : ${OBJDIR}/vespaw_dft.o
+ ## file:src/vespaw_dimer.f90
+ ${OBJDIR}/vespaw_dimer.o : STRINGS_MODULE.mod
+ ${OBJDIR}/vespaw_dimer.o : MPE_MODULE.mod
+ DIMER_MODULE.mod : ${OBJDIR}/vespaw_dimer.o
+ DIMER_OSCILLATOR_MODULE.mod : ${OBJDIR}/vespaw_dimer.o
+ ## file:src/vespaw_efg.f90
+ ${OBJDIR}/vespaw_efg.o : LINKEDLIST_MODULE.mod
+ ${OBJDIR}/vespaw_efg.o : MPE_MODULE.mod
+ HYPERFINE_MODULE.mod : ${OBJDIR}/vespaw_efg.o
+ ## file:src/vespaw_error.f90
+ ERROR_MODULE.mod : ${OBJDIR}/vespaw_error.o
+ ## file:src/vespaw_extpot.f90
+ ## file:src/vespaw.f90
+ ${OBJDIR}/vespaw.o : CLOCK_MODULE.mod
+ ${OBJDIR}/vespaw.o : MPE_MODULE.mod
+ VERSION_MODULE.mod : ${OBJDIR}/vespaw_version.o
+ TIMESTEP_MODULE.mod : ${OBJDIR}/vespaw.o
+ STOPIT_MODULE.mod : ${OBJDIR}/vespaw.o
+ ## file:src/vespaw_fft.f90
+ ${OBJDIR}/vespaw_fft.o : MPE_MODULE.mod
+ PLANEWAVE_MODULE.mod : ${OBJDIR}/vespaw_fft.o
+ ## file:src/vespaw_filehandler.f90
+ ${OBJDIR}/vespaw_filehandler.o : STRINGS_MODULE.mod
+ FILEHANDLER_MODULE.mod : ${OBJDIR}/vespaw_filehandler.o
+ ## file:src/vespaw_forcefield.f90
+ ${OBJDIR}/vespaw_forcefield.o : STRINGS_MODULE.mod
+ ${OBJDIR}/vespaw_forcefield.o : LINKEDLIST_MODULE.mod
+ ${OBJDIR}/vespaw_forcefield.o : CLASSICAL_MODULE.mod
+ FORCEFIELD_MODULE.mod : ${OBJDIR}/vespaw_forcefield.o
+ ## file:src/vespaw_generalpurpose.f90
+ SORT_MODULE.mod : ${OBJDIR}/vespaw_generalpurpose.o
+ ## file:src/vespaw_graphics.f90
+ ${OBJDIR}/vespaw_graphics.o : MPE_MODULE.mod
+ GRAPHICS_MODULE.mod : ${OBJDIR}/vespaw_graphics.o
+ ## file:src/vespaw_ionew.f90
+ ${OBJDIR}/vespaw_ionew.o : RESTART_INTERFACE.mod
+ ${OBJDIR}/vespaw_ionew.o : MPE_MODULE.mod
+ ${OBJDIR}/vespaw_ionew.o : STRINGS_MODULE.mod
+ ${OBJDIR}/vespaw_ionew.o : TIMESTEP_MODULE.mod
+ ## file:src/vespaw_ioroutines.f90
+ ${OBJDIR}/vespaw_ioroutines.o : LINKEDLIST_MODULE.mod
+ ${OBJDIR}/vespaw_ioroutines.o : CLOCK_MODULE.mod
+ ${OBJDIR}/vespaw_ioroutines.o : VERSION_MODULE.mod
+ ${OBJDIR}/vespaw_ioroutines.o : STRINGS_MODULE.mod
+ ${OBJDIR}/vespaw_ioroutines.o : MPE_MODULE.mod
+ ${OBJDIR}/vespaw_ioroutines.o : PERIODICTABLE_MODULE.mod
+ ${OBJDIR}/vespaw_ioroutines.o : FORCEFIELD_MODULE.mod
+ IO_MODULE.mod : ${OBJDIR}/vespaw_ioroutines.o
+ ## file:src/vespaw_iotra.f90
+ TRAJECTORYIO_MODULE.mod : ${OBJDIR}/vespaw_iotra.o
+ ## file:src/vespaw_isolate.f90
+ ${OBJDIR}/vespaw_isolate.o : MPE_MODULE.mod
+ ISOLATE_MODULE.mod : ${OBJDIR}/vespaw_isolate.o
+ ## file:src/vespaw_kpoints.f90
+ ## file:src/vespaw_ci.f90
+ CI_MODULE.mod : ${OBJDIR}/vespaw_ci.o
+ ## file:src/vespaw_library.f90
+ RANDOM_MODULE.mod : ${OBJDIR}/vespaw_library.o
+ ## file:src/vespaw_linkedlist.f90
+ ${OBJDIR}/vespaw_linkedlist.o : STRINGS_MODULE.mod
+ ${OBJDIR}/vespaw_linkedlist.o : MPE_MODULE.mod
+ LLIST_MODULE.mod : ${OBJDIR}/vespaw_linkedlist.o
+ LINKEDLIST_MODULE.mod : ${OBJDIR}/vespaw_linkedlist.o
+ BUFFER_MODULE.mod : ${OBJDIR}/vespaw_linkedlist.o
+ ## file:src/vespaw_lists.f90
+ ENERGYLIST_MODULE.mod : ${OBJDIR}/vespaw_lists.o
+ GROUPLIST_MODULE.mod : ${OBJDIR}/vespaw_lists.o
+ ATOMTYPELIST_MODULE.mod : ${OBJDIR}/vespaw_lists.o
+ ## file:src/vespaw_lmtobasics.f90
+ ${OBJDIR}/vespaw_lmtobasics.o : STRINGS_MODULE.mod
+ ## file:src/vespaw_lock.f90
+ ${OBJDIR}/vespaw_lock.o : CLOCK_MODULE.mod
+ LOCK_MODULE.mod : ${OBJDIR}/vespaw_lock.o
+ ## file:src/vespaw_md.f90
+ ## file:src/vespaw_mixer.f90
+ ${OBJDIR}/vespaw_mixer.o : MPE_MODULE.mod
+ MIXPULAY_MODULE.mod : ${OBJDIR}/vespaw_mixer.o
+ ## file:src/vespaw_mpelib.f90
+ MPI.mod : ${OBJDIR}/vespaw_mpelib${MODE}.o
+ MPE_MPIF_MODULE.mod : ${OBJDIR}/vespaw_mpelib${MODE}.o
+ MPE_COMBINE_MODULE.mod : ${OBJDIR}/vespaw_mpelib${MODE}.o
+ MPE_BROADCAST_MODULE.mod : ${OBJDIR}/vespaw_mpelib${MODE}.o
+ MPE_SENDRECEIVE_MODULE.mod : ${OBJDIR}/vespaw_mpelib${MODE}.o
+ MPE_SEND_MODULE.mod : ${OBJDIR}/vespaw_mpelib${MODE}.o
+ MPE_RECEIVE_MODULE.mod : ${OBJDIR}/vespaw_mpelib${MODE}.o
+ MPE_TRANSPOSE_MODULE.mod : ${OBJDIR}/vespaw_mpelib${MODE}.o
+ MPE_GATHER_MODULE.mod : ${OBJDIR}/vespaw_mpelib${MODE}.o
+ MPE_MODULE.mod : ${OBJDIR}/vespaw_mpelib${MODE}.o
+ ## file:src/vespaw_occupations.f90
+ ${OBJDIR}/vespaw_occupations.o : RESTART_INTERFACE.mod
+ ${OBJDIR}/vespaw_occupations.o : MPE_MODULE.mod
+ ${OBJDIR}/vespaw_occupations.o : LINKEDLIST_MODULE.mod
+ DYNOCC_MODULE.mod : ${OBJDIR}/vespaw_occupations.o
+ OCCUPATION_MODULE.mod : ${OBJDIR}/vespaw_occupations.o
+ ## file:src/vespaw_optfric.f90
+ OPTFRIC_MODULE.mod : ${OBJDIR}/vespaw_optfric.o
+ ## file:src/vespaw_opteels.f90
+ ${OBJDIR}/vespaw_opteels.o : MPE_MODULE.mod
+ ## file:src/vespaw_pairpotential.f90
+ ${OBJDIR}/vespaw_pairpotential.o : MPE_MODULE.mod
+ ## file:src/vespaw_pdos.f90
+ PDOS_MODULE.mod : ${OBJDIR}/vespaw_pdos.o
+ ## file:src/vespaw_banddata.f90
+ BANDDATA_MODULE.mod : ${OBJDIR}/vespaw_banddata.o
+ ## file:src/vespaw_periodictable.f90
+ ${OBJDIR}/vespaw_periodictable.o : STRINGS_MODULE.mod
+ PERIODICTABLE_MODULE.mod : ${OBJDIR}/vespaw_periodictable.o
+ ## file:src/vespaw_polynom.f90
+ ## file:src/vespaw_potential.f90
+ ${OBJDIR}/vespaw_potential.o : MPE_MODULE.mod
+ ${OBJDIR}/vespaw_potential.o : PERIODICTABLE_MODULE.mod
+ POTENTIAL_MODULE.mod : ${OBJDIR}/vespaw_potential.o
+ ## file:src/vespaw_qmmm.f90
+ ${OBJDIR}/vespaw_qmmm.o : PERIODICTABLE_MODULE.mod
+ ${OBJDIR}/vespaw_qmmm.o : RESTART_INTERFACE.mod
+ ${OBJDIR}/vespaw_qmmm.o : MPE_MODULE.mod
+ QMMM_MODULE.mod : ${OBJDIR}/vespaw_qmmm.o
+ ## file:src/vespaw_radial.f90
+ ${OBJDIR}/vespaw_radial.o : PERIODICTABLE_MODULE.mod
+ RADIAL_MODULE.mod : ${OBJDIR}/vespaw_radial.o
+ SHLOGRADIAL_MODULE.mod : ${OBJDIR}/vespaw_radial.o
+ LOGRADIAL_MODULE.mod : ${OBJDIR}/vespaw_radial.o
+ BESSELTRANSFORM_MODULE.mod : ${OBJDIR}/vespaw_radial.o
+ ## file:src/vespaw_report.f90
+ RESTART_INTERFACE.mod : ${OBJDIR}/vespaw_report.o
+ ## file:src/vespaw_schroedinger.f90
+ ## file:src/vespaw_selftest.f90
+ SELFTEST_MODULE.mod : ${OBJDIR}/vespaw_selftest.o
+ ## file:src/vespaw_setupread.f90
+ ${OBJDIR}/vespaw_setupread.o : LINKEDLIST_MODULE.mod
+ SETUPREAD_MODULE.mod : ${OBJDIR}/vespaw_setupread.o
+ ## file:src/vespaw_setups.f90
+ ${OBJDIR}/vespaw_setups.o : PERIODICTABLE_MODULE.mod
+ ${OBJDIR}/vespaw_setups.o : LMTO_MODULE.mod
+ ${OBJDIR}/vespaw_setups.o : LINKEDLIST_MODULE.mod
+ ${OBJDIR}/vespaw_setups.o : VERSION_MODULE.mod
+ SETUP_MODULE.mod : ${OBJDIR}/vespaw_setups.o
+ ## file:src/vespaw_softcore.f90
+ CORE_MODULE.mod : ${OBJDIR}/vespaw_softcore.o
+ ## file:src/vespaw_specialfunctions.f90
+ ## file:src/vespaw_spherical.f90
+ CLEBSCH_MODULE.mod : ${OBJDIR}/vespaw_spherical.o
+ SPHERICALCCMAT_MODULE.mod : ${OBJDIR}/vespaw_spherical.o
+ ## file:src/vespaw_strcio.f90
+ ${OBJDIR}/vespaw_strcio.o : PERIODICTABLE_MODULE.mod
+ ${OBJDIR}/vespaw_strcio.o : STRINGS_MODULE.mod
+ STRCIO_MODULE.mod : ${OBJDIR}/vespaw_strcio.o
+ ## file:src/vespaw_strings.f90
+ STRINGS_MODULE.mod : ${OBJDIR}/vespaw_strings.o
+ ## file:src/vespaw_thermostat.f90
+ ${OBJDIR}/vespaw_thermostat.o : RESTART_INTERFACE.mod
+ ${OBJDIR}/vespaw_thermostat.o : MPE_MODULE.mod
+ THERMOSTAT_MODULE.mod : ${OBJDIR}/vespaw_thermostat.o
+ ## file:src/vespaw_timing.f90
+ ${OBJDIR}/vespaw_timing.o : MPE_MODULE.mod
+ TIMING_MODULE.mod : ${OBJDIR}/vespaw_timing.o
+ ## file:src/vespaw_trace.f90
+ ${OBJDIR}/vespaw_trace.o : STRINGS_MODULE.mod
+ TRACE_MODULE.mod : ${OBJDIR}/vespaw_trace.o
+ ## file:src/vespaw_usage.f90
+ ${OBJDIR}/vespaw_usage.o : MPE_MODULE.mod
+ ## file:src/vespaw_vdw.f90
+ ${OBJDIR}/vespaw_vdw.o : CONSTANTS_MODULE.mod
+ ${OBJDIR}/vespaw_vdw.o : STRINGS_MODULE.mod
+ VDW_MODULE.mod : ${OBJDIR}/vespaw_vdw.o
+ ## file:src/vespaw_onsite.f90
+ ${OBJDIR}/vespaw_onsite.o : PERIODICTABLE_MODULE.mod
+ ${OBJDIR}/vespaw_onsite.o : NSPH_SCAN_MODULE.mod
+ ONSITE_MODULE.mod : ${OBJDIR}/vespaw_onsite.o
+ ## file:src/vespaw_vext.f90
+ ${OBJDIR}/vespaw_vext.o : PERIODICTABLE_MODULE.mod
+ VEXT_MODULE.mod : ${OBJDIR}/vespaw_vext.o
+ ## file:src/vespaw_warmup.f90
+ WARMUP_MODULE.mod : ${OBJDIR}/vespaw_warmup.o
+ ## file:src/vespaw_waves1.f90
+ ${OBJDIR}/vespaw_waves1.o : LINKEDLIST_MODULE.mod
+ ${OBJDIR}/vespaw_waves1.o : MPE_MODULE.mod
+ WAVES_MODULE.mod : ${OBJDIR}/vespaw_waves1.o
+ ## file:src/vespaw_waves2.f90
+ ${OBJDIR}/vespaw_waves2.o : MPE_MODULE.mod
+ ${OBJDIR}/vespaw_waves2.o : SETUP_MODULE.mod
+ ${OBJDIR}/vespaw_waves2.o : WAVES_MODULE.mod
+ ${OBJDIR}/vespaw_waves2.o : PERIODICTABLE_MODULE.mod
+ ${OBJDIR}/vespaw_waves2.o : RESTART_INTERFACE.mod
+ WAVESFIXRHO_MODULE.mod : ${OBJDIR}/vespaw_waves2.o
+ TOTALSPIN_MODULE.mod : ${OBJDIR}/vespaw_waves2.o
+ ## file:src/vespaw_waves_add.f90
+ ${OBJDIR}/vespaw_waves_add.o : WAVES_MODULE.mod
+ ${OBJDIR}/vespaw_waves_add.o : MPE_MODULE.mod
+ ## file:tools/Atom/build.f90
+ ${OBJDIR}/build.o : STRINGS_MODULE.mod
+ ${OBJDIR}/build.o : PERIODICTABLE_MODULE.mod
+ ## file:tools/Atom/inboudaryfromkaras.f90
+ ## file:tools/Stpa/vespaw_stpa.f90
+ ${OBJDIR}/vespaw_stpa.o : LINKEDLIST_MODULE.mod
+ ${OBJDIR}/vespaw_stpa.o : STRINGS_MODULE.mod
+ ## file:tools/Test/vespaw_test.f90
+ ${OBJDIR}/vespaw_test.o : PERIODICTABLE_MODULE.mod
+ ${OBJDIR}/vespaw_test.o : LINKEDLIST_MODULE.mod
+ ${OBJDIR}/vespaw_test.o : STRINGS_MODULE.mod
+ BROYDEN_MODULE.mod : ${OBJDIR}/vespaw_test.o
+ ## file:tools/Atomnew/vespaw_lattice.f90
+ ${OBJDIR}/vespaw_lattice.o : PERIODICTABLE_MODULE.mod
+ ${OBJDIR}/vespaw_lattice.o : LINKEDLIST_MODULE.mod
+ ${OBJDIR}/vespaw_lattice.o : STRINGS_MODULE.mod
+ BROYDEN_MODULE.mod : ${OBJDIR}/vespaw_lattice.o
+ ## file:tools/Atomnew/vespaw_newatom.f90
+ ${OBJDIR}/vespaw_newatom.o : PERIODICTABLE_MODULE.mod
+ ${OBJDIR}/vespaw_newatom.o : LINKEDLIST_MODULE.mod
+ ${OBJDIR}/vespaw_newatom.o : STRINGS_MODULE.mod
+ BROYDEN_MODULE.mod : ${OBJDIR}/vespaw_newatom.o
+ ## file:tools/Atom/vespaw_atom.f90
+ ${OBJDIR}/vespaw_atom.o : STRINGS_MODULE.mod
+ ${OBJDIR}/vespaw_atom.o : LINKEDLIST_MODULE.mod
+ ${OBJDIR}/vespaw_atom.o : PERIODICTABLE_MODULE.mod
+ ${OBJDIR}/vespaw_atom.o : SCHRGL_INTERFACE_MODULE.mod
+ GRID.mod : ${OBJDIR}/vespaw_atom.o
+ AEATOM.mod : ${OBJDIR}/vespaw_atom.o
+ PROJECTION.mod : ${OBJDIR}/vespaw_atom.o
+ ## file:tools/Atom/vespaw_diffgl.f90
+ SCHRGL_INTERFACE_MODULE.mod : ${OBJDIR}/vespaw_diffgl.o
+ ## file:tools/Atom/vespaw_oldradial.f90
+ BESSELTRANSFORM_MODULE.mod : ${OBJDIR}/vespaw_oldradial.o
+ ## file:tools/Convertrstrt/vespaw_iooldrdwrte.f90
+ ## file:tools/Convertrstrt/read.f90
+ ## file:tools/Grab/vespaw_grab.f90
+ ${OBJDIR}/vespaw_grab.o : LINKEDLIST_MODULE.mod
+ ${OBJDIR}/vespaw_grab.o : STRINGS_MODULE.mod
+ SUBSTANCE_MODULE.mod : ${OBJDIR}/vespaw_grab.o
+ READCNTL_MODULE.mod : ${OBJDIR}/vespaw_grab.o
+ ## file:tools/PDoS/vespaw_dos.f90
+ ${OBJDIR}/vespaw_dos.o : PDOS_MODULE.mod
+ ${OBJDIR}/vespaw_dos.o : STRINGS_MODULE.mod
+ ${OBJDIR}/vespaw_dos.o : LINKEDLIST_MODULE.mod
+ SPINDIR_MODULE.mod : ${OBJDIR}/vespaw_dos.o
+ ORBITALS_MODULE.mod : ${OBJDIR}/vespaw_dos.o
+ READCNTL_MODULE.mod : ${OBJDIR}/vespaw_dos.o
+ ## file:tools/Bands/vespaw_bands.f90
+ ${OBJDIR}/vespaw_bands.o : PDOS_MODULE.mod
+ ${OBJDIR}/vespaw_bands.o : STRINGS_MODULE.mod
+ ${OBJDIR}/vespaw_bands.o : LINKEDLIST_MODULE.mod
+ SPINDIR_MODULE.mod : ${OBJDIR}/vespaw_bands.o
+ ORBITALS_MODULE.mod : ${OBJDIR}/vespaw_bands.o
+ READCNTL_MODULE.mod : ${OBJDIR}/vespaw_bands.o
+ ## file:tools/Preopt/vespaw_preopt.f90
+ ${OBJDIR}/vespaw_preopt.o : LINKEDLIST_MODULE.mod
+ ${OBJDIR}/vespaw_preopt.o : STRINGS_MODULE.mod
+ ${OBJDIR}/vespaw_preopt.o : PERIODICTABLE_MODULE.mod
+ POPT_MODULE.mod : ${OBJDIR}/vespaw_preopt.o
+ READ_MODULE.mod : ${OBJDIR}/vespaw_preopt.o
+ ## file:tools/Strc/vespaw_strc.f90
+ ${OBJDIR}/vespaw_strc.o : LINKEDLIST_MODULE.mod
+ ${OBJDIR}/vespaw_strc.o : STRINGS_MODULE.mod
+ ## file:tools/Strc/vespaw_tostrc.f90
+ ${OBJDIR}/vespaw_tostrc.o : LINKEDLIST_MODULE.mod
+ ${OBJDIR}/vespaw_tostrc.o : STRINGS_MODULE.mod
+ ${OBJDIR}/vespaw_tostrc.o : PERIODICTABLE_MODULE.mod
+ ${OBJDIR}/vespaw_tostrc.o : FORCEFIELD_MODULE.mod
+ ## file:tools/Strc/vespaw_toxyz.f90
+ ${OBJDIR}/vespaw_toxyz.o : LINKEDLIST_MODULE.mod
+ ${OBJDIR}/vespaw_toxyz.o : STRINGS_MODULE.mod
+ ## file:tools/Strc/vespaw_tozyz.f90
+ ${OBJDIR}/vespaw_tozyz.o : LINKEDLIST_MODULE.mod
+ ${OBJDIR}/vespaw_tozyz.o : STRINGS_MODULE.mod
+ ## file:tools/Tra/vespaw_cleantra.f90
+ ${OBJDIR}/vespaw_cleantra.o : STRINGS_MODULE.mod
+ ${OBJDIR}/vespaw_cleantra.o : LINKEDLIST_MODULE.mod
+ ## file:tools/Tra/vespaw_converttra.f90
+ ## file:tools/Tra/vespaw_tra.f90
+ ${OBJDIR}/vespaw_tra.o : STRINGS_MODULE.mod
+ ${OBJDIR}/vespaw_tra.o : LINKEDLIST_MODULE.mod
+ ${OBJDIR}/vespaw_tra.o : SORT_MODULE.mod
+ ${OBJDIR}/vespaw_tra.o : PERIODICTABLE_MODULE.mod
+ ${OBJDIR}/vespaw_tra.o : FORCEFIELD_MODULE.mod
+ TRAJECTORY_MODULE.mod : ${OBJDIR}/vespaw_tra.o
+ ## file:tools/Wave/vespaw_1davpot.f90
+ ## file:tools/Wave/vespaw_cmcwave.f90
+ ## file:tools/Wave/vespaw_wave.f90
+ ${OBJDIR}/vespaw_wave.o : STRINGS_MODULE.mod
+ ${OBJDIR}/vespaw_wave.o : LINKEDLIST_MODULE.mod
+ ${OBJDIR}/vespaw_wave.o : PERIODICTABLE_MODULE.mod
+ ## file:tools/Wave/vespaw_lmto.f90
+##  ${OBJDIR}/vespaw_lmto.o : ATOMS_MODULE.mod
+${OBJDIR}/vespaw_lmto.o : PERIODICTABLE_MODULE.mod
+LMTO_MODULE.mod : ${OBJDIR}/vespaw_lmto.o
+ ## file:tools/Wave/vespaw_dmft.f90
+DMFT_MODULE.mod : ${OBJDIR}/vespaw_dmft.o
+${OBJDIR}/vespaw_dmft.o : LMTO_MODULE.mod
+${OBJDIR}/vespaw_dmft.o : WAVES_MODULE.mod
+${OBJDIR}/vespaw_dmft.o : MPE_MODULE.mod
+${OBJDIR}/vespaw_dmft.o : STRINGS_MODULE.mod
+

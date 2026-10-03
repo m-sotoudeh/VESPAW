@@ -1,0 +1,161 @@
+#########################################################################################
+##                                                                                     ##
+##  parameter file for configuration of PAW environment                                ##
+##     "configure --with-parmfile=...."                                                ##
+##                                                                                     ##
+##  UNTESTED VARIANT (2026-09-03) -- cuFFT backend for PLANEWAVE$SUPFFT's hot path,    ##
+##  written and syntax-checked (via gfortran -fsyntax-only against a stub link) on a   ##
+##  machine with NO CUDA toolkit or GPU, so the CUDADIR/library paths below are        ##
+##  templates, not verified values. See the dev notes Phase 2 for what's actually  ##
+##  been validated (Fortran/ISO_C_BINDING interface correctness) vs. not (linking      ##
+##  against real libcudart/libcufft, correctness of the actual transform, performance).##
+##                                                                                     ##
+##  Based on parms.gfortran_openblas_fftw3.txt -- identical except CPPFLAGS selects    ##
+##  CPPVAR_FFT_CUFFT instead of CPPVAR_FFT_FFTW3, and CUDADIR/-lcudart/-lcufft are      ##
+##  added to the link step. FFTW3 stays linked too (harmless if unused) since removing ##
+##  it isn't necessary and other parts of the build script may reference FFTDIR.       ##
+##                                                                                     ##
+##  On Justus2 (or any CUDA-toolkit cluster): after `module load` whatever gives you   ##
+##  libcudart.so/libcufft.so and their headers, run:                                   ##
+##    ` echo $CUDA_HOME `   (or wherever your module sets it)                          ##
+##  and set CUDADIR below to that path before running configure.                       ##
+##                                                                                     ##
+#########################################################################################
+#
+#########################################################################################
+##________________________________architecture (arbitrary name)________________________##
+##                                                                                     ##
+ARCH="gfortran_openblas_cufft"
+##                                                                                     ##
+#########################################################################################
+#
+#########################################################################################
+##_______________________________flag for parallelization______________________________##
+##                                                                                     ##
+TPARALLEL="T"
+##                                                                                     ##
+#########################################################################################
+#
+#########################################################################################
+##________________special rules for the configure script and f90 preprocessor__________##
+##                                                                                     ##
+SPECIAL="none"
+##                                                                                     ##
+#########################################################################################
+#
+#########################################################################################
+##___________________________DIRECTORIES containing LIBRARIES__________________________##
+##                                                                                     ##
+BLASDIR="/usr/local/opt/openblas/"
+LAPACKDIR="/usr/local/opt/openblas/"
+FFTDIR="/usr/local/opt/"
+MPIDIR="/usr/local/opt/open-mpi/"
+##_______________________ TEMPLATE -- SET THIS TO YOUR CLUSTER'S CUDA TOOLKIT PATH ____##
+CUDADIR="/CHANGE/ME/TO/YOUR/CUDA/TOOLKIT/PREFIX"
+##  e.g. on Justus2: whatever `module load cuda` (or the site's equivalent module)     ##
+##  sets as CUDA_HOME/CUDA_PATH -- must contain lib64/libcudart.so and lib64/libcufft.so
+##  (or lib/ on some installs -- adjust LDFLAGS_* below if so).                        ##
+##                                                                                     ##
+#########################################################################################
+#
+#########################################################################################
+##_________________________________ include file for fftw______________________________##
+##                                                                                     ##
+FFT_HEADER="${FFTDIR}/fftw/include/fftw3.f03"
+##                                                                                     ##
+#########################################################################################
+#
+#########################################################################################
+##_________________________________ include file for mpi "mpif.f90"
+##                                                                                     ##
+MPI_HEADER="${MPIDIR}/include/mpif.h"
+##                                                                                     ##
+#########################################################################################
+#
+#########################################################################################
+##________________F90 compiler and linker for scalar executables_______________________##
+##                                                                                     ##
+COMPILER_SCALAR="gfortran -lgfortran -DCPPVAR_COMPILER_G95 -I/usr/local/opt/fftw/include/ -I${CUDADIR}/include/ -fopenmp"
+##                                                                                     ##
+#########################################################################################
+#
+#########################################################################################
+##_______________F90 compiler and linker for parallel executables______________________##
+##                                                                                     ##
+COMPILER_PARALLEL="mpif90 -I${MPIDIR}/include -lgfortran -I/usr/local/opt/fftw/include/ -I${CUDADIR}/include/ "
+##                                                                                     ##
+#########################################################################################
+#
+#########################################################################################
+##___________________________standard compiler flags___________________________________##
+##                                                                                     ##
+FCFLAGS_NONE="-c "
+##                                                                                     ##
+#########################################################################################
+#
+#########################################################################################
+#________________________________compiler flags for optimization_______________________##
+##                                                                                     ##
+FCFLAGS_OPT="-c -O3 -march=native -funroll-loops -fomit-frame-pointer -fimplicit-none -std=legacy"
+##                                                                                     ##
+#########################################################################################
+#
+#########################################################################################
+##________________________________compiler flags for  profiling________________________##
+##                                                                                     ##
+FCFLAGS_PROF="-c -pg -O3 -funroll-loops"
+##                                                                                     ##
+#########################################################################################
+#
+#########################################################################################
+#________________________________compiler flags for debugging__________________________##
+##                                                                                     ##
+FCFLAGS_DBG="-c -g -fbounds-check -fimplicit-none "
+##                                                                                     ##
+#########################################################################################
+#
+#########################################################################################
+#________________________________flags for linking_____________________________________##
+LDFLAGS_SCALAR="-I${OBJDIR} -I/usr/local/opt/fftw/include/ -L${OBJDIR} -L${LAPACKDIR}/lib -L${FFTDIR}/fftw/lib/ -L${CUDADIR}/lib64"
+##                                                                                     ##
+#########################################################################################
+#
+#########################################################################################
+#________________________________flags for linking_____________________________________##
+LDFLAGS_PARALLEL="-I${OBJDIR} -I/usr/local/opt/fftw/include/ -L${OBJDIR} -L${LAPACKDIR}/lib -L${FFTDIR}/fftw/lib/ -L${MPIDIR} -L${CUDADIR}/lib64"
+##                                                                                     ##
+#########################################################################################
+#
+#########################################################################################
+#________________________________external libraries (sequential)
+##                                                                                     ##
+LIBS_SCALAR="-lcufft -lcudart -lfftw3 -lgfortran -lopenblas -llapack -lpthread -lm -fopenmp"
+##                                                                                     ##
+#########################################################################################
+#
+#########################################################################################
+#____________________________external libraries (parallel)_____________________________##
+##                                                                                     ##
+LIBS_PARALLEL="-lcufft -lcudart -lfftw3 -lgfortran -lopenblas -llapack -lpthread -lm -fopenmp"
+##                                                                                     ##
+#########################################################################################
+#
+#########################################################################################
+##________________________________preprocessor variables_______________________________##
+##                                                                                     ##
+CPPFLAGS="-DCPPVAR_FFT_CUFFT -DCPPVAR_BLAS_OPENBLAS -DCPPVAR_U77 -DCPPVAR_COMPILER_G95 "
+##                                                                                     ##
+##-------------------------------------------------------------------------------------##
+##  selects LIB_CUFFT/LIB_3DFFTCUFFT in src/paw_library.f90 instead of LIB_FFTW3.      ##
+##  everything else (LAPACK/BLAS via OpenBLAS, MPI) is unchanged from the FFTW3 parms  ##
+##  file this was copied from -- this variant only swaps the FFT backend, per the      ##
+##  design's Phase 2 scope (library swap, no algorithm change).                       ##
+##                                                                                     ##
+#########################################################################################
+#
+#########################################################################################
+##________________________________file extension_______________________________________##
+##                                                                                     ##
+FEXT="f90"
+##                                                                                     ##
+#########################################################################################

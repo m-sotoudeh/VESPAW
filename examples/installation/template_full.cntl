@@ -1,0 +1,251 @@
+# =============================================================================
+# VESPAW .cntl REFERENCE TEMPLATE -- every feature added on top of stock
+# CP-PAW's control-file syntax, in one annotated file. Not a runnable deck
+# by itself (no !STRUCTURE/atoms) -- copy the blocks you need into a real
+# .cntl and delete the rest. Lines starting with '#' are comments and are
+# skipped by the parser (see src/vespaw_linkedlist.f90, BUFFER_READ).
+#
+# IMPORTANT: comments must be on their OWN line, starting with '#' as the
+# very first (non-blank) character. There is NO trailing/inline comment
+# support -- "NSTEP=200 # steps" is NOT a comment, the parser tries to
+# read "# steps" as more data for NSTEP and crashes. Every comment below
+# is on its own line for that reason.
+#
+# Two syntax rules that trip people up (both inherited from the original
+# CP-PAW grammar, not VESPAW-specific):
+#   - every !BLOCK must be closed with !END, and the whole file with !EOB.
+#   - a quoted value ('LIKE THIS') is a string; unquoted is a number or
+#     T/F. A functional name like PBE MUST be quoted (TYPE='PBE') --
+#     unquoted TYPE=PBE is parsed as an attempt to read the number "PBE"
+#     and crashes.
+# =============================================================================
+
+!CONTROL
+
+  # ---------------------------------------------------------------------
+  # !GENERIC -- run length and bookkeeping. Always required.
+  # ---------------------------------------------------------------------
+  !GENERIC
+    # number of outer steps (MD steps, or CG/DAV/RMM outer iterations --
+    # see !PSIDYN OPTIMIZER= below)
+    NSTEP=200
+    # time step [a.u.] (also sets the fictitious WF mass default if
+    # !PSIDYN MPSI= is not given)
+    DT=5.0
+    # write a detailed report every NWRITE steps
+    NWRITE=20
+    # T = fresh start (randomize/zero velocities per the RANDOM=
+    # keywords below); F = continue from a RESTART_IN file
+    START=F
+    # 'DYNAMIC' (default) or 'STATIC' restart file shape
+    RSTRTTYPE='DYNAMIC'
+    # !AUTO's #(steps) convergence window override (default 20) --
+    # see !PSIDYN!AUTO below
+    #AUTOCONV=20
+    # wall-clock budget: HOURS MINUTES SECONDS -- the run checkpoints
+    # and stops cleanly near this limit
+    #RUNTIME=4 0 0
+  !END
+
+  # ---------------------------------------------------------------------
+  # !FOURIER -- plane-wave cutoffs. Always required.
+  # ---------------------------------------------------------------------
+  !FOURIER
+    # wavefunction plane-wave cutoff [Hartree]
+    EPWPSI=30.
+    # density-grid-to-wavefunction-grid cutoff ratio
+    CDUAL=2.0
+    # "bucket" (soft) cutoff pair -- both required together if used
+    #EPWBUCKET=25.
+    #BUCKETPAR=5.
+  !END
+
+  # ---------------------------------------------------------------------
+  # !DFT -- exchange-correlation functional.
+  #
+  # TYPE= accepts either the historical numeric code or a quoted name
+  # (src/vespaw_ioroutines.f90, READIN_DFTTYPEFROMNAME) -- both forms
+  # below are equivalent:
+  #   TYPE=10        (old style, still works, never breaks)
+  #   TYPE='PBE'     (new, readable)
+  # Named aliases (only the well-established ones -- see the design for
+  # why the rarer/test-only numeric codes were deliberately left numeric):
+  #   NONE PZ PW92 PBE RPBE PW91 REVPBE SCANL SCAN
+  # 'PBE0R'/'SCAN0R' are NOT TYPE= values -- they are TYPE='PBE' combined
+  # with !NTBO MODUS='HYBRID' below (see that block's comment).
+  # ---------------------------------------------------------------------
+  !DFT
+    # global/interstitial functional (was: TYPE=10)
+    TYPE='PBE'
+    # T = drop correlation everywhere (diagnostic only)
+    #XCONLY=F
+    # T = real orbital-tau SCAN, delocalized over the whole cell
+    # (independent of !NTBO below)
+    #TSCANDELOC=F
+
+    # Grimme DFT-D3 dispersion correction (PBE-only, i.e. TYPE='PBE')
+    #!VDW
+    #  VDW-3BODY=F
+    #!END
+
+    # -----------------------------------------------------------------
+    # !NTBO -- onsite hybrid mixing (exact exchange restricted to the
+    # augmentation spheres). TYPE='PBE' + !NTBO MODUS='HYBRID' with the
+    # default DCTYPE (=same as TYPE, i.e. PBE) is "PBE0r". Adding
+    # DCTYPE='SCANL' on top (as below) makes the onsite double-counting
+    # correction SCAN-L instead, i.e. "SCAN0r" in this project's usage.
+    #
+    # READ=F disables the whole block without deleting/renaming it (new --
+    # see src/vespaw_ioroutines.f90, READIN_BLOCKON) -- flip to F to fall
+    # straight back to plain TYPE='PBE' (no onsite hybrid) for comparison
+    # runs, keeping every parameter below on record.
+    # -----------------------------------------------------------------
+    !NTBO
+      READ=T
+      # 'HYBRID' (onsite exact exchange), 'DMFT', or 'ROBERT'
+      MODUS='HYBRID'
+      # T = add offsite (NDDO/31/BONDX) exchange terms (MODUS='HYBRID' only)
+      #OFFSITE=F
+      # onsite exact-exchange admixture (0.25 = PBE0-like)
+      HFWEIGHT=0.25
+      # onsite double-counting functional (default: same as the global
+      # TYPE=); named or numeric, same alias table as TYPE= above
+      DCTYPE='SCANL'
+      # T (default) = non-spherical onsite SCAN evaluation, F =
+      # spherical-only (legacy). No effect on SCAN-L.
+      #NSPH=T
+      # T = include SCAN correlation in the onsite (spherical-only)
+      # TSCAN evaluation. Default F.
+      #TSCANCORR=F
+      # screened-exchange range parameter [a.u.]
+      K2=-0.25
+      # augmentation-sphere cutoff scale for the screening
+      SCALERCUT=2.
+    !END
+  !END
+
+  # ---------------------------------------------------------------------
+  # !PSIDYN -- wavefunction dynamics/optimizer. Always required.
+  #
+  # OPTIMIZER= (new): 'MD' (default, classic friction-damped fictitious
+  # dynamics), 'CG' (state-by-state conjugate gradient), 'DAV' (block
+  # Davidson), 'RMM' (block RMM-DIIS). VASP's rough equivalent of
+  # switching ALGO between damped MD and a direct diagonalizer.
+  # ---------------------------------------------------------------------
+  !PSIDYN
+    # 'MD' | 'CG' | 'DAV' | 'RMM'
+    OPTIMIZER='RMM'
+    # strict energy conservation (recommended with CG/DAV/RMM; also
+    # required =F if !MERMIN is used)
+    SAFEORTHO=T
+    # T = zero initial wavefunction velocities
+    STOP=T
+    # nonzero = randomize wavefunctions by this amplitude
+    #RANDOM=0.01
+
+    # -- density mixer (CG/DAV/RMM only; ignored by OPTIMIZER='MD') -----
+    # 'PULAY' (default, restarted-DIIS) | 'ANDERSON'
+    MIXER='PULAY'
+    # Kerker screening wavevector**2 [bohr**-2] -- smaller = more
+    # aggressive long-wavelength damping
+    MIXG0SQ=1.5
+    # mixer history depth override (0 = mixer's own default: 3 for
+    # PULAY, 4 for ANDERSON)
+    #MIXNHISTORY=0
+    # density-residual convergence tolerance -- stops the run once the
+    # mixer's own residual norm drops below this (see the design entry
+    # "MIXTOL" for the exact semantics)
+    MIXTOL=1.D-8
+    # (new) total-energy change [Hartree] between two successive outer
+    # steps below which the run is considered converged -- this IS
+    # VASP's actual EDIFF. Complements MIXTOL: either one being
+    # satisfied stops the run. Useful because the density residual can
+    # sit just above MIXTOL (e.g. an oscillating restarted-DIIS mixer)
+    # long after the energy has visibly stopped changing.
+    EDIFF=1.D-6
+
+    # -- RMM-DIIS-only knobs (ignored by MD/CG/DAV) ---------------------
+    # #(RMM-DIIS inner sweeps per outer step)
+    NRMMX=4
+    # #(initial outer steps run with CG before switching to RMM -- VASP
+    # NELMDL's rough equivalent, avoids RMM's cold-start eigenstate
+    # drift when starting from atomic superposition)
+    RMMDELAY=8
+
+    # -- fictitious WF dynamics (OPTIMIZER='MD' only; harmless otherwise)
+    # friction coefficient
+    #FRIC=0.01
+    # fictitious WF mass override (default: 10*DT**2)
+    #MPSI=1.D-3
+    # WF-mass enhancement factor
+    #MPSICG2=1.D-3
+
+    # -- autopilot: anneal friction and auto-stop on energy convergence -
+    # READ=F (new) leaves the ramp parameters on record but inactive; the
+    # block's mere presence used to be the only on/off switch.
+    !AUTO
+      READ=F
+      # friction floor + shrink factor while energy is still falling
+      FRIC(-)=0.3  FACT(-)=0.97
+      # friction ceiling + growth factor while energy rises
+      FRIC(+)=0.3  FACT(+)=1.0
+      MINFRIC=0.01
+    !END
+  !END
+
+  # ---------------------------------------------------------------------
+  # !RDYN -- atomic (ionic) dynamics. READ=F below is equivalent to
+  # omitting the whole block (electronic-structure-only / fixed atoms,
+  # the default) -- flip to T (or drop READ=) to relax/move atoms, VASP
+  # IBRION-style.
+  # ---------------------------------------------------------------------
+  !RDYN
+    READ=F
+    # T = zero initial atomic velocities
+    STOP=T
+    # nonzero = randomize atomic velocities to this temperature [K]
+    #RANDOM[K]=0.
+    !AUTO
+      READ=F
+      FRIC(-)=0.0  FACT(-)=1.0
+      FRIC(+)=1.D-2  FACT(+)=1.0
+      MINFRIC=0.0
+    !END
+  !END
+
+  # ---------------------------------------------------------------------
+  # !MERMIN -- finite-temperature (Fermi-smeared) occupations. Requires
+  # !PSIDYN SAFEORTHO=F (dynamical occupations are not eigenstates
+  # otherwise -- READIN_MERMIN enforces this and stops with a clear
+  # error if violated).
+  # ---------------------------------------------------------------------
+  !MERMIN
+    READ=F
+    # how initial occupations are obtained
+    #STARTTYPE='N'
+  !END
+
+  # ---------------------------------------------------------------------
+  # !CELL -- variable-cell dynamics (VASP ISIF-style volume/shape
+  # relaxation). Off by default here.
+  # ---------------------------------------------------------------------
+  !CELL
+    READ=F
+    MOVE=T
+  !END
+
+  # ---------------------------------------------------------------------
+  # !QM-MM and !COSMO -- classical-environment coupling / implicit
+  # solvation. Off by default here; see doc/manual for their full
+  # keyword sets.
+  # ---------------------------------------------------------------------
+  !QM-MM
+    READ=F
+  !END
+
+  !COSMO
+    READ=F
+  !END
+
+!END
+!EOB

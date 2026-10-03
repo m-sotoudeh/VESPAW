@@ -1,0 +1,41 @@
+!STRUCTURE
+  !GENERIC LUNIT= 7.881106 !END
+  !OCCUPATIONS EMPTY=4 NSPIN=2  SPIN[HBAR]=0. !END
+  !KPOINTS DIV=2 2 2 SHIFT=0 0 0 !END
+  !LATTICE T= 1.0 0.5 0.5
+              0.5 1.0 0.5
+              0.5 0.5 1.0 !END
+  !SPECIES NAME='NI' NPRO=2 2 2 LRHOX=4 RAD/RCOV=1.2
+    !DFTU L=2 U[EV]=6.3 J[EV]=0. !END
+@NINTBO@    !AUGMENT ID='NI_HBS' EL='NI' ZV=10. TYPE='HBS'
+             RBOX/RCOV=1.2 RCSM/RCOV=0.25
+             RCL/RCOV= 0.75 0.75 0.75 0.75
+             LAMBDA= 6. 6. 6. 6.
+      !GRID DMIN=1.E-6 DMAX=0.1 RMAX=10. !END
+      !POT  POW=3. RC/RCOV=0.67 !END
+      !CORE POW=3. RC/RCOV=0.67 !END
+    !END
+  !END
+  !SPECIES NAME='O_' NPRO=1 1 1 LRHOX=4 RAD/RCOV=1.2
+    !NTBO NOFL=1 1 0 CV=T LHFWEIGHT=0.05
+          TAILLAMBDA=4. 2. RAUG/RCOV=0.6
+          RTAIL/RCOV=0.8 RTAILCUT/RCOV=2. !END
+    !AUGMENT ID='O_HBS' EL='O' ZV=6. TYPE='HBS'
+             RBOX/RCOV=1.2 RCSM/RCOV=0.25
+             RCL/RCOV= 0.75 0.75 0.75 0.75
+             LAMBDA= 6. 6. 6. 6.
+      !GRID DMIN=1.E-6 DMAX=0.1 RMAX=10. !END
+      !POT  POW=3. RC/RCOV=0.67 !END
+      !CORE POW=3. RC/RCOV=0.67 !END
+    !END
+  !END
+  !ATOM  NAME= 'NI1'  R=  0.00    0.00      0.00   !END
+  !ATOM  NAME= 'NI2'  R=  1.00    1.00      1.00   !END
+  !ATOM  NAME= 'O_3'  R=  0.50    0.50      0.50   !END
+  !ATOM  NAME= 'O_4'  R=  1.50    1.50      1.50   !END
+  !@ORBPOT@
+    !POT  ATOM='NI1' VALUE=+0.1 TYPE='D' S=1 RC=2. !END
+    !POT  ATOM='NI2' VALUE=-0.1 TYPE='D' S=1 RC=2. !END
+  !END
+!END
+!EOB

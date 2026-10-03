@@ -1,0 +1,23 @@
+# U -- PAW setup (HBS construction), rebuilt 2026-09-27
+# Replaces u_ndlss_v0 (see AUDIT.md), which the setup audit flagged.
+# Parameters: CP-PAW parameters/stp.cntl entry U_HBS_SC; projectors
+#   NPRO=2 2 2 1 (two per s/p/d channel: the recipe that removed
+#   the NiO incompleteness collapse, the dev notes 2026-09-27).
+#   Matching radii RCL/RCOV scaled by 1.1 relative to stp.cntl.
+#   NOTE: the replaced setup u_ndlss_v0 was standard;
+#   this one is semicore (different ZV), because
+#   no clean setup of the original variant was found.
+# Checked: builds for an isolated atom (PBE) with no ghost state and no
+#   incompleteness warning. NOT yet validated in solids (lattice constants,
+#   cutoff convergence) unless stated in AUDIT.md.
+#
+  !SPECIES NAME='U_' NPRO=2 2 2 1 LRHOX=4 RAD/RCOV=1.2
+    !AUGMENT ID='U_HBS_SC' EL='U' ZV=14. TYPE='HBS'
+             RBOX/RCOV=1.2 RCSM/RCOV=0.25
+             RCL/RCOV= 0.550 0.550 0.550 0.550
+             LAMBDA= 6. 6. 6. 6.
+      !GRID DMIN=1.E-6 DMAX=0.1 RMAX=10. !END
+      !POT  POW=3. RC/RCOV=0.5 !END
+      !CORE POW=3. RC/RCOV=0.5 !END
+    !END
+  !END

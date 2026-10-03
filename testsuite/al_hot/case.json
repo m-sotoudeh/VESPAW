@@ -1,0 +1,58 @@
+{
+  "description": "fcc Al (metal), PBE, 6x6x6 k-points, Mermin T=1000 K: free-energy minimum with fractional occupations",
+  "inputs": [
+    "al.cntl",
+    "al.strc"
+  ],
+  "timeout": 900,
+  "runs": {
+    "dav_var": {
+      "subs": {
+        "@PSIDYN@": "OPTIMIZER='DAV' MIXER='VARIATIONAL' SAFEORTHO=F STOP=T"
+      }
+    },
+    "rmm_var": {
+      "subs": {
+        "@PSIDYN@": "OPTIMIZER='RMM' MIXER='VARIATIONAL' SAFEORTHO=F STOP=T"
+      }
+    },
+    "cg_var": {
+      "subs": {
+        "@PSIDYN@": "OPTIMIZER='CG' MIXER='VARIATIONAL' SAFEORTHO=F STOP=T"
+      }
+    },
+    "edft_var": {
+      "subs": {
+        "@PSIDYN@": "OPTIMIZER='EDFT' MIXER='VARIATIONAL' SAFEORTHO=F STOP=T"
+      }
+    }
+  },
+  "checks": [
+    {
+      "run": "dav_var",
+      "quantity": "energy",
+      "value": -2.1081472383,
+      "tol": 2e-06,
+      "reference": "Route 1 (CG) -2.1141629 Ha and Route 2 -2.1141628 Ha, 2026-09-23 (the dev notes) -- re-referenced 2026-09-29 after the default relativistic treatment changed from ZORA to energy-dependent scalar-relativistic (cross-optimizer agreement and finite-difference checks unchanged) -- re-referenced 2026-10-02 for the corrected PBE reduced gradient (TFAC ported from CP-PAW 2024; also fixed in the SCAN correlation code; TYPE=-10 reproduces the old values)"
+    },
+    {
+      "run": "edft_var",
+      "quantity": "energy",
+      "value": -2.1081471202,
+      "tol": 2e-06,
+      "reference": "same -- re-referenced 2026-09-29 after the default relativistic treatment changed from ZORA to energy-dependent scalar-relativistic (cross-optimizer agreement and finite-difference checks unchanged) -- re-referenced 2026-10-02 for the corrected PBE reduced gradient (TFAC ported from CP-PAW 2024; also fixed in the SCAN correlation code; TYPE=-10 reproduces the old values)"
+    }
+  ],
+  "agree": [
+    {
+      "runs": [
+        "dav_var",
+        "rmm_var",
+        "cg_var",
+        "edft_var"
+      ],
+      "quantity": "energy",
+      "tol": 2e-06
+    }
+  ]
+}

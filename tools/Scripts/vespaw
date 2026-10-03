@@ -1,0 +1,108 @@
+#!/bin/bash
+#################################################################
+##  vespaw -- single-command dispatcher for the VESPAW tool    ##
+##  family (forked from CP-PAW's ~20 separate paw_*.x tools).  ##
+##                                                              ##
+##  Picks the right underlying binary from the extension of    ##
+##  the first non-option argument, and picks serial vs MPI     ##
+##  automatically by checking whether it was itself launched   ##
+##  under mpirun/mpiexec/srun (common launcher env vars).      ##
+##                                                              ##
+##  Usage:   vespaw FILE.cntl        -> SCF/MD driver           ##
+##           mpirun -np N vespaw FILE.cntl -> parallel driver   ##
+##           vespaw FILE.dcntl       -> density-of-states tool  ##
+##           vespaw FILE.dpcntl      -> DOS-plot tool           ##
+##           vespaw FILE.bcntl       -> band-structure tool     ##
+##           vespaw FILE.pcntl       -> pre-optimizer tool      ##
+##           vespaw FILE.gcntl       -> "grab" post-processor   ##
+##           vespaw convert IN.cif OUT.strc --species-from ...  ##
+##                                   -> structure-file importer  ##
+##           vespaw run input.yaml  -> YAML input frontend      ##
+##           vespaw input.yaml      -> (same, by extension)     ##
+##                                                              ##
+##  Everything else (structure/trajectory conversion tools:     ##
+##  strc/tostrc/toxyz/tra/converttra/cleantra/wave/1davpot/     ##
+##  cmcwave/murnaghan/polyhedra/stpa/stpreport) has no fixed    ##
+##  extension convention yet and must still be called by its   ##
+##  own vespaw_<name>.x name -- see the dev notes.          ##
+#################################################################
+set -eu
+
+# -- locate the directory this script itself lives in (same dir the
+#    real vespaw_*.x binaries land in via `make tools`/`make scripts`) --
+BINDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+usage() {
+  echo "usage: vespaw [--np] FILE.<cntl|dcntl|dpcntl|bcntl|pcntl|gcntl> [args...]"
+  echo "       vespaw run FILE.yaml [args...]   (or just: vespaw FILE.yaml)"
+  echo "  dispatches by FILE's extension to the matching VESPAW tool;"
+  echo "  runs the parallel build automatically under mpirun/mpiexec/srun."
+  echo "  other tools (strc, tostrc, toxyz, tra, wave, murnaghan, ...) are"
+  echo "  not yet auto-dispatched -- call vespaw_<name>.x directly for those."
+  exit 1
+}
+
+if [ $# -lt 1 ]; then
+  usage
+fi
+
+# -- detect an MPI launch context from the common launcher env vars --
+UNDER_MPI=0
+if [ -n "${OMPI_COMM_WORLD_SIZE:-}" ] || [ -n "${PMI_SIZE:-}" ] \
+   || [ -n "${MPI_LOCALNRANKS:-}" ] || [ -n "${SLURM_NPROCS:-}" ] \
+   || [ -n "${SLURM_NTASKS:-}" ]; then
+  UNDER_MPI=1
+fi
+
+case "$1" in
+  --help|-h|\?|--version|--parmfile)
+    if [ "$UNDER_MPI" -eq 1 ]; then
+      exec "${BINDIR}/vespaw_fast_mpi.x" "$@"
+    else
+      exec "${BINDIR}/vespaw_fast.x" "$@"
+    fi
+    ;;
+  convert)
+    shift
+    exec python3 "${BINDIR}/vespaw_convert.py" "$@"
+    ;;
+  run)
+    shift
+    exec python3 "${BINDIR}/vespaw_yaml_run.py" "$@"
+    ;;
+  *.yaml|*.yml)
+    exec python3 "${BINDIR}/vespaw_yaml_run.py" "$@"
+    ;;
+esac
+
+FILE="$1"
+shift
+EXT="${FILE##*.}"
+EXT_LC="$(echo "$EXT" | tr '[:upper:]' '[:lower:]')"
+
+case "$EXT_LC" in
+  cntl)
+    if [ "$UNDER_MPI" -eq 1 ]; then
+      TOOL="${BINDIR}/vespaw_fast_mpi.x"
+    else
+      TOOL="${BINDIR}/vespaw_fast.x"
+    fi
+    ;;
+  dcntl)    TOOL="${BINDIR}/vespaw_dos.x" ;;
+  dpcntl)   TOOL="${BINDIR}/vespaw_dosplot.x" ;;
+  bcntl)    TOOL="${BINDIR}/vespaw_bands.x" ;;
+  pcntl)    TOOL="${BINDIR}/vespaw_preopt.x" ;;
+  gcntl)    TOOL="${BINDIR}/vespaw_grab.x" ;;
+  *)
+    echo "vespaw: don't know how to dispatch '.$EXT' -- see usage below" >&2
+    usage
+    ;;
+esac
+
+if [ ! -x "$TOOL" ]; then
+  echo "vespaw: expected tool '$TOOL' not found or not executable" >&2
+  echo "        (build it with the matching 'make' target first)" >&2
+  exit 1
+fi
+
+exec "$TOOL" "$FILE" "$@"

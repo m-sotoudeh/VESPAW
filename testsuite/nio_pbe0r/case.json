@@ -1,0 +1,176 @@
+{
+  "description": "NiO AFM-II (HBS setups, Ni 2/2/2 projectors), PBE0r local hybrid (25% onsite exact exchange on Ni and O): hybrid operator in all eigensolvers",
+  "inputs": [
+    "nio.cntl",
+    "nio.strc"
+  ],
+  "timeout": 1800,
+  "defaults": {
+    "@NINTBO@": "    !NTBO NOFL=1 1 1 CV=T\n          TAILLAMBDA=4. 2. RAUG/RCOV=0.6\n          RTAIL/RCOV=0.8 RTAILCUT/RCOV=2. !END\n",
+    "@HFWEIGHT@": "HFWEIGHT=0.25 "
+  },
+  "runs": {
+    "dav_var": {
+      "stages": [
+        {
+          "subs": {
+            "@START@": "T",
+            "@NSTEP@": "300",
+            "@ORBPOT@": "ORBPOT",
+            "@PSIDYN@": "STOP=F FRIC=0.02 SAFEORTHO=T\n    !AUTO FRIC(-)=0.3 FACT(-)=0.97 FRIC(+)=0.3 FACT(+)=1. MINFRIC=0.02 !END\n "
+          }
+        },
+        {
+          "subs": {
+            "@START@": "F",
+            "@NSTEP@": "300",
+            "@ORBPOT@": "ORBPOT_OFF",
+            "@PSIDYN@": "OPTIMIZER='DAV' MIXER='VARIATIONAL' SAFEORTHO=T STOP=T"
+          }
+        }
+      ]
+    },
+    "rmm_var": {
+      "stages": [
+        {
+          "subs": {
+            "@START@": "T",
+            "@NSTEP@": "300",
+            "@ORBPOT@": "ORBPOT",
+            "@PSIDYN@": "STOP=F FRIC=0.02 SAFEORTHO=T\n    !AUTO FRIC(-)=0.3 FACT(-)=0.97 FRIC(+)=0.3 FACT(+)=1. MINFRIC=0.02 !END\n "
+          }
+        },
+        {
+          "subs": {
+            "@START@": "F",
+            "@NSTEP@": "300",
+            "@ORBPOT@": "ORBPOT_OFF",
+            "@PSIDYN@": "OPTIMIZER='RMM' MIXER='VARIATIONAL' SAFEORTHO=T STOP=T"
+          }
+        }
+      ]
+    },
+    "cg_var": {
+      "stages": [
+        {
+          "subs": {
+            "@START@": "T",
+            "@NSTEP@": "300",
+            "@ORBPOT@": "ORBPOT",
+            "@PSIDYN@": "STOP=F FRIC=0.02 SAFEORTHO=T\n    !AUTO FRIC(-)=0.3 FACT(-)=0.97 FRIC(+)=0.3 FACT(+)=1. MINFRIC=0.02 !END\n "
+          }
+        },
+        {
+          "subs": {
+            "@START@": "F",
+            "@NSTEP@": "300",
+            "@ORBPOT@": "ORBPOT_OFF",
+            "@PSIDYN@": "OPTIMIZER='CG' MIXER='VARIATIONAL' SAFEORTHO=T STOP=T"
+          }
+        }
+      ]
+    },
+    "md": {
+      "stages": [
+        {
+          "subs": {
+            "@START@": "T",
+            "@NSTEP@": "300",
+            "@ORBPOT@": "ORBPOT",
+            "@PSIDYN@": "STOP=F FRIC=0.02 SAFEORTHO=T\n    !AUTO FRIC(-)=0.3 FACT(-)=0.97 FRIC(+)=0.3 FACT(+)=1. MINFRIC=0.02 !END\n "
+          }
+        },
+        {
+          "subs": {
+            "@START@": "F",
+            "@NSTEP@": "4000",
+            "@ORBPOT@": "ORBPOT_OFF",
+            "@PSIDYN@": "STOP=T FRIC=0.02 SAFEORTHO=T\n    !AUTO FRIC(-)=0.3 FACT(-)=0.97 FRIC(+)=0.3 FACT(+)=1. MINFRIC=0.02 !END\n "
+          }
+        }
+      ]
+    },
+    "dav_coldseed": {
+      "stages": [
+        {
+          "subs": {
+            "@START@": "T",
+            "@NSTEP@": "40",
+            "@ORBPOT@": "ORBPOT",
+            "@PSIDYN@": "OPTIMIZER='DAV' MIXER='VARIATIONAL' SAFEORTHO=T STOP=F"
+          }
+        },
+        {
+          "subs": {
+            "@START@": "F",
+            "@NSTEP@": "300",
+            "@ORBPOT@": "ORBPOT_OFF",
+            "@PSIDYN@": "OPTIMIZER='DAV' MIXER='VARIATIONAL' SAFEORTHO=T STOP=T"
+          }
+        }
+      ]
+    }
+  },
+  "agree": [
+    {
+      "runs": [
+        "dav_var",
+        "rmm_var",
+        "cg_var"
+      ],
+      "quantity": "energy",
+      "tol": 3e-06
+    },
+    {
+      "runs": [
+        "dav_var",
+        "md"
+      ],
+      "quantity": "energy",
+      "tol": 1e-05
+    },
+    {
+      "runs": [
+        "dav_var",
+        "dav_coldseed"
+      ],
+      "quantity": "energy",
+      "tol": 1e-05
+    },
+    {
+      "runs": [
+        "dav_var",
+        "rmm_var",
+        "cg_var",
+        "md",
+        "dav_coldseed"
+      ],
+      "quantity": "gap_ev",
+      "tol": 0.02
+    }
+  ],
+  "known_issues": {},
+  "checks": [
+    {
+      "run": "dav_var",
+      "quantity": "energy",
+      "value": -111.1447807444,
+      "tol": 3e-06,
+      "reference": "DAV/RMM/CG/friction MD and a Davidson cold start agree to 1e-7 Ha (2026-09-27, HBS setups, Ni 2/2/2 projectors, exact local-orbital projection). Converged in the Ni d projector basis: 2/3/4 d projectors give -111.3684/-111.3705/-111.3680 Ha and 2.990/3.000/2.998 eV. The older reference -113.037361 Ha / 3.955 eV came from the projector-dependent fit through <ptilde|chitilde> (still available with VESPAW_NTBO_OLDPROJ=1). -- re-referenced 2026-09-29 after the default relativistic treatment changed from ZORA to energy-dependent scalar-relativistic (cross-optimizer agreement and finite-difference checks unchanged) -- re-referenced 2026-10-02 after the scalar-relativistic partial waves were made consistent (one DREL per l at the valence energy; HBS setups shift by ~-11 mHa, NiO+U/hybrid gaps by ~-0.09 eV) -- re-referenced 2026-10-02 for the corrected PBE reduced gradient (TFAC ported from CP-PAW 2024; also fixed in the SCAN correlation code; TYPE=-10 reproduces the old values)"
+    },
+    {
+      "run": "dav_var",
+      "quantity": "gap_ev",
+      "value": 2.9028,
+      "tol": 0.01,
+      "reference": "same runs -- re-referenced 2026-09-29 after the default relativistic treatment changed from ZORA to energy-dependent scalar-relativistic (cross-optimizer agreement and finite-difference checks unchanged) -- re-referenced 2026-10-02 after the scalar-relativistic partial waves were made consistent (one DREL per l at the valence energy; HBS setups shift by ~-11 mHa, NiO+U/hybrid gaps by ~-0.09 eV) -- re-referenced 2026-10-02 for the corrected PBE reduced gradient (TFAC ported from CP-PAW 2024; also fixed in the SCAN correlation code; TYPE=-10 reproduces the old values)"
+    },
+    {
+      "run": "dav_coldseed",
+      "quantity": "energy",
+      "value": -111.1447807153,
+      "tol": 5e-06,
+      "reference": "cold start must reach the physical state (it collapsed with one s projector on Ni) -- re-referenced 2026-09-29 after the default relativistic treatment changed from ZORA to energy-dependent scalar-relativistic (cross-optimizer agreement and finite-difference checks unchanged) -- re-referenced 2026-10-02 after the scalar-relativistic partial waves were made consistent (one DREL per l at the valence energy; HBS setups shift by ~-11 mHa, NiO+U/hybrid gaps by ~-0.09 eV) -- re-referenced 2026-10-02 for the corrected PBE reduced gradient (TFAC ported from CP-PAW 2024; also fixed in the SCAN correlation code; TYPE=-10 reproduces the old values)"
+    }
+  ]
+}

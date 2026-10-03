@@ -1,0 +1,110 @@
+#########################################################################################
+##
+## parameter file for configuration of PAW/VESPAW environment
+##
+## for: Apple Silicon (M3) native arm64 build -- avoids Rosetta 2 translation, which the
+## existing x86_64 build (parms.in_use, ARCH=gfortran_openblas_fftw3) runs under on this
+## machine. See the dev notes, 2026-09-07, "why is VESPAW ~20x slower than VASP".
+##
+#########################################################################################
+#
+#########################################################################################
+##________________________________architecture (arbitrary name)________________________##
+##
+ARCH="gfortran_openblas_fftw3_arm64"
+##
+#########################################################################################
+#
+#########################################################################################
+##_______________________________flag for parallelization______________________________##
+##
+TPARALLEL="T"
+##
+## native arm64 Open MPI 5.0.8 (/opt/homebrew) -- parallel build enabled 2026-09-29
+##
+#########################################################################################
+#
+#########################################################################################
+##________special rules for the configure script and f90 preprocessor__________________##
+##
+SPECIAL="none"
+##
+#########################################################################################
+#
+#########################################################################################
+##___________________________DIRECTORIES containing LIBRARIES__________________________##
+##
+BLASDIR="/opt/homebrew/opt/openblas/"
+LAPACKDIR="/opt/homebrew/opt/openblas/"
+FFTDIR="/opt/homebrew/opt/"
+MPIDIR="/opt/homebrew/"
+##
+#########################################################################################
+##_________________________________ include file for fftw______________________________##
+##
+FFT_HEADER="${FFTDIR}/fftw/include/fftw3.f03"
+##
+#########################################################################################
+##_________________________________ include file for mpi "mpif.f90"
+##
+MPI_HEADER="${MPIDIR}/include/mpif.h"
+##
+#########################################################################################
+##________________F90 compiler and linker for scalar executables_______________________##
+##
+COMPILER_SCALAR="/opt/homebrew/bin/gfortran -lgfortran -DCPPVAR_COMPILER_G95 -I/opt/homebrew/opt/fftw/include/ -I/opt/homebrew/include/ -fopenmp"
+##
+#########################################################################################
+##_______________F90 compiler and linker for parallel executables______________________##
+##
+COMPILER_PARALLEL="OMPI_FC=/opt/homebrew/bin/gfortran /opt/homebrew/bin/mpif90 -DCPPVAR_COMPILER_G95 -I${MPIDIR}/include -lgfortran -I/opt/homebrew/include/ -I/opt/homebrew/opt/fftw/include/ "
+##
+#########################################################################################
+##___________________________standard compiler flags___________________________________##
+##
+FCFLAGS_NONE="-c "
+##
+#########################################################################################
+#________________________________compiler flags for optimization_______________________##
+##
+FCFLAGS_OPT="-c -O3 -march=native -funroll-loops -fomit-frame-pointer -fimplicit-none -std=legacy"
+##
+#########################################################################################
+##________________________________compiler flags for profiling________________________##
+##
+FCFLAGS_PROF="-c -pg -O3 -funroll-loops"
+##
+#########################################################################################
+#________________________________compiler flags for debugging__________________________##
+##
+FCFLAGS_DBG="-c -g -fbounds-check -fimplicit-none -std=legacy"
+##
+#########################################################################################
+#________________________________flags for linking_____________________________________##
+LDFLAGS_SCALAR="-I${OBJDIR} -I/opt/homebrew/opt/fftw/include/  -L${OBJDIR} -L${LAPACKDIR}/lib -L${FFTDIR}/fftw/lib/ "
+##
+#########################################################################################
+#________________________________flags for linking_____________________________________##
+LDFLAGS_PARALLEL="-I${OBJDIR} -I/opt/homebrew/opt/fftw/include/ -L${OBJDIR} -L${LAPACKDIR}/lib -L${FFTDIR}/fftw/lib/ -L${MPIDIR}"
+##
+#########################################################################################
+#________________________________external libraries (sequential)
+##
+LIBS_SCALAR="-lfftw3 -lgfortran -lopenblas -llapack -lpthread -lm -fopenmp -I/opt/homebrew/include/ /opt/homebrew/opt/hdf5/lib/libhdf5_hl_fortran.dylib /opt/homebrew/opt/hdf5/lib/libhdf5_fortran.dylib /opt/homebrew/opt/hdf5/lib/libhdf5_hl.dylib /opt/homebrew/opt/hdf5/lib/libhdf5.dylib"
+##
+#########################################################################################
+#____________________________external libraries (parallel)_____________________________##
+##
+LIBS_PARALLEL="-lfftw3 -lgfortran -lopenblas -llapack -lpthread -lm -fopenmp -I/opt/homebrew/include/ /opt/homebrew/opt/hdf5/lib/libhdf5_hl_fortran.dylib /opt/homebrew/opt/hdf5/lib/libhdf5_fortran.dylib /opt/homebrew/opt/hdf5/lib/libhdf5_hl.dylib /opt/homebrew/opt/hdf5/lib/libhdf5.dylib"
+##
+#########################################################################################
+##________________________________preprocessor variables_______________________________##
+##
+CPPFLAGS="-DCPPVAR_FFT_FFTW3 -DCPPVAR_BLAS_OPENBLAS -DCPPVAR_HDF5 -DCPPVAR_U77 -DCPPVAR_COMPILER_G95 "
+##
+#########################################################################################
+##________________________________file extension_______________________________________##
+##
+FEXT="f90"
+##
+#########################################################################################

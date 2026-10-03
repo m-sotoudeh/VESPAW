@@ -1,0 +1,142 @@
+{
+  "description": "Si diamond with SI2 displaced by 0.05 AA along x (PBE, 4x4x4 k, 25 Ry): forces and stress (FORCES=T STRESS=T) against central finite differences of the energy, and agreement across all SCF optimizers",
+  "inputs": [
+    "si.cntl",
+    "si.strc"
+  ],
+  "timeout": 900,
+  "defaults": {
+    "@NSTEP@": "300",
+    "@PSIDYN@": "OPTIMIZER='DAV' MIXER='VARIATIONAL' SAFEORTHO=T STOP=T EDIFF=1.E-10 MIXTOL=1.E-12",
+    "@LUNIT@": "1.0",
+    "@X2@": "1.4075000000"
+  },
+  "runs": {
+    "dav_var": {
+      "subs": {}
+    },
+    "xp": {
+      "subs": {
+        "@X2@": "1.4175000000"
+      }
+    },
+    "xm": {
+      "subs": {
+        "@X2@": "1.3975000000"
+      }
+    },
+    "sp": {
+      "subs": {
+        "@LUNIT@": "1.005"
+      }
+    },
+    "sm": {
+      "subs": {
+        "@LUNIT@": "0.995"
+      }
+    },
+    "rmm_var": {
+      "subs": {
+        "@PSIDYN@": "OPTIMIZER='RMM' MIXER='VARIATIONAL' SAFEORTHO=T STOP=T EDIFF=1.E-10 MIXTOL=1.E-12"
+      }
+    },
+    "cg_var": {
+      "subs": {
+        "@PSIDYN@": "OPTIMIZER='CG' MIXER='VARIATIONAL' SAFEORTHO=T STOP=T EDIFF=1.E-10 MIXTOL=1.E-12"
+      }
+    },
+    "dav_pulay": {
+      "subs": {
+        "@PSIDYN@": "OPTIMIZER='DAV' MIXER='PULAY' SAFEORTHO=T STOP=T EDIFF=1.E-10 MIXTOL=1.E-12"
+      }
+    },
+    "md": {
+      "subs": {
+        "@NSTEP@": "4000",
+        "@PSIDYN@": "STOP=T FRIC=0.02 SAFEORTHO=T EDIFF=1.E-11\n    !AUTO FRIC(-)=0.3 FACT(-)=0.97 FRIC(+)=0.3 FACT(+)=1. MINFRIC=0.02 !END"
+      }
+    }
+  },
+  "checks": [
+    {
+      "run": "dav_var",
+      "quantity": "energy",
+      "value": -7.9664204797,
+      "tol": 2e-09,
+      "reference": "2026-09-27, DAV+VARIATIONAL converged to EDIFF=1e-10 -- re-referenced 2026-09-29 after the default relativistic treatment changed from ZORA to energy-dependent scalar-relativistic (cross-optimizer agreement and finite-difference checks unchanged) -- re-referenced 2026-10-02 for the corrected PBE reduced gradient (TFAC ported from CP-PAW 2024; also fixed in the SCAN correlation code; TYPE=-10 reproduces the old values) -- re-referenced 2026-10-03: published PBE beta, SCAN-L PC07opt deorbitalization, spin-polarized SCAN correlation, CODATA 2018 constants (output now in eV; references stay in Hartree)"
+    },
+    {
+      "run": "dav_var",
+      "quantity": "force:SI2:x",
+      "value": -0.0138338656,
+      "tol": 2e-07,
+      "reference": "2026-09-27; finite difference -0.0138485 (0.01 and 0.005 AA steps agree to 1e-6) -- re-referenced 2026-09-29 after the default relativistic treatment changed from ZORA to energy-dependent scalar-relativistic (cross-optimizer agreement and finite-difference checks unchanged) -- re-referenced 2026-10-02 for the corrected PBE reduced gradient (TFAC ported from CP-PAW 2024; also fixed in the SCAN correlation code; TYPE=-10 reproduces the old values)"
+    },
+    {
+      "run": "dav_var",
+      "quantity": "dedeps_trace",
+      "value": -0.0798041392,
+      "tol": 2e-06,
+      "reference": "2026-09-27; finite difference -0.1009 at 25 Ry and -0.09844 vs analytic -0.09797 at 50 Ry (difference is Pulay stress) -- re-referenced 2026-09-29 after the default relativistic treatment changed from ZORA to energy-dependent scalar-relativistic (cross-optimizer agreement and finite-difference checks unchanged) -- re-referenced 2026-10-02 for the corrected PBE reduced gradient (TFAC ported from CP-PAW 2024; also fixed in the SCAN correlation code; TYPE=-10 reproduces the old values) -- re-referenced 2026-10-03: published PBE beta, SCAN-L PC07opt deorbitalization, spin-polarized SCAN correlation, CODATA 2018 constants (output now in eV; references stay in Hartree)"
+    }
+  ],
+  "fd": [
+    {
+      "quantity": "force:SI2:x",
+      "run": "dav_var",
+      "plus": "xp",
+      "minus": "xm",
+      "step": 0.0188972612,
+      "factor": -1.0,
+      "tol": 5e-06
+    },
+    {
+      "quantity": "dedeps_trace",
+      "run": "dav_var",
+      "plus": "sp",
+      "minus": "sm",
+      "step": 0.005,
+      "factor": 1.0,
+      "tol": 0.003
+    }
+  ],
+  "agree": [
+    {
+      "runs": [
+        "dav_var",
+        "rmm_var",
+        "cg_var",
+        "dav_pulay"
+      ],
+      "quantity": "force:SI2:x",
+      "tol": 2e-07
+    },
+    {
+      "runs": [
+        "dav_var",
+        "rmm_var",
+        "cg_var",
+        "dav_pulay"
+      ],
+      "quantity": "dedeps_trace",
+      "tol": 2e-05
+    },
+    {
+      "runs": [
+        "dav_var",
+        "md"
+      ],
+      "quantity": "force:SI2:x",
+      "tol": 3e-05
+    },
+    {
+      "runs": [
+        "dav_var",
+        "md"
+      ],
+      "quantity": "dedeps_trace",
+      "tol": 0.003
+    }
+  ],
+  "known_issues": {}
+}

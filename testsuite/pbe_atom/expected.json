@@ -1,0 +1,5 @@
+{
+  "description": "Single free C atom, TYPE='PBE', 12 friction-damped steps -- checks the plain-PBE code path stays numerically stable. -- re-referenced 2026-09-29 after the default relativistic treatment changed from ZORA to energy-dependent scalar-relativistic (cross-optimizer agreement and finite-difference checks unchanged) -- re-referenced 2026-10-02 for the corrected PBE reduced gradient (TFAC ported from CP-PAW 2024; also fixed in the SCAN correlation code; TYPE=-10 reproduces the old values) -- re-referenced 2026-10-03: published PBE beta, SCAN-L PC07opt deorbitalization, spin-polarized SCAN correlation, CODATA 2018 constants (output now in eV; references stay in Hartree) (this 12-step unconverged run amplifies the uHa change into 1.7 mHa; converged C atom: beta 1.7 uHa + constants 2.3 uHa, verified 2026-10-03)",
+  "energy_ha": -2.574167792,
+  "tolerance_ha": 1e-06
+}

@@ -1,0 +1,7531 @@
+!........1.........2.........3.........4.........5.........6.........7.........8
+!*******************************************************************************
+!*******************************************************************************
+!**                                                                           **
+!**  WAVES OBJECT                                                             **
+!**  THIS OBJECT IS CONTINUED IN PAW_WAVES2.F90                               **
+!**                                                                           **
+!**  PURPOSE: OPERATIONS ON THE PLANE WAVE PART OF THE WAVE FUNCTIONS         **
+!**                                                                           **
+!**  FUNCTIONS:                                                               **
+!**    WAVES$SETR8A(ID,LEN,VAL)                                               **
+!**    WAVES$GETR8A(ID,LEN,VAL)                                               **
+!**    WAVES$SETL4(ID,VAL)                                                    **
+!**    WAVES$INITIALIZE                                                       **
+!**    WAVES$ETOT                                                             **
+!**    WAVES$PROPAGATE                                                        **
+!**    WAVES$ORTHOGONALIZE                                                    **
+!**    WAVES$SWITCH                                                           **
+!**    WAVES$REPORT(NFIL)                                                     **
+!**                                                                           **
+!**  DEPENDECIES:                                                             **
+!**    ERROR                                                                  **
+!**    MPELIB                                                                 **
+!**    PLANEWAVE                                                              **
+!**    SETUP                                                                  **
+!**    ...                                                                    **
+!**                                                                           **
+!**  DEFINITION OF SPIN DIMENSIONS:                                           **
+!**                           | NSPIN | NDIM | NDIMD |                        **
+!**        -------------------------------------------                        **
+!**        NON-SPIN-POLARIZED |   1   |   1  |   1   |                        **
+!**        SPIN POLARIZED     |   2   |   1  |   2   |                        **
+!**        NON-COLLINEAR      |   1   |   2  |   4   |                        **
+!**                                                                           **
+!**     NSPIN IS THE NUMBER OF SLATER DETERMINANTS                            **
+!**     NDIM IS THE NUMBER OF SPINOR DIMENSIONS OF THE WAVE FUNCTION          **
+!**     NDIMD IS THE NUMBER OF DENSITY COMPONENTS. NDIMD=NSPIN*NDIM**2        **
+!**     TWO REPRESENTATIONS ARE USED:                                         **
+!**           NSPIN=2,NDIM=1:  UP/DOWN AND TOTAL/SPIN                         **
+!**           NSPIN=1,NDIM=2:  UPUP/UPDOWN/DOWNUP/DOWNDOWN AND                **
+!**                            TOTAL/MX/MY/MZ                                 **
+!**                                                                           **
+!*******************************************************************************
+!*******************************************************************************
+!
+!........1.........2.........3.........4.........5.........6.........7.........8
+MODULE WAVES_MODULE                                                
+!*******************************************************************************
+!**                                                                           **
+!**                                                                           **
+!************************************************P.E. BLOECHL, (1995)***********
+USE LINKEDLIST_MODULE
+! ------------------------------------------------------------------------------
+! THE TYPE MAP_TYPE DESCRIBES THE ARRANGEMENT OF PROJECTOR FUNCTIONS 
+! AND THEIR LINKS TO ATOMS AN ANGULAR MOMENTA
+TYPE MAP_TYPE
+  INTEGER(4)         :: NAT         ! #(ATOMS)
+  INTEGER(4)         :: NSP         ! #(ATOM TYPES)
+  INTEGER(4)         :: NBAREPRO    ! #(LN*NAT)
+  INTEGER(4)         :: NRL         ! #(LOCAL REAL SPACE GRID POINTS)
+  INTEGER(4)         :: NPRO        ! #(LMN*NAT)
+  INTEGER(4)         :: LMX
+  INTEGER(4)         :: LNXX        ! X(LNX)
+  INTEGER(4),POINTER :: LNX(:)      !(NSP)
+  INTEGER(4),POINTER :: LMNX(:)     !(NSP)
+  INTEGER(4),POINTER :: LOX(:,:)    !(LNXX,NSP) MAIN ANGULAR MOMENTUM OF AN LN
+  INTEGER(4),POINTER :: ISP(:)      !(NAT) POINTER TO ATOM TYPES
+END TYPE MAP_TYPE
+! ------------------------------------------------------------------------------
+! THE TYPE GSET_TYPE KEEPS PROJECTOR FUNCTIONS SPHERICAL HARMONICS AND
+! STRUCTURE FACTORS FOR A GIVEN K-POINT
+! GSET_TYPE REFERS TO MAP_TYPE FOR DIMENSIONING OF ITS ARRAYS
+TYPE GSET_TYPE
+  CHARACTER(16)      :: ID         ! GSET IDENTIFIER
+  LOGICAL(4)         :: TINV       ! SWITCH: TIME INVERSION SYMMETRY
+  LOGICAL(4)         :: TSUPER=.FALSE. ! GAMMA-POINT HALF-SPHERE STORAGE ACTIVE
+                                   ! (SEE LGAMMASUPER). NGL IS ALREADY THE
+                                   ! HALVED COUNT WHEN THIS IS TRUE.
+  INTEGER(4)         :: NGL        ! #(PLANE WAVES(LOCAL))
+  REAL(8)   ,POINTER :: PRO(:,:)   ! (NGL,NBAREPRO) PROJECTOR
+  REAL(8)   ,POINTER :: DPRO(:,:)  ! (NGL,NBAREPRO) PROJECTOR |G|DP/DG-L*P
+  REAL(8)   ,POINTER :: YLM(:,:)   ! (NGL,LMXX) REAL SPHERICAL HARMONICS
+  REAL(8)   ,POINTER :: SYLM(:,:,:)! (NGL,LMXX,6) STRAINED SPHERICAL HARMONICS
+  REAL(8)   ,POINTER :: MPSI(:)    ! (NGL) WAVE FUNCTION MASS
+!PB070802  REAL(8)   ,POINTER :: DMPSI(:)   ! (NGL) DMPSI/DT
+  REAL(8)   ,POINTER :: BUCKET(:)  ! BUCKET POTENTIAL
+  REAL(8)   ,POINTER :: DBUCKET(:) ! 1/G* DBUCKET/DG
+END TYPE GSET_TYPE
+TYPE WVSET_TYPE  !==============================================================
+  TYPE(GSET_TYPE),POINTER :: GSET
+  INTEGER(4)         :: NB
+  INTEGER(4)         :: NBH
+  COMPLEX(8),POINTER :: PSI0(:,:,:)=>NULL()     !(NGL,NDIM,NBH)  PSPSI(0)
+  COMPLEX(8),POINTER :: PSIM(:,:,:)=>NULL()     !(NGL,NDIM,NBH)  PSPSI(-,+)(G)
+  COMPLEX(8),POINTER :: PROJ(:,:,:)=>NULL()     !(NDIM,NBH,NPRO) <PSPSI|P>
+  COMPLEX(8),POINTER :: TBC_NEW(:,:,:)=>NULL()  !(NDIM,NBH,NORB) |PSI>=|CHI>*TBC
+  COMPLEX(8),POINTER :: HTBC_NEW(:,:,:)=>NULL()     !(NDIM,NBH,NPRO) DE/DTBC
+  COMPLEX(8),POINTER :: HPSI(:,:,:)=>NULL()     !(NGWLX,NB,IDIM)
+                                        ! +(WAVES$HPSI)-(WAVES$PROPAGATE)
+  COMPLEX(8),POINTER :: OPSI(:,:,:)     !(NGWLX,NB,IDIM)
+                                        ! +(WAVES$HPSI)-(WAVES$PROPAGATE)
+  COMPLEX(8),POINTER :: RLAM0(:,:)      !(NB,NB)
+  COMPLEX(8),POINTER :: RLAMM(:,:)      !(NB,NB)
+  COMPLEX(8),POINTER :: RLAM2M(:,:)     !(NB,NB)
+  COMPLEX(8),POINTER :: RLAM3M(:,:)     !(NB,NB)
+  COMPLEX(8),POINTER :: EIGVEC(:,:)     !(NB,NB) ENERGY EIGENVALUES AFTER DIAG
+  REAL(8)   ,POINTER :: EIGVAL(:)       !(NB)    EIGENVALUES AFTER DIAG
+  REAL(8)   ,POINTER :: EXPECTVAL(:)    !(NB) !<PSI_N|H|PSI_N>
+END TYPE WVSET_TYPE
+TYPE EXTERNALPOINTER_TYPE !=====================================================
+  INTEGER(4) :: IB
+  INTEGER(4) :: IKPT
+  INTEGER(4) :: ISPIN
+  INTEGER(4) :: IAT
+  LOGICAL(4) :: TIM
+END TYPE EXTERNALPOINTER_TYPE
+!===============================================================================
+!== DATA THAT DESCRIBE FUNCTIONALITY OF WAVES OBJECT                          ==
+!==  THESE DATA HAVE TO BE SET EXPLICITELY                                    ==
+!===============================================================================
+INTEGER(4)  :: NKPT          ! #(K-POINTS) SEE ALSO NKPTL
+INTEGER(4)  :: NSPIN=1       ! #(SPINS)
+INTEGER(4)  :: NDIM=1        ! #(WAVE FUNCTION COMPONENTS)
+INTEGER(4)  :: NDIMD=1       ! #(WAVE FUNCTION COMPONENTS)
+REAL(8)     :: EPWPSI=0.D0   ! PLANE WAVE CUTOFF GMAX**2/2
+LOGICAL(4)  :: TBUCKET=.FALSE.
+REAL(8)     :: EPWPSI0=0.D0  ! PARAMETER FOR PLANE WAVE CUTOFF POTENTIAL
+REAL(8)     :: D2EPWPSI=0.D0 ! PARAMETER FOR PLANE WAVE CUTOFF POTENTIAL
+REAL(8)     :: EPWRHO=0.D0   ! PLANE WAVE CUTOFF GMAX**2/2
+REAL(8)     :: EMASS=0.D0    ! MPSI(G)=EMASS*(1+EMASSCG2*G2)
+REAL(8)     :: EMASSCG2=0.D0 ! MPSI(G)=EMASS*(1+EMASSCG2*G2)
+REAL(8)     :: ANNEE=0.D0    ! FRICTION 
+LOGICAL(4)  :: TSTOP=.FALSE. ! INITIAL VELOCITY SET TO ZERO
+CHARACTER(32):: RSTRTTYPE='DYNAMIC'
+LOGICAL(4)  :: TRANDOM=.FALSE.    ! INITIAL VELOCITIES RANDOMIZED
+REAL(8)     :: AMPRANDOM=0.D0
+LOGICAL(4)  :: TSAFEORTHO=.TRUE.  ! CHOICE OR ORTHOGONALIZATION
+LOGICAL(4)  :: TSWAPSTATES=.FALSE. ! CHOICE OR SWITCHING STATES IN A BAND CROSSING
+LOGICAL(4)  :: TSTRAIGHTEN=.TRUE. ! TRANSFORM TO EIGENSTATES
+REAL(8)     :: DELT=0.D0          ! TIME STEP IN A.U.
+LOGICAL(4)  :: THAMILTON=.FALSE.  ! HAMILTON MATRIX AVAILABLE
+LOGICAL(4)  :: TRAWSTATES=.FALSE. ! PROVIDES NON-DIAGONALIZED WAVE FUNCTIONS THROUGH $GETR
+LOGICAL(4)  :: TFORCEX=.TRUE.
+LOGICAL(4)  :: TSTRESSX=.FALSE.
+!===============================================================================
+!== PERMANENT DATA, WHICH ARE ORGANIZED BY THE ROUTINES ITSELF                ==
+!===============================================================================
+INTEGER(4)      ,SAVE     :: NKPTL         ! #(LOCAL K-POINTS)
+INTEGER(4)      ,POINTER  :: KMAP(:)
+REAL(8)                   :: WAVEEKIN1=0.D0   ! CALCULATED IN WAVES$ETOT
+REAL(8)                   :: WAVEEKIN2=0.D0   ! CALULATED IN WAVES$ORTHOGONALIZE
+TYPE(WVSET_TYPE),POINTER  :: THISARRAY(:,:)   ! (NKPTL,NSPIN)
+TYPE(WVSET_TYPE),POINTER  :: THIS            ! CURRENT SET OF WAVES
+TYPE(GSET_TYPE) ,POINTER  :: GSET            ! CURRENT SET OF GSET
+TYPE(MAP_TYPE)            :: MAP
+LOGICAL(4)                :: TPR=.FALSE.
+LOGICAL(4)                :: TFIRST=.TRUE.
+TYPE(EXTERNALPOINTER_TYPE):: EXTPNTR
+LOGICAL(4)                :: TFIXRHO=.FALSE.
+LOGICAL(4)                :: TWRITERHO=.FALSE.
+CHARACTER(8)              :: OPTIMIZERTYPE='MD'  ! SWITCH FOR CONJUGATE GRADIENT OR DYNAMICS
+CHARACTER(16)             :: MIXERTYPE='VARIATIONAL' ! MIXER FOR CG/DAV/RMM/EDFT: 'VARIATIONAL', 'PULAY' OR 'ANDERSON'
+REAL(8)                   :: MIXG0SQ=1.5D0       ! KERKER SCREENING WAVEVECTOR**2 [BOHR**-2] FOR EITHER MIXER
+REAL(8)                   :: MIXTOL=1.D-8        ! DENSITY-RESIDUAL NORM BELOW WHICH THE MIXER DECLARES
+                                                  ! CONVERGENCE AND STOPS THE RUN (CG/DAV/RMM ONLY); VASP'S
+                                                  ! ANALOGOUS KNOB IS EDIFF. SEE WAVES_MIXRHO_PUL/_ANDERSON.
+REAL(8)                   :: EDIFFTOL=1.D-6      ! TOTAL-ENERGY CHANGE [HARTREE] BELOW WHICH TWO SUCCESSIVE
+                                                  ! OUTER STEPS ARE CONSIDERED CONVERGED (CG/DAV/RMM ONLY) --
+                                                  ! VASP'S EDIFF ITSELF. COMPLEMENTS MIXTOL: EITHER ONE BEING
+                                                  ! SATISFIED STOPS THE RUN. SEE TIMESTEP, src/vespaw_driver.f90.
+INTEGER(4)                :: RMMNRMMX=4          ! #(RMM-DIIS INNER SWEEPS PER OUTER STEP); SEE RMM$STATE_BY_BLOCK
+INTEGER(4)                :: MIXNHISTORY=0       ! DENSITY-MIXER HISTORY DEPTH OVERRIDE; 0=USE MIXER'S OWN DEFAULT
+INTEGER(4)                :: RMMDELAY=8          ! #(INITIAL OPTIMIZER='RMM' STEPS RUN WITH DAVIDSON INSTEAD); SEE WAVES$ETOT
+INTEGER(4)                :: RMMDELAYCOUNT=0     ! #(OPTIMIZER='RMM' STEPS SEEN SO FAR); COUNTS UP TO RMMDELAY, THEN STOPS
+!     ==========================================================================
+!     == SCAN0R: REAL (ORBITAL-TAU-BASED) DELOCALIZED TSCAN. BOTH ARRAYS ARE  ==
+!     == ON THE WAVE FUNCTION GRID (NRL,NDIMD), I.E. THE SAME SHAPE AS RHO.   ==
+!     == TAU_W IS SET BY WAVES$ETOT (VIA WAVES$TAU) BEFORE WAVES_VOFRHO IS    ==
+!     == CALLED; VTAU_W IS SET BY WAVES_VOFRHO AND CONSUMED BY WAVES_VPSI     ==
+!     == (VIA WAVES_TAUHPSI). VTAU_W IS ALWAYS LEFT ALLOCATED (NRL,NDIMD) AND ==
+!     == ZEROED BY WAVES_VOFRHO REGARDLESS OF TSCANDELOC, SO IT IS ALWAYS     ==
+!     == SAFE TO SEQUENCE-ASSOCIATE (SAME CONVENTION AS RHO/POT ELSEWHERE).   ==
+!     == LTSCANDELOC MIRRORS POTENTIAL_MODULE'S TTSCANDELOC (SET ONCE PER    ==
+!     == WAVES$ETOT CALL) SO WAVES_VPSI CAN GATE THE EXTRA FFT WORK WITHOUT   ==
+!     == AN EXTRA SUBROUTINE CALL PER K-POINT/SPIN/BAND -- SEE                ==
+!     == SCAN0r notes                              ==
+!     ==========================================================================
+REAL(8)   ,ALLOCATABLE    :: TAU_W(:,:)   !(NRL,NDIMD)
+REAL(8)   ,ALLOCATABLE    :: VTAU_W(:,:)  !(NRL,NDIMD)
+LOGICAL(4)                :: LTSCANDELOC=.FALSE.
+!     ==========================================================================
+!     == GAMMA-POINT HALF-SPHERE (TSUPER) WAVEFUNCTION STORAGE. OPT-IN,       ==
+!     == DEFAULT .FALSE.. WHEN TRUE AND A K-POINT HAS GSET%TINV (ONLY EVER    ==
+!     == TRUE AT K=0), WAVES$INITIALIZE ACTIVATES PLANEWAVE$SETL4(...,        ==
+!     == 'SUPER',.TRUE.) FOR THAT K-POINT'S PLANE-WAVE OBJECT (SO GSET%NGL    ==
+!     == BECOMES THE HALF-SPHERE COUNT) AND SETS NBH=NB (NO BAND PAIRING --   ==
+!     == EACH ORBITAL IS STORED INDEPENDENTLY AT HALF RESOLUTION, INSTEAD OF  ==
+!     == TODAY'S NBH=(NB+1)/2 TWO-ORBITALS-PACKED-AT-FULL-NGL SCHEME). SEE    ==
+!     == THE DEV NOTES, "ACTIVATE GAMMA-POINT HALF-SPHERE STORAGE" FOR    ==
+!     == WHY THE TWO SCHEMES CANNOT COEXIST (A PACKED A+I*B SLOT IS NOT       ==
+!     == ITSELF HERMITIAN-SYMMETRIC, SO IT CANNOT BE HALVED BY MINUSG         ==
+!     == FOLDING). RESTART FILES WRITTEN/READ WITH THIS ON ARE NOT YET        ==
+!     == INTERCHANGEABLE WITH ONES WRITTEN WITH IT OFF -- OUT OF SCOPE FOR    ==
+!     == THE FIRST IMPLEMENTATION PASS.                                      ==
+!     ==========================================================================
+LOGICAL(4)                :: LGAMMASUPER=.FALSE.
+!     == LOCAL K-POINT INDEX LAST SELECTED BY WAVES_SELECTWV -- LETS WAVES_HPSI ==
+!     == FIND THE K-VECTOR IT NEEDS FOR THE NTBO HYBRID OPERATOR.               ==
+INTEGER(4)                :: IKPTSELECTED=0
+!     ==========================================================================
+!     == SINGLE-SLOT CACHE FOR THE FULL (STRUCTURE-FACTOR- AND SPHERICAL-     ==
+!     == HARMONIC-RESOLVED) RECIPROCAL-SPACE PROJECTOR ARRAY, BUILT BY        ==
+!     == WAVES_FULLPRO AND CONSUMED BY WAVES_ADDPRO/WAVES_PROJECTIONS. THIS   ==
+!     == ARRAY DEPENDS ONLY ON THE CURRENT GSET (K-POINT) AND ATOMIC          ==
+!     == POSITIONS -- NEITHER CHANGES DURING ELECTRONIC-STRUCTURE             ==
+!     == MINIMIZATION -- YET WAS PREVIOUSLY REBUILT FROM SCRATCH (STRUCTURE   ==
+!     == FACTOR + WAVES_EXPANDPRO, BOTH O(NGL) PER ATOM) ON *EVERY* CALL,     ==
+!     == I.E. EVERY SINGLE H*PSI/O*PSI APPLICATION -- MANY TIMES PER K-POINT  ==
+!     == PER OUTER SCF ITERATION. PROFILING (THE DEV NOTES, 2026-09-07)   ==
+!     == FOUND THIS WAS 63% OF TOTAL CPU ON A 64-ATOM SI TEST. SINCE DAVIDSON/==
+!     == CG/RMM/EDFT ALL PROCESS ONE K-POINT'S FULL BLOCK-SWEEP BEFORE MOVING ==
+!     == TO THE NEXT, A SINGLE SLOT (NOT ONE PER K-POINT) CAPTURES THE        ==
+!     == OVERWHELMING MAJORITY OF THE REDUNDANCY WITHOUT THE MEMORY COST OF   ==
+!     == CACHING EVERY K-POINT'S (NGL,NPRO) ARRAY SIMULTANEOUSLY (PROHIBITIVE ==
+!     == ON A DENSE MESH -- NGL*NPRO*16 BYTES PER K-POINT). INVALIDATED BY A  ==
+!     == PLAIN EQUALITY CHECK ON THE CACHED ATOMIC POSITIONS -- SAFE (NOT A   ==
+!     == TOLERANCE HEURISTIC) SINCE POSITIONS ARE BIT-IDENTICAL UNTIL AN      ==
+!     == ACTUAL IONIC STEP MOVES THEM.                                        ==
+      CHARACTER(16)             :: PROCACHEID=''
+      INTEGER(4)                :: PROCACHENAT=-1
+      INTEGER(4)                :: PROCACHENGL=-1
+      INTEGER(4)                :: PROCACHENPRO=-1
+      REAL(8)   ,ALLOCATABLE    :: PROCACHER(:,:)   !(3,NAT)
+      COMPLEX(8),ALLOCATABLE    :: PROCACHEPRO(:,:) !(NGL,NPRO)
+
+CONTAINS
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WAVES_SELECTWV(IKPT,ISPIN)
+      IMPLICIT NONE
+      INTEGER(4),INTENT(IN) :: IKPT
+      INTEGER(4),INTENT(IN) :: ISPIN
+!     **************************************************************************
+      IF(.NOT.ASSOCIATED(THISARRAY)) THEN
+        CALL ERROR$MSG('THISARRAY DOES NOT EXIST') 
+        CALL ERROR$STOP('WAVES_SELECTWV')
+      END IF 
+      IF(IKPT.GT.NKPTL) THEN
+        CALL ERROR$MSG('IKPT OUT OF RANGE')
+        CALL ERROR$I4VAL('IKPT',IKPT)
+        CALL ERROR$I4VAL('NKPTL',NKPTL)
+        CALL ERROR$STOP('WAVES_SELECTWV')
+      END IF
+      IF(ISPIN.GT.NSPIN) THEN
+        CALL ERROR$MSG('ISPIN OUT OF RANGE')
+        CALL ERROR$I4VAL('ISPIN',ISPIN)
+        CALL ERROR$I4VAL('NSPIN',NSPIN)
+        CALL ERROR$STOP('WAVES_SELECTWV')
+      END IF
+      THIS=>THISARRAY(IKPT,ISPIN)
+      IKPTSELECTED=IKPT
+      GSET=>THIS%GSET
+      RETURN
+      END SUBROUTINE WAVES_SELECTWV
+END MODULE WAVES_MODULE
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WAVES$STATESELECTED(TCHK)
+!     **************************************************************************
+!     **  WAVES$STATESELECTED                                                 **
+!     **  TESTS IF THE EXTERNAL POINTER SELECTS A STATE THAT IS               **
+!     **  AVAILABLE ON THIS TASK                                              **
+!     **************************************************************************
+      USE WAVES_MODULE
+      IMPLICIT NONE
+      LOGICAL(4),INTENT(OUT):: TCHK
+!     **************************************************************************
+      TCHK=.TRUE.
+      TCHK=TCHK.AND.EXTPNTR%IKPT.NE.0
+      TCHK=TCHK.AND.EXTPNTR%ISPIN.NE.0
+      TCHK=TCHK.AND.EXTPNTR%IB.NE.0
+      RETURN
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WAVES$SELECTSTATEPOINTER(IB,IKPT,ISPIN,TCHK)
+!     **************************************************************************
+!     **  SELECTS A SPECIFIC STATE OR WAVES$GET.. ROUTINES.                   **
+!     **  IF THE PRESENT TASK DOES NOT HAVE INFORMATION ON THIS STATE         **
+!     **  TCHK WILL BE FALSE. OTHERWISE IT WILL BE TRUE                       **
+!     **************************************************************************
+      USE WAVES_MODULE
+      IMPLICIT NONE
+      INTEGER(4),INTENT(IN) :: IB
+      INTEGER(4),INTENT(IN) :: IKPT
+      INTEGER(4),INTENT(IN) :: ISPIN
+      LOGICAL(4),INTENT(OUT):: TCHK
+!     **************************************************************************
+      CALL WAVES$SETI4('IKPT',IKPT)
+      CALL WAVES$SETI4('ISPIN',ISPIN)
+      CALL WAVES$SETI4('IB',IB)
+      TCHK=.TRUE.
+      TCHK=TCHK.AND.EXTPNTR%IKPT.NE.0
+      TCHK=TCHK.AND.EXTPNTR%ISPIN.NE.0
+      TCHK=TCHK.AND.EXTPNTR%IB.NE.0
+      RETURN
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WAVES$SETR8(ID,VAL)
+!     **************************************************************************
+!     **  WAVES$SETR8A                                                        **
+!     **************************************************************************
+      USE WAVES_MODULE
+      IMPLICIT NONE
+      CHARACTER(*),INTENT(IN) :: ID
+      REAL(8)     ,INTENT(IN) :: VAL
+!     **************************************************************************
+      IF(ID.EQ.'EPWRHO') THEN
+        EPWRHO=VAL
+      ELSE IF(ID.EQ.'EPWPSI') THEN
+        EPWPSI=VAL
+      ELSE IF(ID.EQ.'EMASS') THEN
+        EMASS=VAL
+      ELSE IF(ID.EQ.'EMASSCG2') THEN
+        EMASSCG2=VAL
+      ELSE IF(ID.EQ.'EPWBUCKET') THEN
+        EPWPSI0=VAL
+      ELSE IF(ID.EQ.'BUCKETPAR') THEN
+        D2EPWPSI=VAL
+        TBUCKET=(D2EPWPSI.NE.0.D0)
+      ELSE IF(ID.EQ.'FRICTION') THEN
+        ANNEE=VAL
+      ELSE IF(ID.EQ.'TIMESTEP') THEN
+        DELT=VAL
+      ELSE IF(ID.EQ.'AMPRE') THEN
+        AMPRANDOM=VAL
+      ELSE IF(ID.EQ.'MIXG0SQ') THEN
+        IF(VAL.LE.0.D0) THEN
+          CALL ERROR$MSG('MIXG0SQ (KERKER SCREENING WAVEVECTOR**2) MUST BE POSITIVE')
+          CALL ERROR$R8VAL('VAL',VAL)
+          CALL ERROR$STOP('WAVES$SETR8')
+        END IF
+        MIXG0SQ=VAL
+      ELSE IF(ID.EQ.'MIXTOL') THEN
+        IF(VAL.LE.0.D0) THEN
+          CALL ERROR$MSG('MIXTOL (DENSITY-MIXER CONVERGENCE TOLERANCE) MUST BE POSITIVE')
+          CALL ERROR$R8VAL('VAL',VAL)
+          CALL ERROR$STOP('WAVES$SETR8')
+        END IF
+        MIXTOL=VAL
+      ELSE IF(ID.EQ.'EDIFF') THEN
+        IF(VAL.LE.0.D0) THEN
+          CALL ERROR$MSG('EDIFF (ENERGY CONVERGENCE TOLERANCE) MUST BE POSITIVE')
+          CALL ERROR$R8VAL('VAL',VAL)
+          CALL ERROR$STOP('WAVES$SETR8')
+        END IF
+        EDIFFTOL=VAL
+      ELSE
+        CALL ERROR$MSG('ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID',ID)
+        CALL ERROR$STOP('WAVES$SETR8')
+      END IF
+      RETURN
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WAVES$GETR8(ID,VAL)
+!     **************************************************************************
+!     **  WAVES$GETR8                                                         **
+!     **************************************************************************
+      USE WAVES_MODULE
+      IMPLICIT NONE
+      CHARACTER(*),INTENT(IN) :: ID
+      REAL(8)     ,INTENT(OUT):: VAL
+!     **************************************************************************
+      IF(ID.EQ.'EPWRHO') THEN
+        VAL=EPWRHO
+      ELSE IF(ID.EQ.'EPWPSI') THEN
+        VAL=EPWPSI
+      ELSE IF(ID.EQ.'EMASS') THEN
+        VAL=EMASS
+      ELSE IF(ID.EQ.'EMASSCG2') THEN
+        VAL=EMASSCG2
+      ELSE IF(ID.EQ.'FRICTION') THEN
+        VAL=ANNEE
+      ELSE IF(ID.EQ.'EKIN(PSI)') THEN
+        IF(WAVEEKIN2.EQ.0.D0) THEN
+          VAL=WAVEEKIN1
+        ELSE
+          VAL=0.5D0*(WAVEEKIN1+WAVEEKIN2)
+        END IF
+      ELSE IF(ID.EQ.'EDIFF') THEN
+        VAL=EDIFFTOL
+      ELSE
+        CALL ERROR$MSG('ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID',ID)
+        CALL ERROR$STOP('WAVES$GETR8')
+      END IF
+      RETURN
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WAVES$GETR8A(ID,LEN,VAL)
+!     **************************************************************************
+!     **  WAVES$GETR8A                                                        **
+!     **************************************************************************
+      USE WAVES_MODULE
+      IMPLICIT NONE
+      CHARACTER(*),INTENT(IN) :: ID
+      INTEGER(4)  ,INTENT(IN) :: LEN
+      REAL(8)     ,INTENT(OUT):: VAL(LEN)
+      COMPLEX(8)  ,ALLOCATABLE:: CWORK1(:)
+      COMPLEX(8)  ,ALLOCATABLE:: CWORK2(:)
+      COMPLEX(8)  ,ALLOCATABLE:: CWORK3(:)
+      INTEGER(4)              :: IKPT,ISPIN,IB,IDIM,IBH,IB1,IB2,IG,IR
+      INTEGER(4)              :: IPRO,IPRO1,IPRO2,IAT,ISP,L,LN,LMNX,LMN
+      INTEGER(4)              :: NB,NBH,NRL,NAT,NGL
+      COMPLEX(8)              :: CSVAR1,CSVAR2
+      COMPLEX(8)  ,PARAMETER  :: CI=(0.D0,1.D0)
+      INTEGER(4)              :: NTASKS,THISTASK
+      LOGICAL(4)              :: TINV
+!     **************************************************************************
+                              CALL TRACE$PUSH('WAVES$GETR8A')
+      CALL MPE$QUERY('MONOMER',NTASKS,THISTASK)
+      IF(ID.EQ.'XXXXXXXXXXXXXX') THEN
+!     
+!     ==========================================================================
+!     ==  REAL SPACE PS WAVE FUNCTION                               ==
+!     ==  NOTE: IB,IKPT,ISPIN MUST BE SET ON LINKEDLIST             ==
+!     ==========================================================================
+!     ELSE IF(ID.EQ.'<PSI|H|PSI>') THEN
+!
+!     ==========================================================================
+!     ==  ENERGY EIGENVALUES                                        ==
+!     ==  NOTE: IKPT,ISPIN MUST BE SET ON LINKEDLIST                ==
+!     ==========================================================================
+      ELSE IF(ID.EQ.'EIGVAL') THEN
+        IKPT=EXTPNTR%IKPT
+        ISPIN=EXTPNTR%ISPIN
+        IF(IKPT.EQ.0) THEN
+          CALL ERROR$MSG('STATE NOT AVAILABLE ON THIS TASK')
+          CALL ERROR$MSG('THIS ERROR OCCURS ONLY FOR PARALLEL JOBS')
+          CALL ERROR$MSG("USE WAVES$GETL4('AVAILABLESTATE',TCHK) TO EXPLORE")
+          CALL ERROR$I4VAL('THISTASK(MOMOMER)',THISTASK)
+          CALL ERROR$I4VAL('IKPT',IKPT)
+          CALL ERROR$I4VAL('ISPIN',ISPIN)
+          CALL ERROR$CHVAL('ID',ID)
+          CALL ERROR$STOP('WAVES$GETR8A')
+        END IF
+        CALL WAVES_SELECTWV(IKPT,ISPIN)
+        CALL PLANEWAVE$SELECT(GSET%ID)
+        IF(.NOT.ASSOCIATED(THIS%EIGVAL)) THEN
+          CALL ERROR$MSG('EIGENVALUES NOT AVAILABLE')
+          CALL ERROR$L4VAL('THAMILTON',THAMILTON)
+          CALL ERROR$CHVAL('ID',ID)
+          CALL ERROR$STOP('WAVES$GETR8A')
+        END IF
+        IF(LEN.NE.THIS%NB) THEN
+          CALL ERROR$MSG('INCONSISTENT LENGTH')
+          CALL ERROR$I4VAL('NB',THIS%NB)
+          CALL ERROR$I4VAL('LEN',LEN)
+          CALL ERROR$CHVAL('ID',ID)
+          CALL ERROR$STOP('WAVES$GETR8A')
+        END IF
+        VAL(:)=THIS%EIGVAL(:)
+!
+!     ==========================================================================
+!     ==  ENERGY EXPECTATIONS VALUES OF THE ONE-PARTCLE STATES      ==
+!     ==  NOTE: IKPT,ISPIN MUST BE SET ON LINKEDLIST                ==
+!     ==========================================================================
+      ELSE IF(ID.EQ.'<PSI|H|PSI>') THEN
+        IKPT=EXTPNTR%IKPT
+        IF(IKPT.EQ.0) THEN
+          CALL ERROR$MSG('STATE NOT AVAILABLE ON THIS TASK')
+          CALL ERROR$MSG('THIS ERROR OCCURS ONLY FOR PARALLEL JOBS')
+          CALL ERROR$MSG("USE WAVES$GETL4('AVAILABLESTATE',TCHK) TO EXPLORE")
+          CALL ERROR$I4VAL('THISTASK(MOMOMER)',THISTASK)
+          CALL ERROR$I4VAL('IKPT',IKPT)
+          CALL ERROR$I4VAL('ISPIN',ISPIN)
+          CALL ERROR$CHVAL('ID',ID)
+          CALL ERROR$STOP('WAVES$GETR8A')
+        END IF
+        ISPIN=EXTPNTR%ISPIN
+        CALL WAVES_SELECTWV(IKPT,ISPIN)
+        CALL PLANEWAVE$SELECT(GSET%ID)
+        IF(.NOT.ASSOCIATED(THIS%EXPECTVAL)) THEN
+          CALL ERROR$MSG('ENERGY EXPECTATION VALUES NOT AVAILABLE')
+          CALL ERROR$L4VAL('THAMILTON',THAMILTON)
+          CALL ERROR$CHVAL('ID',ID)
+          CALL ERROR$STOP('WAVES$GETR8A')
+        END IF
+        IF(LEN.NE.THIS%NB) THEN
+          CALL ERROR$MSG('INCONSISTENT LENGTH')
+          CALL ERROR$I4VAL('NB',THIS%NB)
+          CALL ERROR$I4VAL('LEN',LEN)
+          CALL ERROR$CHVAL('ID',ID)
+          CALL ERROR$STOP('WAVES$GETR8A')
+        END IF
+        VAL(:)=THIS%EXPECTVAL(:)
+!
+!     ==========================================================================
+!     ==  REAL SPACE PS WAVE FUNCTION                               ==
+!     ==  NOTE: IB,IKPT,ISPIN MUST BE SET ON LINKEDLIST             ==
+!     ==========================================================================
+      ELSE IF(ID.EQ.'PSPSI') THEN
+        IKPT=EXTPNTR%IKPT
+        IF(IKPT.EQ.0) THEN
+          CALL ERROR$MSG('STATE NOT AVAILABLE ON THIS TASK')
+          CALL ERROR$MSG('THIS ERROR OCCURS ONLY FOR PARALLEL JOBS')
+          CALL ERROR$MSG("USE WAVES$GETL4('AVAILABLESTATE',TCHK) TO EXPLORE")
+          CALL ERROR$I4VAL('THISTASK(MOMOMER)',THISTASK)
+          CALL ERROR$I4VAL('IKPT',IKPT)
+          CALL ERROR$I4VAL('ISPIN',ISPIN)
+          CALL ERROR$CHVAL('ID',ID)
+          CALL ERROR$STOP('WAVES$GETR8A')
+        END IF
+        ISPIN=EXTPNTR%ISPIN
+        IB=EXTPNTR%IB
+        IF(NSPIN.EQ.1.AND.NDIM.EQ.2) THEN
+          IDIM=ISPIN
+          ISPIN=1
+        ELSE
+          IDIM=1
+        END IF
+        CALL WAVES_SELECTWV(IKPT,ISPIN)
+        CALL PLANEWAVE$SELECT(GSET%ID)
+        IF(.NOT.ASSOCIATED(THIS%EIGVEC)) THEN
+          CALL ERROR$MSG('EIGENSTATES NOT AVAILABLE')
+          CALL ERROR$L4VAL('THAMILTON',THAMILTON)
+          CALL ERROR$CHVAL('ID',ID)
+          CALL ERROR$STOP('WAVES$GETR8A')
+        END IF
+        NGL=GSET%NGL
+        NB=THIS%NB
+        NBH=THIS%NBH
+        TINV=GSET%TINV
+        ALLOCATE(CWORK1(NGL))
+        CWORK1(:)=(0.D0,0.D0)
+        IF(TINV) THEN
+          ALLOCATE(CWORK2(NGL))
+          CWORK2(:)=(0.D0,0.D0)
+          DO IBH=1,NBH
+            IB1=2*IBH-1
+            IB2=2*IBH
+            CSVAR1=0.5D0*(THIS%EIGVEC(IB1,IB)-CI*THIS%EIGVEC(IB2,IB))
+            CSVAR2=0.5D0*(THIS%EIGVEC(IB1,IB)+CI*THIS%EIGVEC(IB2,IB))
+            CSVAR2=CONJG(CSVAR2)
+            DO IG=1,NGL
+              CWORK1(IG)=CWORK1(IG)+THIS%PSI0(IG,IDIM,IBH)*CSVAR1
+              CWORK2(IG)=CWORK2(IG)+THIS%PSI0(IG,IDIM,IBH)*CSVAR2
+            ENDDO
+          ENDDO
+          ALLOCATE(CWORK3(NGL))
+          CALL PLANEWAVE$INVERTG(NGL,CWORK2,CWORK3)
+          DO IG=1,NGL
+            CWORK1(IG)=CWORK1(IG)+CWORK3(IG)
+          ENDDO
+          DEALLOCATE(CWORK2)
+          DEALLOCATE(CWORK3)
+        ELSE
+          DO IB1=1,NB
+            CSVAR1=THIS%EIGVEC(IB1,IB)
+            DO IG=1,NGL
+              CWORK1(IG)=CWORK1(IG)+THIS%PSI0(IG,IDIM,IB1)*CSVAR1
+            ENDDO
+          ENDDO
+        END IF
+        NRL=MAP%NRL
+        IF(NRL.NE.LEN) THEN
+          CALL ERROR$MSG('SIZE INCONSISTENT')
+          CALL ERROR$CHVAL('ID',ID)
+          CALL ERROR$STOP('WAVES$GETR8A')
+        END IF
+        ALLOCATE(CWORK2(NRL))
+        CALL PLANEWAVE$FFT('GTOR',1,NGL,CWORK1,NRL,CWORK2)
+        DEALLOCATE(CWORK1)
+        IF(EXTPNTR%TIM) THEN
+          DO IR=1,NRL
+            VAL(IR)=AIMAG(CWORK2(IR))
+          ENDDO
+        ELSE
+          DO IR=1,NRL
+            VAL(IR)=REAL(CWORK2(IR),KIND=8)
+          ENDDO
+        END IF
+        DEALLOCATE(CWORK2)
+!
+!     ==========================================================================
+!     ==  GET PROJECTIONS                                                     ==
+!     ==  FOR A SPECIFIED KPOINT(IKPT), SPIN (ISPIN), BAND(IB),               ==
+!     ==  REAL OR IMAGINARY PART (TIM), ATOM(IAT) AS SPECIFIED IN EXTPTR.     ==
+!     ==  THE PROJECTION IS OBTAINED FOR EIGENSTATES                          ==
+!     ==========================================================================
+      ELSE IF(ID.EQ.'<PSPSI|PRO>') THEN
+        IKPT=EXTPNTR%IKPT   ! IKPT REFERS TO LOCAL KPOINTS
+        IF(IKPT.EQ.0) THEN
+          CALL ERROR$MSG('STATE NOT AVAILABLE ON THIS TASK')
+          CALL ERROR$MSG('THIS ERROR OCCURS ONLY FOR PARALLEL JOBS')
+          CALL ERROR$MSG("USE WAVES$GETL4('AVAILABLESTATE',TCHK) TO EXPLORE")
+          CALL ERROR$I4VAL('THISTASK(MOMOMER)',THISTASK)
+          CALL ERROR$I4VAL('IKPT',IKPT)
+          CALL ERROR$I4VAL('ISPIN',ISPIN)
+          CALL ERROR$CHVAL('ID',ID)
+          CALL ERROR$STOP('WAVES$GETR8A')
+        END IF
+        ISPIN=EXTPNTR%ISPIN
+        IB=EXTPNTR%IB
+        IF(NSPIN.EQ.1.AND.NDIM.EQ.2) THEN
+          IDIM=ISPIN
+          ISPIN=1
+        ELSE
+          IDIM=1
+        END IF
+        CALL WAVES_SELECTWV(IKPT,ISPIN)
+        IF(.NOT.ASSOCIATED(THIS%EIGVEC)) THEN
+          CALL ERROR$MSG('EIGENSTATES NOT AVAILABLE')
+          CALL ERROR$L4VAL('THAMILTON',THAMILTON)
+          CALL ERROR$CHVAL('ID',ID)
+          CALL ERROR$STOP('WAVES$GETR8A')
+        END IF
+        TINV=GSET%TINV
+        NB=THIS%NB
+        NBH=THIS%NBH
+        NAT=MAP%NAT
+!
+        IPRO=0
+        DO IAT=1,NAT
+          IF(IAT.EQ.EXTPNTR%IAT)IPRO1=IPRO+1
+          ISP=MAP%ISP(IAT)
+          DO LN=1,MAP%LNX(ISP)
+            L=MAP%LOX(LN,ISP)
+            IPRO=IPRO+2*L+1
+          ENDDO
+          IF(IAT.EQ.EXTPNTR%IAT) THEN
+            IPRO2=IPRO
+            EXIT
+          END IF
+        ENDDO
+        LMNX=IPRO2-IPRO1+1
+!
+!       == TRANSFORM TO EIGENSTATES ============================================
+        ALLOCATE(CWORK1(LMNX))
+        CWORK1(:)=(0.D0,0.D0)
+        IF(TINV) THEN
+          DO IBH=1,NBH
+            IB1=2*IBH-1
+            IB2=2*IBH
+            CSVAR1=0.5D0*(THIS%EIGVEC(IB1,IB)-CI*THIS%EIGVEC(IB2,IB))
+            CSVAR2=0.5D0*(THIS%EIGVEC(IB1,IB)+CI*THIS%EIGVEC(IB2,IB))
+            DO IPRO=IPRO1,IPRO2
+              LMN=IPRO-IPRO1+1
+              CWORK1(LMN)=CWORK1(LMN)+THIS%PROJ(IDIM,IBH,IPRO)*CSVAR1 &
+                               +CONJG(THIS%PROJ(IDIM,IBH,IPRO))*CSVAR2
+            ENDDO
+          ENDDO
+        ELSE
+          DO IB1=1,NB
+            CSVAR1=THIS%EIGVEC(IB1,IB)
+            DO IPRO=IPRO1,IPRO2
+              LMN=IPRO-IPRO1+1
+              CWORK1(LMN)=CWORK1(LMN)+THIS%PROJ(IDIM,IB1,IPRO)*CSVAR1
+            ENDDO
+          ENDDO             
+        END IF
+        IF(LMNX.NE.LEN) THEN
+          CALL ERROR$MSG('SIZE INCONSISTENT')
+          CALL ERROR$MSG('LMNX AND LEN MUST BE EQUAL')
+          CALL ERROR$CHVAL('ID',ID)
+          CALL ERROR$I4VAL('LEN',LEN)
+          CALL ERROR$I4VAL('LMNX',LMNX)
+          CALL ERROR$I4VAL('EXTPNTR%IAT',EXTPNTR%IAT)
+          CALL ERROR$I4VAL('EXTPNTR%IKPT',EXTPNTR%IKPT)
+          CALL ERROR$I4VAL('EXTPNTR%ISPIN',EXTPNTR%ISPIN)
+          CALL ERROR$I4VAL('EXTPNTR%IB',EXTPNTR%IB)
+          CALL ERROR$L4VAL('EXTPNTR%TIM',EXTPNTR%TIM)
+          CALL ERROR$STOP('WAVES$GETR8A')
+        END IF
+        VAL(:)=0.D0
+        IF(EXTPNTR%TIM) THEN
+          DO LMN=1,LMNX
+            VAL(LMN)=AIMAG(CWORK1(LMN))
+          ENDDO
+        ELSE
+          DO LMN=1,LMNX
+            VAL(LMN)=REAL(CWORK1(LMN),KIND=8)
+          ENDDO
+        END IF
+        DEALLOCATE(CWORK1)
+      ELSE
+        CALL ERROR$MSG('ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID',ID)
+        CALL ERROR$STOP('WAVES$GETR8A')
+      END IF
+                              CALL TRACE$POP
+      RETURN
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WAVES$GETC8A(ID,LEN,VAL)
+!     **************************************************************************
+!     **  WAVES$GETC8A                                                        **
+!     **************************************************************************
+      USE WAVES_MODULE
+      IMPLICIT NONE
+      CHARACTER(*),INTENT(IN) :: ID
+      INTEGER(4)  ,INTENT(IN) :: LEN
+      COMPLEX(8)  ,INTENT(OUT):: VAL(LEN)
+      COMPLEX(8)  ,ALLOCATABLE:: CWORK1(:)
+      COMPLEX(8)  ,ALLOCATABLE:: CWORK2(:)
+      COMPLEX(8)  ,ALLOCATABLE:: CWORK3(:)
+      INTEGER(4)              :: IKPT,ISPIN,IB,IDIM,IBH,IB1,IB2,IG,IR
+      INTEGER(4)              :: IPRO,IPRO1,IPRO2,IAT,ISP,L,LN,LMNX,LMN
+      INTEGER(4)              :: NB,NBH,NRL,NAT,NGL
+      COMPLEX(8)              :: CSVAR1,CSVAR2
+      COMPLEX(8)  ,PARAMETER  :: CI=(0.D0,1.D0)
+      LOGICAL(4)              :: TINV
+!     **************************************************************************
+                              CALL TRACE$PUSH('WAVES$GETR8A')
+!
+!     ==========================================================================
+!     ==  REAL SPACE PS WAVE FUNCTION                                         ==
+!     ==  NOTE: IB,IKPT,ISPIN MUST BE SET ON LINKEDLIST                       ==
+!     ==========================================================================
+      IF(ID.EQ.'PSPSI') THEN
+        IKPT=EXTPNTR%IKPT
+        IF(IKPT.EQ.0) THEN
+          CALL ERROR$MSG('STATE NOT AVAILABLE ON THIS TASK')
+          CALL ERROR$MSG('THIS ERROR OCCURS ONLY FOR PARALLEL JOBS')
+          CALL ERROR$MSG("USE WAVES$GETL4('AVAILABLESTATE',TCHK) TO EXPLORE")
+          CALL ERROR$STOP('WAVES$GETR8A')
+        END IF
+        ISPIN=EXTPNTR%ISPIN
+        IB=EXTPNTR%IB
+        IF(NSPIN.EQ.1.AND.NDIM.EQ.2) THEN
+          IDIM=ISPIN
+          ISPIN=1
+        ELSE
+          IDIM=1
+        END IF
+        CALL WAVES_SELECTWV(IKPT,ISPIN)
+        CALL PLANEWAVE$SELECT(GSET%ID)
+        IF(.NOT.ASSOCIATED(THIS%EIGVEC)) THEN
+          CALL ERROR$MSG('EIGENSTATES NOT AVAILABLE')
+          CALL ERROR$L4VAL('THAMILTON',THAMILTON)
+          CALL ERROR$STOP('WAVES$GETR8A')
+        END IF
+        NGL=GSET%NGL
+        NB=THIS%NB
+        NBH=THIS%NBH
+        TINV=GSET%TINV
+        ALLOCATE(CWORK1(NGL))
+        CWORK1(:)=(0.D0,0.D0)
+!!$WRITE(*,*)"IB=",IB
+!!$WRITE(*,FMT='("EIGVEC=",100("(",2F10.5,") "))')THIS%EIGVEC(:,IB)
+        IF(TINV) THEN
+          ALLOCATE(CWORK2(NGL))
+          CWORK2(:)=(0.D0,0.D0)
+          DO IBH=1,NBH
+            IB1=2*IBH-1
+            IB2=2*IBH
+            CSVAR1=0.5D0*(THIS%EIGVEC(IB1,IB)-CI*THIS%EIGVEC(IB2,IB))
+            CSVAR2=0.5D0*(THIS%EIGVEC(IB1,IB)+CI*THIS%EIGVEC(IB2,IB))
+            CSVAR2=CONJG(CSVAR2)
+            DO IG=1,NGL
+              CWORK1(IG)=CWORK1(IG)+THIS%PSI0(IG,IDIM,IBH)*CSVAR1
+              CWORK2(IG)=CWORK2(IG)+THIS%PSI0(IG,IDIM,IBH)*CSVAR2
+            ENDDO
+          ENDDO
+          ALLOCATE(CWORK3(NGL))
+          CALL PLANEWAVE$INVERTG(NGL,CWORK2,CWORK3)
+          DO IG=1,NGL
+            CWORK1(IG)=CWORK1(IG)+CWORK3(IG)
+          ENDDO
+          DEALLOCATE(CWORK2)
+          DEALLOCATE(CWORK3)
+        ELSE
+          DO IB1=1,NB
+            CSVAR1=THIS%EIGVEC(IB1,IB)
+            DO IG=1,NGL
+              CWORK1(IG)=CWORK1(IG)+THIS%PSI0(IG,IDIM,IB1)*CSVAR1
+            ENDDO
+          ENDDO
+        END IF
+        NRL=MAP%NRL
+        IF(NRL.NE.LEN) THEN
+          CALL ERROR$MSG('SIZE INCONSISTENT')
+          CALL ERROR$CHVAL('ID',ID)
+          CALL ERROR$STOP('WAVES$GETR8A')
+        END IF
+        CALL PLANEWAVE$FFT('GTOR',1,NGL,CWORK1,NRL,VAL)
+        DEALLOCATE(CWORK1)
+!
+!     ==========================================================================
+!     ==  GET PROJECTIONS                                                     ==
+!     ==  FOR A SPECIFIED KPOINT(IKPT), SPIN (ISPIN), BAND(IB),               ==
+!     ==  REAL OR IMAGINARY PART (TIM), ATOM(IAT) AS SPECIFIED IN EXTPTR.     ==
+!     ==  THE PROJECTION IS OBTAINED FOR EIGENSTATES                          ==
+!     ==========================================================================
+      ELSE IF(ID.EQ.'<PSPSI|PRO>') THEN
+        IKPT=EXTPNTR%IKPT   ! IKPT REFERS TO LOCAL KPOINTS
+        IF(IKPT.EQ.0) THEN
+          CALL ERROR$MSG('STATE NOT AVAILABLE ON THIS TASK')
+          CALL ERROR$MSG('THIS ERROR OCCURS ONLY FOR PARALLEL JOBS')
+          CALL ERROR$MSG("USE WAVES$GETL4('AVAILABLESTATE',TCHK) TO EXPLORE")
+          CALL ERROR$STOP('WAVES$GETR8A')
+        END IF
+        ISPIN=EXTPNTR%ISPIN
+        IB=EXTPNTR%IB
+        IF(NSPIN.EQ.1.AND.NDIM.EQ.2) THEN
+          IDIM=ISPIN
+          ISPIN=1
+        ELSE
+          IDIM=1
+        END IF
+        CALL WAVES_SELECTWV(IKPT,ISPIN)
+        IF(.NOT.ASSOCIATED(THIS%EIGVEC)) THEN
+          CALL ERROR$MSG('EIGENSTATES NOT AVAILABLE')
+          CALL ERROR$L4VAL('THAMILTON',THAMILTON)
+          CALL ERROR$STOP('WAVES$GETR8A')
+        END IF
+        TINV=GSET%TINV
+        NB=THIS%NB
+        NBH=THIS%NBH
+        NAT=MAP%NAT
+!
+        IPRO=0
+        DO IAT=1,NAT
+          IF(IAT.EQ.EXTPNTR%IAT)IPRO1=IPRO+1
+          ISP=MAP%ISP(IAT)
+          DO LN=1,MAP%LNX(ISP)
+            L=MAP%LOX(LN,ISP)
+            IPRO=IPRO+2*L+1
+          ENDDO
+          IF(IAT.EQ.EXTPNTR%IAT) THEN
+            IPRO2=IPRO
+            EXIT
+          END IF
+        ENDDO
+        LMNX=IPRO2-IPRO1+1
+!
+!       == TRANSFORM TO EIGENSTATES ============================================
+        ALLOCATE(CWORK1(LMNX))
+        CWORK1(:)=(0.D0,0.D0)
+        IF(TINV) THEN
+          DO IBH=1,NBH
+            IB1=2*IBH-1
+            IB2=2*IBH
+            CSVAR1=0.5D0*(THIS%EIGVEC(IB1,IB)-CI*THIS%EIGVEC(IB2,IB))
+            CSVAR2=0.5D0*(THIS%EIGVEC(IB1,IB)+CI*THIS%EIGVEC(IB2,IB))
+            DO IPRO=IPRO1,IPRO2
+              LMN=IPRO-IPRO1+1
+              CWORK1(LMN)=CWORK1(LMN)+THIS%PROJ(IDIM,IBH,IPRO)*CSVAR1 &
+                               +CONJG(THIS%PROJ(IDIM,IBH,IPRO))*CSVAR2
+            ENDDO
+          ENDDO
+        ELSE
+          DO IB1=1,NB
+            CSVAR1=THIS%EIGVEC(IB1,IB)
+            DO IPRO=IPRO1,IPRO2
+              LMN=IPRO-IPRO1+1
+              CWORK1(LMN)=CWORK1(LMN)+THIS%PROJ(IDIM,IB1,IPRO)*CSVAR1
+            ENDDO
+          ENDDO             
+        END IF
+        IF(LMNX.GT.LEN) THEN
+          CALL ERROR$MSG('SIZE INCONSISTENT')
+          CALL ERROR$CHVAL('ID',ID)
+          CALL ERROR$STOP('WAVES$GETR8A')
+        END IF
+        VAL(:)=0.D0
+        VAL(:LMNX)=CWORK1(:LMNX)
+        DEALLOCATE(CWORK1)
+      ELSE
+        CALL ERROR$MSG('ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID',ID)
+        CALL ERROR$STOP('WAVES$GETC8A')
+      END IF
+                              CALL TRACE$POP
+      RETURN
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WAVES$SETI4(ID,VAL)
+!     **************************************************************************
+!     **                                                                      **
+!     **************************************************************************
+      USE MPE_MODULE
+      USE WAVES_MODULE
+      IMPLICIT NONE
+      CHARACTER(*),INTENT(IN) :: ID
+      INTEGER(4)  ,INTENT(IN) :: VAL
+      INTEGER(4)              :: IKPT,IKPTL,I
+      INTEGER(4)              :: THISTASK,NTASKS
+!     **************************************************************************
+      IF(ID.EQ.'SPINORDIM') THEN
+        NDIM=VAL
+!
+      ELSE IF(ID.EQ.'RMMNRMMX') THEN
+        IF(VAL.LT.1) THEN
+          CALL ERROR$MSG('RMMNRMMX (RMM-DIIS INNER SWEEPS) MUST BE AT LEAST 1')
+          CALL ERROR$I4VAL('VAL',VAL)
+          CALL ERROR$STOP('WAVES$SETI4')
+        END IF
+        RMMNRMMX=VAL
+!
+      ELSE IF(ID.EQ.'MIXNHISTORY') THEN
+        IF(VAL.LT.0) THEN
+          CALL ERROR$MSG('MIXNHISTORY (DENSITY-MIXER HISTORY DEPTH) MUST BE AT LEAST 0')
+          CALL ERROR$I4VAL('VAL',VAL)
+          CALL ERROR$STOP('WAVES$SETI4')
+        END IF
+        MIXNHISTORY=VAL
+!
+      ELSE IF(ID.EQ.'RMMDELAY') THEN
+        IF(VAL.LT.0) THEN
+          CALL ERROR$MSG('RMMDELAY (CG WARM-UP STEPS BEFORE RMM) MUST BE AT LEAST 0')
+          CALL ERROR$I4VAL('VAL',VAL)
+          CALL ERROR$STOP('WAVES$SETI4')
+        END IF
+        RMMDELAY=VAL
+!
+      ELSE IF(ID.EQ.'IKPT') THEN   ! GLOBAL IKPT
+        IKPT=VAL
+!       == CHECK IF K-POINT IS PRESENT =========================================
+        CALL MPE$QUERY('MONOMER',NTASKS,THISTASK)
+        IF(KMAP(IKPT).NE.THISTASK) THEN
+          IKPTL=0
+        ELSE
+!         == CONVERT GLOBAL IKPT INTO LOCAL IKPT ===============================
+          IKPTL=0
+          DO I=1,IKPT
+            IF(KMAP(I).EQ.THISTASK) IKPTL=IKPTL+1
+          ENDDO
+        END IF
+        CALL MPE$BROADCAST('K',1,IKPTL)
+        EXTPNTR%IKPT=IKPTL
+!
+      ELSE IF(ID.EQ.'ISPIN') THEN
+        EXTPNTR%ISPIN=VAL
+      ELSE IF(ID.EQ.'IB') THEN
+        EXTPNTR%IB=VAL
+      ELSE IF(ID.EQ.'IAT') THEN
+        EXTPNTR%IAT=VAL
+      ELSE
+        CALL ERROR$MSG('ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID',ID)
+        CALL ERROR$STOP('WAVES$SETI4')
+      END IF
+      RETURN
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WAVES$GETI4(ID,VAL)
+!     **************************************************************************
+!     **                                                                      **
+!     **************************************************************************
+      USE WAVES_MODULE
+      IMPLICIT NONE
+      CHARACTER(*),INTENT(IN) :: ID
+      INTEGER(4)  ,INTENT(OUT):: VAL
+!     **************************************************************************
+      IF(ID.EQ.'SPINORDIM') THEN
+        VAL=NDIM
+      ELSE IF(ID.EQ.'NSPIN') THEN
+        VAL=NSPIN
+      ELSE IF(ID.EQ.'NDIM') THEN
+        VAL=NDIM
+      ELSE IF(ID.EQ.'NDIMD') THEN
+        VAL=NDIMD
+      ELSE IF(ID.EQ.'NB') THEN
+        IF(EXTPNTR%ISPIN.EQ.0) EXTPNTR%ISPIN=1
+        IF(EXTPNTR%IKPT.EQ.0)  EXTPNTR%IKPT=1
+        CALL WAVES_SELECTWV(EXTPNTR%IKPT,EXTPNTR%ISPIN)
+        VAL=THIS%NB
+      ELSE IF(ID.EQ.'NKPT') THEN
+        VAL=NKPT   !GLOBAL NKPT
+      ELSE IF(ID.EQ.'NR1') THEN
+        CALL WAVES_SELECTWV(1,1)
+        CALL PLANEWAVE$SELECT(GSET%ID)
+        CALL PLANEWAVE$GETI4('NR1',VAL)
+      ELSE IF(ID.EQ.'NR1L') THEN
+        CALL WAVES_SELECTWV(1,1)
+        CALL PLANEWAVE$SELECT(GSET%ID)
+        CALL PLANEWAVE$GETI4('NR1L',VAL)
+      ELSE IF(ID.EQ.'NR2') THEN
+        CALL WAVES_SELECTWV(1,1)
+        CALL PLANEWAVE$SELECT(GSET%ID)
+        CALL PLANEWAVE$GETI4('NR2',VAL)
+      ELSE IF(ID.EQ.'NR3') THEN
+        CALL WAVES_SELECTWV(1,1)
+        CALL PLANEWAVE$SELECT(GSET%ID)
+        CALL PLANEWAVE$GETI4('NR3',VAL)
+      ELSE IF(ID.EQ.'NR1START') THEN
+        CALL WAVES_SELECTWV(1,1)
+        CALL PLANEWAVE$SELECT(GSET%ID)
+        CALL PLANEWAVE$GETI4('NR1START',VAL)
+      ELSE
+        CALL ERROR$MSG('ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID',ID)
+        CALL ERROR$STOP('WAVES$GETI4')
+      END IF
+      RETURN
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WAVES$SETL4(ID,VAL)
+!     **************************************************************************
+!     **                                                                      **
+!     **************************************************************************
+      USE WAVES_MODULE
+      IMPLICIT NONE
+      CHARACTER(*),INTENT(IN) :: ID
+      LOGICAL(4)  ,INTENT(IN) :: VAL
+!     **************************************************************************
+      IF(ID.EQ.'STOP') THEN
+        TSTOP=VAL
+      ELSE IF(ID.EQ.'SAFEORTHO') THEN
+        TSAFEORTHO=VAL
+      ELSE IF(ID.EQ.'SWAPSTATES') THEN
+        TSWAPSTATES=VAL
+      ELSE IF(ID.EQ.'RANDOMIZE') THEN
+        TRANDOM=VAL
+!
+!     == UNITARY TRANSFORMATION ONTO EIGENSTATES (PERFORMED ONCE) ==============
+      ELSE IF(ID.EQ.'STRAIGHTEN') THEN
+        TSTRAIGHTEN=VAL
+      ELSE IF(ID.EQ.'HAMILTON') THEN
+        THAMILTON=VAL
+      ELSE IF(ID.EQ.'FORCE') THEN
+        TFORCEX=VAL
+      ELSE IF(ID.EQ.'STRESS') THEN
+        TSTRESSX=VAL
+      ELSE IF(ID.EQ.'RAWSTATES') THEN
+        TRAWSTATES=VAL
+      ELSE IF(ID.EQ.'TIM') THEN
+        EXTPNTR%TIM=VAL
+      ELSE IF(ID.EQ.'FIXRHO') THEN
+        TFIXRHO=VAL
+      ELSE IF(ID.EQ.'WRITERHO') THEN
+        TWRITERHO=VAL
+      ELSE IF(ID.EQ.'GAMMASUPER') THEN
+!       == SEE LGAMMASUPER'S OWN DECLARATION COMMENT FOR WHAT THIS ACTIVATES ==
+        LGAMMASUPER=VAL
+      ELSE
+        CALL ERROR$MSG('ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID',ID)
+        CALL ERROR$STOP('WAVES$SETL4')
+      END IF
+      RETURN
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WAVES$GETL4(ID,VAL)
+!     **************************************************************************
+!     **                                                                      **
+!     **************************************************************************
+      USE WAVES_MODULE
+      IMPLICIT NONE
+      CHARACTER(*),INTENT(IN)  :: ID
+      LOGICAL(4)  ,INTENT(OUT) :: VAL
+!     **************************************************************************
+      IF(ID.EQ.'RAWSTATES') THEN
+        VAL=TRAWSTATES
+      ELSE IF(ID.EQ.'TIM') THEN
+        VAL=EXTPNTR%TIM
+      ELSE IF(ID.EQ.'SAFEORTHO') THEN
+        VAL=TSAFEORTHO
+      ELSE IF(ID.EQ.'SWAPSTATES') THEN
+        VAL=TSWAPSTATES
+      ELSE IF(ID.EQ.'WRITERHO') THEN
+        VAL=TWRITERHO
+      ELSE IF(ID.EQ.'AVAILABLESTATE') THEN
+        VAL=(EXTPNTR%IKPT.NE.0)
+      ELSE
+        CALL ERROR$MSG('ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID',ID)
+        CALL ERROR$STOP('WAVES$GETL4')
+      END IF
+      RETURN
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WAVES$SETCH(ID,VAL)
+!     **************************************************************************
+!     **                                                                      **
+!     **************************************************************************
+      USE WAVES_MODULE
+      IMPLICIT NONE
+      CHARACTER(*),INTENT(IN) :: ID
+      CHARACTER(*),INTENT(IN) :: VAL
+!     **************************************************************************
+      IF(ID.EQ.'RSTRTTYPE') THEN
+        IF(VAL.NE.'DYNAMIC'.AND.VAL.NE.'STATIC') THEN
+          CALL ERROR$MSG('VALUE NOT RECOGNIZED')
+          CALL ERROR$MSG('ALLOWED VALUES ARE "STATIC" AND "DYNAMIC"')
+          CALL ERROR$CHVAL('VAL',VAL)
+          CALL ERROR$CHVAL('ID',ID)
+          CALL ERROR$STOP('WAVES$SETCH')
+        END IF
+        RSTRTTYPE=VAL
+      ELSE IF(ID.EQ.'OPTIMIZER') THEN
+        IF(VAL.NE.'CG'.AND.VAL.NE.'MD'.AND.VAL.NE.'DAV'.AND.VAL.NE.'RMM' &
+     &     .AND.VAL.NE.'EDFT') THEN
+          CALL ERROR$MSG('VALUE NOT RECOGNIZED')
+          CALL ERROR$MSG('ALLOWED VALUES ARE "CG", "MD", "DAV", "RMM" AND "EDFT"')
+          CALL ERROR$CHVAL('VAL',VAL)
+          CALL ERROR$CHVAL('ID',ID)
+          CALL ERROR$STOP('WAVES$SETCH')
+        END IF
+        OPTIMIZERTYPE=VAL
+      ELSE IF(ID.EQ.'MIXER') THEN
+        IF(VAL.NE.'PULAY'.AND.VAL.NE.'ANDERSON'.AND.VAL.NE.'VARIATIONAL') THEN
+          CALL ERROR$MSG('VALUE NOT RECOGNIZED')
+          CALL ERROR$MSG('ALLOWED VALUES ARE "PULAY", "ANDERSON" AND "VARIATIONAL"')
+          CALL ERROR$CHVAL('VAL',VAL)
+          CALL ERROR$CHVAL('ID',ID)
+          CALL ERROR$STOP('WAVES$SETCH')
+        END IF
+        MIXERTYPE=VAL
+      ELSE
+        CALL ERROR$MSG('ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID',ID)
+        CALL ERROR$STOP('WAVES$SETCH')
+      END IF
+      RETURN
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WAVES$GETCH(ID,VAL)
+!     **************************************************************************
+!     **************************************************************************
+      USE WAVES_MODULE
+      IMPLICIT NONE
+      CHARACTER(*),INTENT(IN)  :: ID
+      CHARACTER(*),INTENT(OUT) :: VAL
+!     **************************************************************************
+      IF(ID.EQ.'RSTRTTYPE') THEN
+        VAL=RSTRTTYPE
+      ELSE IF(ID.EQ.'OPTIMIZER') THEN
+        VAL=OPTIMIZERTYPE
+      ELSE IF(ID.EQ.'MIXER') THEN
+        VAL=MIXERTYPE
+      ELSE
+        CALL ERROR$MSG('ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID',ID)
+        CALL ERROR$STOP('WAVES$GETCH')
+      END IF
+      RETURN
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WAVES$INITIALIZE
+!     **************************************************************************
+!     **  GENERATE G-VECTORS AND OTHER INITIALIZATION                         **
+!     **************************************************************************
+      USE MPE_MODULE
+      USE WAVES_MODULE
+      IMPLICIT NONE
+      REAL(8)                :: RBAS(3,3) ! LATTICE VECTORS
+      REAL(8)                :: GBAS(3,3) ! RECIPROCAL LATTICE VECTORS
+      REAL(8)                :: CELLVOL   ! UNIT CELL  VOLUME
+      REAL(8)   ,ALLOCATABLE :: XK(:,:)   ! K-POINTS IN RELATIVE COORDINATES
+      REAL(8)   ,ALLOCATABLE :: GVEC(:,:)     ! G VECTOR
+      INTEGER(4)             :: LN,ISP,IKPT,ISPIN,IAT,IKPTG,IKPTL
+      INTEGER(4)             :: NB
+      INTEGER(4)             :: NBH
+      INTEGER(4)             :: NGL
+      INTEGER(4)             :: NRL,NR1L,NR1START,NR2,NR3
+      LOGICAL(4)             :: TINV
+      LOGICAL(4)             :: TSCANDELOCCHK
+      INTEGER(4)             :: NFILO
+      INTEGER(4)             :: LNX
+      INTEGER(4)             :: NTASKS,THISTASK
+      INTEGER(4),ALLOCATABLE :: ICOLOR(:)
+      LOGICAL(4),ALLOCATABLE :: TINVARR(:)
+      LOGICAL(4)             :: TKGROUP
+      INTEGER(4)             :: I,J,K
+!     **************************************************************************
+                              CALL TRACE$PUSH('WAVES$INITIALIZE')
+!     
+!     ==========================================================================
+!     ==  DETERMINE MAPPRO AND MAPBAREPRO                                     ==
+!     ==========================================================================
+      CALL ATOMLIST$NATOM(MAP%NAT)
+      CALL SETUP$GETI4('NSP',MAP%NSP)   !FORMER CALL SETUP$NSPECIES(MAP%NSP)
+      CALL SETUP$GETI4('LNXX',MAP%LNXX) !FORMER CALL SETUP$LNXX(MAP%LNXX)
+      ALLOCATE(MAP%ISP(MAP%NAT))
+      ALLOCATE(MAP%LNX(MAP%NSP))
+      ALLOCATE(MAP%LMNX(MAP%NSP))
+      ALLOCATE(MAP%LOX(MAP%LNXX,MAP%NSP))
+      CALL ATOMLIST$GETI4A('ISPECIES',0,MAP%NAT,MAP%ISP)
+      MAP%LMX=0
+      MAP%LOX(:,:)=0
+      MAP%NBAREPRO=0
+      DO ISP=1,MAP%NSP
+        CALL SETUP$ISELECT(ISP)
+        CALL SETUP$GETI4('LNX',LNX) !FORMER CALL SETUP$LNX(ISP,LNX)
+        MAP%LNX(ISP)=LNX
+        CALL SETUP$GETI4A('LOX',LNX,MAP%LOX(1:LNX,ISP))
+                       !FORMER CALL SETUP$LOFLN(ISP,LNX,MAP%LOX(1:LNX,ISP))
+        MAP%LMNX(ISP)=0
+        DO LN=1,LNX
+          MAP%LMNX(ISP)=MAP%LMNX(ISP)+2*MAP%LOX(LN,ISP)+1
+          MAP%LMX=MAX(MAP%LMX,(MAP%LOX(LN,ISP)+1)**2)
+        ENDDO
+        MAP%NBAREPRO=MAP%NBAREPRO+LNX
+        CALL SETUP$UNSELECT()
+      ENDDO
+      MAP%NPRO=0
+      DO IAT=1,MAP%NAT
+        ISP=MAP%ISP(IAT)
+        MAP%NPRO=MAP%NPRO+MAP%LMNX(ISP)
+      ENDDO
+!     
+!     ==================================================================
+!     ==  K-POINT PARALLELIZATION                                     ==
+!     ==================================================================
+      CALL DYNOCC$GETI4('NKPT',NKPT) 
+      ALLOCATE(TINVARR(NKPT))
+      ALLOCATE(XK(3,NKPT))
+      CALL DYNOCC$GETR8A('XK',3*NKPT,XK)
+      DO IKPT=1,NKPT
+        CALL PLANEWAVE$CHECKINVERSION(XK(1,IKPT),TINVARR(IKPT))
+        IF(NDIM.NE.1)TINVARR(IKPT)=.FALSE.
+      ENDDO
+      DEALLOCATE(XK)
+      CALL MPE$QUERY('MONOMER',NTASKS,THISTASK)
+      ALLOCATE(KMAP(NKPT))
+      ALLOCATE(ICOLOR(NTASKS))
+      CALL WAVES_KDISTRIBUTE(NTASKS,NKPT,TINVARR,ICOLOR,KMAP)
+      DEALLOCATE(TINVARR)
+      CALL MPE$NEW('MONOMER','K',NTASKS,ICOLOR)
+      DEALLOCATE(ICOLOR)
+      NKPTL=0
+      DO IKPT=1,NKPT
+        IF(KMAP(IKPT).EQ.THISTASK) NKPTL=NKPTL+1
+      ENDDO
+      CALL MPE$BROADCAST('K',1,NKPTL)
+!     
+!     ==================================================================
+!     ==  ALLOCATE THISARRAY                                          ==
+!     ==================================================================
+      CALL DYNOCC$GETI4('NSPIN',NSPIN)
+      ALLOCATE(THISARRAY(NKPTL,NSPIN))
+      DO IKPT=1,NKPTL
+        ALLOCATE(THISARRAY(IKPT,1)%GSET)
+        DO ISPIN=2,NSPIN
+          THISARRAY(IKPT,ISPIN)%GSET=>THISARRAY(IKPT,1)%GSET
+        ENDDO
+        DO ISPIN=1,NSPIN
+          NULLIFY(THISARRAY(IKPT,ISPIN)%PSI0)
+          NULLIFY(THISARRAY(IKPT,ISPIN)%PSIM)
+          NULLIFY(THISARRAY(IKPT,ISPIN)%PROJ)
+          NULLIFY(THISARRAY(IKPT,ISPIN)%TBC_NEW)
+          NULLIFY(THISARRAY(IKPT,ISPIN)%HTBC_NEW)
+          NULLIFY(THISARRAY(IKPT,ISPIN)%HPSI)
+          NULLIFY(THISARRAY(IKPT,ISPIN)%OPSI)
+          NULLIFY(THISARRAY(IKPT,ISPIN)%RLAM0)
+          NULLIFY(THISARRAY(IKPT,ISPIN)%RLAMM)
+          NULLIFY(THISARRAY(IKPT,ISPIN)%RLAM2M)
+          NULLIFY(THISARRAY(IKPT,ISPIN)%RLAM3M)
+          NULLIFY(THISARRAY(IKPT,ISPIN)%EIGVEC)
+          NULLIFY(THISARRAY(IKPT,ISPIN)%EIGVAL)
+          NULLIFY(THISARRAY(IKPT,ISPIN)%EXPECTVAL)
+        ENDDO
+      ENDDO
+!     
+!     ==================================================================
+!     ==  DEFINE REAL SPACE GRID                                      ==
+!     ==================================================================
+      CALL CELL$GETR8A('TREF',9,RBAS)
+      CALL PLANEWAVE$DIVIDERGRIDONTASKS(EPWRHO,RBAS,'MONOMER',NR1START,NR1L,NR2,NR3)
+      CALL POTENTIAL$INITIALIZE(EPWRHO,NR1START,NR1L,NR2,NR3)
+!
+      CALL PLANEWAVE$DIVIDERGRIDONTASKS(EPWRHO,RBAS,'K',NR1START,NR1L,NR2,NR3)
+      MAP%NRL=NR1L*NR2*NR3
+!     
+!     ==================================================================
+!     ==  INITIALIZE PLANE WAVE OBJECT                                ==
+!     ==================================================================
+      ALLOCATE(XK(3,NKPTL))
+      CALL WAVES_DYNOCCGETR8A('XK',3*NKPTL,XK)
+      CALL GBASS(RBAS,GBAS,CELLVOL)
+      IF(NDIM.EQ.1) THEN
+        NDIMD=NSPIN
+      ELSE
+        NDIMD=NDIM**2
+      END IF
+      IKPTL=0
+      DO IKPTG=1,NKPT
+        TKGROUP=THISTASK.EQ.KMAP(IKPTG)
+        CALL MPE$BROADCAST('K',1,TKGROUP)
+        IF(.NOT.TKGROUP) CYCLE
+        IKPTL=IKPTL+1
+        CALL WAVES_SELECTWV(IKPTL,1)
+        WRITE(GSET%ID,FMT=*)IKPTG
+        GSET%ID='WAVE '//ADJUSTL(GSET%ID)
+        IF(NDIM.EQ.1) THEN
+          CALL PLANEWAVE$CHECKINVERSION(XK(1,IKPTL),TINV)
+        ELSE
+          TINV=.FALSE.
+        END IF
+!       == SCAN0R: TSCANDELOC'S REAL KINETIC-ENERGY-DENSITY MACHINERY      ==
+!       == (WAVES_KINETICDENSITY/WAVES_TAUHPSI, VESPAW_SCANKINDEN.F90)     ==
+!       == EXPLICITLY REFUSES THE TINV/SUPER-WAVE-FUNCTION REPRESENTATION  ==
+!       == (NOT YET IMPLEMENTED THERE). FORCE TINV OFF FOR EVERY K-POINT   ==
+!       == WHEN TSCANDELOC=T IS REQUESTED, SO A GAMMA-POINT OR ANY OTHER   ==
+!       == TIME-REVERSAL-SYMMETRIC K-MESH DOESN'T CRASH DEEP IN THE FIRST  ==
+!       == ENERGY EVALUATION -- IT SIMPLY RUNS WITHOUT THE USUAL TINV      ==
+!       == BAND-COUNT-PACKING SAVING FOR THOSE K-POINTS, ONLY WHEN         ==
+!       == TSCANDELOC IS ACTUALLY ON. QUERY POTENTIAL$GETL4 DIRECTLY, NOT  ==
+!       == THE WAVES_MODULE-LOCAL LTSCANDELOC MIRROR -- THAT ONE IS ONLY   ==
+!       == REFRESHED PER WAVES$ETOT CALL AND IS STILL ITS .FALSE. DEFAULT  ==
+!       == THIS EARLY (WAVES$INITIALIZE RUNS ONCE, BEFORE THE FIRST        ==
+!       == WAVES$ETOT), WHILE POTENTIAL_MODULE'S OWN FLAG IS ALREADY SET   ==
+!       == FROM READIN BY THIS POINT. SEE THE DEV NOTES, "TSCANDELOC=T ==
+!       == CRASHES ON ANY K-POINT MESH THAT HITS A TINV-EXPLOITED K-POINT".==
+        CALL POTENTIAL$GETL4('TSCANDELOC',TSCANDELOCCHK)
+        IF(TSCANDELOCCHK) TINV=.FALSE.
+!       ==  NOTE THAT XK REFERS TO THE LOCAL K-POINT INDEX ================
+        CALL PLANEWAVE$INITIALIZE(GSET%ID,'K',RBAS,XK(1,IKPTL),TINV,EPWPSI &
+     &                           ,NR1START,NR1L,NR2,NR3)
+        CALL PLANEWAVE$SELECT(GSET%ID)
+        CALL PLANEWAVE$GETL4('TINV',GSET%TINV)
+!       == GAMMA-POINT HALF-SPHERE (TSUPER) STORAGE -- SEE LGAMMASUPER'S OWN ==
+!       == DECLARATION COMMENT. MUST HAPPEN BEFORE THE NGL QUERY BELOW SO    ==
+!       == GSET%NGL PICKS UP THE HALVED COUNT.                              ==
+        IF(GSET%TINV.AND.LGAMMASUPER) THEN
+          CALL PLANEWAVE$SETL4('SUPER',.TRUE.)
+        END IF
+        CALL PLANEWAVE$GETL4('SUPER',GSET%TSUPER)
+!       == GSPACE AND RSPACE DIMENSIONS ================================
+        CALL PLANEWAVE$GETI4('NGL',NGL)
+        CALL PLANEWAVE$GETI4('NRL',NRL)
+        GSET%NGL=NGL
+        NULLIFY(GSET%PRO)
+        NULLIFY(GSET%DPRO)
+        NULLIFY(GSET%YLM)
+        NULLIFY(GSET%SYLM)
+        NULLIFY(GSET%MPSI)
+!PB070802        NULLIFY(GSET%DMPSI)
+        NULLIFY(GSET%BUCKET)
+        NULLIFY(GSET%DBUCKET)
+      ENDDO
+      DEALLOCATE(XK)
+      CALL WAVES_UPDATEGSET()
+!
+!     ==================================================================
+!     ==  EVALUATE NUMBER OF G-VECTORS ETC. ON LOCAL PROCESSOR        ==
+!     ==================================================================
+      CALL DYNOCC$GETI4('NB',NB)
+      DO IKPT=1,NKPTL
+        DO ISPIN=1,NSPIN
+          CALL WAVES_SELECTWV(IKPT,ISPIN)
+          CALL PLANEWAVE$SELECT(GSET%ID)
+!         == #(BANDS) ==================================================
+!         == WHEN TSUPER IS ACTIVE, EACH ORBITAL IS STORED INDEPENDENTLY   ==
+!         == AT HALF G-RESOLUTION (NBH=NB, NO PAIRING) -- SEE LGAMMASUPER. ==
+!         == OTHERWISE, TINV K-POINTS USE THE LEGACY NBH=(NB+1)/2 SCHEME.  ==
+          IF(GSET%TINV) THEN
+            IF(GSET%TSUPER) THEN
+              NBH=NB
+            ELSE
+              NBH=(NB+1)/2
+            END IF
+          ELSE
+            NBH=NB
+          END IF
+          THIS%NB=NB
+          THIS%NBH=NBH
+!         == ALLOCATE PROJECTIONS ======================================
+          ALLOCATE(THIS%PROJ(NDIM,NBH,MAP%NPRO))
+!         == ALLOCATE WAVE FUNCTIONS ===================================
+          NGL=GSET%NGL
+          ALLOCATE(THIS%PSI0(NGL,NDIM,NBH))
+          ALLOCATE(THIS%PSIM(NGL,NDIM,NBH))
+          THIS%PSI0(:,:,:)=(0.D0,0.D0)
+          THIS%PSIM(:,:,:)=(0.D0,0.D0)
+          ALLOCATE(GVEC(3,NGL))
+          CALL PLANEWAVE$GETR8A('GVEC',3*NGL,GVEC)
+          CALL WAVES_INITIALIZERANDOM(NGL,NDIM,NBH,GVEC,THIS%PSI0)
+          DEALLOCATE(GVEC)
+          DO I=1,NBH
+            DO J=1,NDIM
+              DO K=1,NGL
+                THIS%PSIM(K,J,I)=THIS%PSI0(K,J,I)
+              ENDDO
+            ENDDO
+          ENDDO
+!          THIS%PSIM=THIS%PSI0 ! THIS STATEMENT GAVE PROBLEMS WITH IFC10
+!         == ALLOCATE LAGRANGE MULTIPLYERS =============================
+          NULLIFY(THIS%HPSI)
+          NULLIFY(THIS%OPSI)
+          ALLOCATE(THIS%RLAM0(NB,NB))
+          THIS%RLAM0(:,:)=(0.D0,0.D0)
+          NULLIFY(THIS%RLAMM)
+          NULLIFY(THIS%RLAM2M)
+          NULLIFY(THIS%RLAM3M)
+          NULLIFY(THIS%EIGVAL)
+          NULLIFY(THIS%EIGVEC)
+          NULLIFY(THIS%EXPECTVAL)
+        ENDDO
+      ENDDO
+!     
+!     ==================================================================
+!     ==  REPORT DATA ABOUT FFTS                                      ==
+!     ==================================================================
+      CALL FILEHANDLER$UNIT('PROT',NFILO)
+      CALL PLANEWAVE$REPORT(NFILO)
+!
+!      DO IKPT=1,NKPTL
+!        CALL WAVES_SELECTWV(IKPT,1)
+!        CALL PLANEWAVE$SELECT(GSET%ID)
+!        CALL PLANEWAVE$REPORT(NFILO)
+!      ENDDO
+!     
+!     ================================================================
+!     ==  SEND DATA TO OPTIC CODE                                   ==
+!     ================================================================
+!      CALL OPTICS$GETL4('ON',TCHK)
+!      IF(TCHK) THEN
+!        ALLOCATE(XK(3,NKPT))
+!        CALL DYNOCC$GETR8A('XK',3*NKPT,XK)
+!        TCHK=.FALSE.
+!        DO IKPT=1,NKPT
+!          TCHK=XK(1,IKPT).EQ.0.AND.XK(2,IKPT).EQ.0.AND.XK(3,IKPT).EQ.0
+!          IF(TCHK) THEN
+!            CALL WAVES_SELECTWV(IKPT,1)
+!            CALL PLANEWAVE$SELECT(GSET%ID)
+!            CALL OPTICS$LATTICE
+!            EXIT
+!          END IF
+!        ENDDO
+!        IF(.NOT.TCHK) THEN
+!          CALL ERROR$MSG('OPTICS CODE REQUIRES GAMMA POINT IN THE K-POINT SET')
+!          CALL ERROR$STOP('WAVES$INITIALIZE')
+!        END IF
+!        DEALLOCATE(XK)
+!      END IF
+                              CALL TRACE$POP
+      RETURN
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WAVES_DYNOCCGETR8A(ID,LEN,VAL)
+!     **                                                              **
+!     **  GET A REAL(8) ARRAY FROM DYNOCC. THIS ROUTINE IS AN         **
+!     **  INTERFACE BETWEEN WAVES OBJECT AND DYNOCC OBJECT.           **
+!     **  IT IS REQUIRED FOR THE K-POINT PARALLELIZATION, BECAUSE     **
+!     **  EACH NODE ONLY MAINTAINS A FRACTION OF ALL K-POINTS         **
+!     **  WHILE THE DYNOCC OBJECT WORKS ON ALL K-POINTS               **
+!     **                                                              **
+!     **  REMARKS:                                                    **
+!     **   ASSUMES THAT THE INPUT ARRAY IS IDENTICAL ON ALL           **
+!     **      TASKS OF THE LOCAL K-GROUP                              **
+!     **   KMAP(NKPT) POINTS TO THE FIRST TASK IN THE K-GROUP, WHERE  **
+!     **     THE K-POINT RESIDES (THE TASK IS RELATIVE TO THE MONOMER **
+!     **     GROUP)                                                   **
+!     **                                                              **
+!     ************P.E. BLOECHL, TU-CLAUSTHAL (2005)*********************
+      USE MPE_MODULE
+      USE WAVES_MODULE  ,ONLY : NKPT,NKPTL,KMAP
+      IMPLICIT NONE
+      CHARACTER(*),INTENT(IN) :: ID
+      INTEGER(4)  ,INTENT(IN) :: LEN
+      REAL(8)     ,INTENT(OUT):: VAL(LEN)
+      REAL(8)     ,ALLOCATABLE:: VALG(:)
+      INTEGER(4)              :: NTASKS,THISTASK
+      INTEGER(4)              :: IKPTL,IKPT
+      INTEGER(4)              :: NSPIN,NBX
+      INTEGER(4)              :: ISVAR1L,ISVAR2L,ISVAR1G,ISVAR2G
+      INTEGER(4)              :: ISPIN
+!     ******************************************************************
+      IF(ID.EQ.'OCC'.OR.ID.EQ.'EPSILON') THEN
+        CALL MPE$QUERY('MONOMER',NTASKS,THISTASK)
+        CALL DYNOCC$GETI4('NB',NBX)
+        CALL DYNOCC$GETI4('NSPIN',NSPIN)
+        ALLOCATE(VALG(NBX*NKPT*NSPIN))
+        CALL DYNOCC$GETR8A(ID,NBX*NKPT*NSPIN,VALG)
+        IKPTL=0
+        DO IKPT=1,NKPT
+           IF(KMAP(IKPT).EQ.THISTASK) THEN
+            IKPTL=IKPTL+1
+            DO ISPIN=1,NSPIN
+!             == DIMENSIONS: OCC(NBX,NKPT,NSPIN)
+              ISVAR1L=1+NBX*(IKPTL-1+NKPTL*(ISPIN-1))
+              ISVAR2L=ISVAR1L+NBX-1
+              ISVAR1G=1+NBX*(IKPT-1+NKPT*(ISPIN-1))
+              ISVAR2G=ISVAR1G+NBX-1
+              VAL(ISVAR1L:ISVAR2L)=VALG(ISVAR1G:ISVAR2G)
+            ENDDO
+          END IF
+        ENDDO
+        DEALLOCATE(VALG)
+        CALL MPE$BROADCAST('K',1,VAL)
+!
+      ELSE IF(ID.EQ.'XK') THEN
+        CALL MPE$QUERY('MONOMER',NTASKS,THISTASK)
+        ALLOCATE(VALG(3*NKPT))
+        CALL DYNOCC$GETR8A('XK',3*NKPT,VALG)
+        IKPTL=0
+        DO IKPT=1,NKPT
+          IF(KMAP(IKPT).EQ.THISTASK) THEN
+            IKPTL=IKPTL+1
+            ISVAR1L=1+3*(IKPTL-1)
+            ISVAR2L=ISVAR1L+3-1
+            ISVAR1G=1+3*(IKPT-1)
+            ISVAR2G=ISVAR1G+3-1
+            VAL(ISVAR1L:ISVAR2L)=VALG(ISVAR1G:ISVAR2G)
+          END IF
+        ENDDO                        
+        DEALLOCATE(VALG)
+        CALL MPE$BROADCAST('K',1,VAL)
+!
+      ELSE IF(ID.EQ.'WKPT') THEN
+!       == THIS OPTION IS USED IN DMFT MODULE  =================================
+        CALL MPE$QUERY('MONOMER',NTASKS,THISTASK)
+        ALLOCATE(VALG(NKPT))
+        CALL DYNOCC$GETR8A('WKPT',NKPT,VALG)
+        IKPTL=0
+        DO IKPT=1,NKPT
+          IF(KMAP(IKPT).EQ.THISTASK) THEN
+            IKPTL=IKPTL+1
+            VAL(IKPTL)=VALG(IKPT)
+          END IF
+        ENDDO                         
+        DEALLOCATE(VALG)
+        CALL MPE$BROADCAST('K',1,VAL)
+      ELSE
+        CALL ERROR$MSG('ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID',ID)
+        CALL ERROR$STOP('WAVES_DYNOCCGETR8A')
+      END IF
+      RETURN
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WAVES_DYNOCCSETR8A(ID,LEN,VAL)
+!     **************************************************************************
+!     **  SET A REAL(8) ARRAY TO DYNOCC. THIS ROUTINE IS AN                   **
+!     **  INTERFACE BETWEEN WAVES OBJECT AND DYNOCC OBJECT.                   **
+!     **  IT IS REQUIRED FOR THE K-POINT PARALLELIZATION, BECAUSE             **
+!     **  EACH NODE ONLY MAINTAINS A FRACTION OF ALL K-POINTS                 **
+!     **  WHILE THE DYNOCC OBJECT WORKS ON ALL K-POINTS                       **
+!     **                                                                      **
+!     **  REMARKS:                                                            **
+!     **   ASSUMES THAT THE INPUT ARRAY IS IDENTICAL ON ALL                   **
+!     **      TASKS OF THE LOCAL K-GROUP                                      **
+!     **   KMAP(NKPT) POINTS TO THE FIRST TASK IN THE K-GROUP WHERE           **
+!     **     THE K-POINT RESIDES (THE TASK IS RELATIVE TO THE MONOMER         **
+!     **     GROUP)                                                           **
+!     **                                                                      **
+!     **                                                                      **
+!     *********************P.E. BLOECHL, TU-CLAUSTHAL (2005)********************
+      USE MPE_MODULE
+      USE WAVES_MODULE  ,ONLY : NKPT,NKPTL,KMAP
+!     -- KMAP(NKPT) POINTS TO THE FIRST TASK IN THE K-GROUP WHERE THE 
+!     --    K-POINT RESIDES (THE TASK IS RELATIVE TO THE MONOMER GROUP)
+      IMPLICIT NONE
+      CHARACTER(*),INTENT(IN) :: ID
+      INTEGER(4)  ,INTENT(IN) :: LEN
+      REAL(8)     ,INTENT(IN) :: VAL(LEN)
+      REAL(8)     ,ALLOCATABLE:: VALG(:)
+      INTEGER(4)              :: NTASKS,THISTASK
+      INTEGER(4)              :: IKPTL,IKPT
+      INTEGER(4)              :: NSPIN,NBX
+      INTEGER(4)              :: ISVAR1L,ISVAR2L,ISVAR1G,ISVAR2G
+      INTEGER(4)              :: ISPIN
+!     **************************************************************************
+      IF(ID.EQ.'EIG'.OR.ID.EQ.'M<PSIDOT|PSIDOT>'.OR.ID.EQ.'EPSILON') THEN
+        CALL MPE$QUERY('MONOMER',NTASKS,THISTASK)
+        CALL DYNOCC$GETI4('NB',NBX)
+        CALL DYNOCC$GETI4('NSPIN',NSPIN)
+        ALLOCATE(VALG(NBX*NKPT*NSPIN))
+        VALG(:)=0.D0
+        IKPTL=0
+        DO IKPT=1,NKPT
+          IF(KMAP(IKPT).EQ.THISTASK) THEN
+            IKPTL=IKPTL+1
+            DO ISPIN=1,NSPIN
+!             == DIMENSIONS: EIG(NBX,NKPT,NSPIN)
+              ISVAR1L=1+NBX*(IKPTL-1+NKPTL*(ISPIN-1))
+              ISVAR2L=ISVAR1L+NBX-1
+              ISVAR1G=1+NBX*(IKPT-1+NKPT*(ISPIN-1))
+              ISVAR2G=ISVAR1G+NBX-1
+              VALG(ISVAR1G:ISVAR2G)=VAL(ISVAR1L:ISVAR2L)
+            ENDDO
+          END IF
+        ENDDO
+        CALL MPE$COMBINE('MONOMER','+',VALG)
+        CALL DYNOCC$SETR8A(ID,NBX*NKPT*NSPIN,VALG)
+        DEALLOCATE(VALG)
+      ELSE
+        CALL ERROR$MSG('ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID',ID)
+        CALL ERROR$STOP('WAVES_DYNOCCSETR8A')
+      END IF
+      RETURN
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WAVES$ETOT()
+!     **************************************************************************
+!     **                                                                      **
+!     **  EVALUATE PS KINETIC ENERGY IN G-SPACE                               **
+!     **  EVALUATE NUMBER OF ELECTRONS IN G-SPACE                             **
+!     **                                                                      **
+!     *******************************************P.E. BLOECHL, (2000)***********
+      USE MPE_MODULE
+      USE WAVES_MODULE
+      IMPLICIT NONE
+      INTEGER(4)             :: LMRXX
+      REAL(8)   ,ALLOCATABLE :: QLM(:,:)  !(LMRXX) MULTIPOLE MOMENTS
+      REAL(8)   ,ALLOCATABLE :: VQLM(:,:) !(LMRXX) MULTIPOLE POTENTIALS
+      REAL(8)   ,ALLOCATABLE :: RHO(:,:)  ! CHARGE DENSITY
+      COMPLEX(8),ALLOCATABLE :: DENMAT(:,:,:,:) ! 1CENTER DENSITY MATRIX
+      COMPLEX(8),ALLOCATABLE :: EDENMAT(:,:,:,:)! ENERGY-WEIGHTED DENSITY MATRIX
+      COMPLEX(8),ALLOCATABLE :: DH(:,:,:,:)     ! 1CENTER HAMILTONIAN
+      COMPLEX(8),ALLOCATABLE :: DH1(:,:,:,:)     ! 1CENTER HAMILTONIAN
+      REAL(8)   ,ALLOCATABLE :: DO(:,:,:,:)     ! 1CENTER OVERLAP
+      REAL(8)   ,ALLOCATABLE :: OCC(:,:,:)
+      REAL(8)   ,ALLOCATABLE :: R(:,:)
+      REAL(8)   ,ALLOCATABLE :: FORCE(:,:)
+      REAL(8)   ,ALLOCATABLE :: FORCET(:,:)
+      REAL(8)                :: STRESS1(3,3),STRESS(3,3)
+      REAL(8)                :: STRESSKIN(3,3)
+      REAL(8)                :: EONSU,EONSSO
+      INTEGER(4)             :: NTASKSMIX,THISTASKMIX
+      INTEGER(4)             :: NR1L_VM,NR1L_PM,NR1M,NR2M,NR3M,NRLVM,NGROUPM
+      REAL(8)                :: RNR1LM(1)
+      REAL(8)   ,ALLOCATABLE :: RHOVM(:,:)  ! DENSITY IN THE DENSITY-GRID LAYOUT
+      REAL(8)                :: RBAS(3,3) ! REAL SPACE LATTICE VECTORS
+      REAL(8)                :: RHOB      ! BACKGROUND DENSITY
+      REAL(8)                :: POTB      ! AVERAGE ELECTROSTATIC POTENTIAL
+      INTEGER(4)             :: NGL
+      INTEGER(4)             :: NRL
+      REAL(8)                :: EKIN
+      INTEGER(4)             :: IKPT,ISPIN,IAT,ISP,IB,IR
+      INTEGER(4)             :: L,M,LN
+      INTEGER(4)             :: LMN1,LMN2
+      INTEGER(4)             :: LMNXX
+      INTEGER(4)             :: NAT
+      INTEGER(4)             :: NBH,NBX,NB
+      INTEGER(4)             :: LMNX
+      REAL(8)                :: SVAR1,SVAR2
+      COMPLEX(8)             :: CSVAR1,CSVAR2
+      COMPLEX(8),ALLOCATABLE :: HAMILTON(:,:)
+      REAL(8)   ,ALLOCATABLE :: EIG(:,:,:)
+      LOGICAL(4)             :: TSTRESS
+      LOGICAL(4)             :: TFORCE
+      LOGICAL(4)             :: TATOMSMOVE
+      LOGICAL(4)             :: TCHK,TCHK1,TSYM
+      COMPLEX(8),ALLOCATABLE :: QMAT(:,:)   
+      INTEGER(4)             :: NFILO
+      LOGICAL(4)             :: TCONV ! MIXER SAYS THAT WAVE FUNCTIONS ARE CONVERGED !KAESTNERCG
+      REAL(8)                :: CONVPSI ! CONVERGENCE CRITERION FOR WAVE FUNCTIONS !KAESTNERCG
+      INTEGER(4)             :: RHODIM,DENDIM                        !KAESTNERCG
+      REAL(8)   ,ALLOCATABLE :: DENMATR(:) ! REAL COPY OF DENMAT FOR THE MIXER !KAESTNERCG
+!     == LIVE EDFT OCCUPATION FEED (OPT-IN, VESPAW_EDFT_LIVE_OCC): SEE THE     ==
+!     == BLOCK JUST BEFORE WAVES_DYNOCCSETR8A('EPSILON',...) BELOW, AND       ==
+!     == THE DEV NOTES FOR THE FULL RATIONALE.                            ==
+      LOGICAL(4),SAVE        :: TEDFTKPCCHECKED=.FALSE.
+      LOGICAL(4),SAVE        :: TEDFTKPC=.TRUE.
+      CHARACTER(16)          :: CENVKPC
+      REAL(8)   ,ALLOCATABLE :: RHOTH(:,:)
+      COMPLEX(8),ALLOCATABLE :: DHTH(:,:,:,:)
+      LOGICAL(4),SAVE        :: TEDFTLIVEOCCCHECKED=.FALSE.
+      LOGICAL(4),SAVE        :: TEDFTLIVEOCC=.FALSE.
+      CHARACTER(16)          :: CENVVALEDFTOCC
+      LOGICAL(4)             :: TEDFTINI
+      LOGICAL(4)             :: TEDFTLIVEOCCACTIVE
+      REAL(8)                :: EDFTTEMPCHECK
+      REAL(8)   ,ALLOCATABLE :: HAUXEIGTMP(:)
+!     == HAUX-RESIDUAL-AWARE STOPPING (SEE THE GATE JUST BEFORE                ==
+!     == STOPIT$SETL4('STOP',.TRUE.) BELOW, AND THE DEV NOTES): WHEN LIVE  ==
+!     == OCCUPATIONS ARE ON, DO NOT LET THE MIXER'S OWN (DENSITY-RESIDUAL-     ==
+!     == ONLY) CONVERGENCE SIGNAL STOP THE RUN WHILE HAUX ITSELF IS STILL      ==
+!     == MEASURABLY SHORT OF TRACKING THE REAL HAMILTONIAN -- FOUND 2026-09-05 ==
+!     == TO BE THE LIKELY CAUSE OF LIVE OCCUPATIONS' REGRESSION (A SMALL BUT   ==
+!     == REAL ENERGY OFFSET THAT THE DENSITY-RESIDUAL CRITERION NEVER SAW).    ==
+      LOGICAL(4),SAVE        :: TEDFTHAUXTOLCHECKED=.FALSE.
+      REAL(8)   ,SAVE        :: EDFTHAUXCONVTOL=1.D-5
+      CHARACTER(32)          :: CENVVALHAUXTOL
+      REAL(8)                :: EDFTHAUXRESNOW
+!     == SCAN0R DAV+ANDERSON INSTABILITY DIAGNOSTIC, PRE-MIX DENMAT (2026-09-10): ==
+!     == SAME OPT-IN ENV VAR AS THE OTHER DIAGNOSTICS THIS INVESTIGATION --       ==
+!     == PRINTS MAX-ABS|DENMAT| AND WHICH ATOM, RIGHT AFTER WAVES$DENMAT RETURNS  ==
+!     == ITS RAW (PRE-ANDERSON-MIX) OUTPUT, TO SPLIT WHETHER THE ~88X SPIKE AT    ==
+!     == IAT=8 FOUND POST-MIX (DENMAT1 IN WAVES$SPHERE) IS ALREADY PRESENT HERE   ==
+!     == (DAVIDSON/PROJECTOR-OVERLAP BUG) OR ONLY APPEARS AFTER MIXING           ==
+!     == (WAVES_MIXRHO_ANDERSON ARRAY-HANDLING BUG). SEE THE DEV NOTES.       ==
+      LOGICAL(4),SAVE        :: TPREMIXDIAGCHECKED=.FALSE.
+      LOGICAL(4),SAVE        :: TPREMIXDIAG=.FALSE.
+      CHARACTER(16)          :: CENVPREMIXDIAG
+      REAL(8)                :: MAXDENMATPREMIX
+      INTEGER(4)             :: IATMAXDENMATPREMIX,IATPM
+!     **************************************************************************
+      INTEGER(4) ::NTASKS_W,THISTASK_W
+      CALL MPE$QUERY('~',NTASKS_W,THISTASK_W)
+                              CALL TRACE$PUSH('WAVES$ETOT')
+!
+!     ==========================================================================
+!     == CHECK CONSISTENCY WITH OCCUPATIONS OBJECT                            ==
+!     ==========================================================================
+      CALL DYNOCC$GETL4('DYN',TCHK)
+      IF(TCHK) THEN
+        IF(TSAFEORTHO) THEN
+          CALL ERROR$MSG('FOR DYNAMICAL OCCUPATIONS, SAFEORTHO MUST BE FALSE')
+          CALL ERROR$STOP('WAVES$ETOT')
+        END IF
+      END IF
+!     == LIVE EDFT OCCUPATION FEED AND HAUX-RESIDUAL-AWARE STOPPING: ENV-VAR  ==
+!     == CHECKS DONE HERE (EARLY IN THE SUBROUTINE, ONCE) SO BOTH THE         ==
+!     == STOPPING GATE BELOW AND THE EPSILON SUBSTITUTION FURTHER DOWN CAN    ==
+!     == USE THEM -- SEE THEIR OWN COMMENTS FOR THE FULL RATIONALE.           ==
+      IF(.NOT.TEDFTLIVEOCCCHECKED) THEN
+        CALL GET_ENVIRONMENT_VARIABLE('VESPAW_EDFT_LIVE_OCC',CENVVALEDFTOCC)
+        TEDFTLIVEOCC=(LEN_TRIM(CENVVALEDFTOCC).GT.0)
+        TEDFTLIVEOCCCHECKED=.TRUE.
+        IF(TEDFTLIVEOCC) THEN
+          PRINT*,'VESPAW_EDFT_LIVE_OCC SET -- DYNOCC WILL FERMI-FILL' &
+     &          ,' HAUX EIGENVALUES INSTEAD OF THE REAL EXPECTATION VALUE' &
+     &          ,' (AFFECTS CONVERGENCE AND THE REAL OCCUPATIONS)'
+        END IF
+      END IF
+      IF(.NOT.TEDFTHAUXTOLCHECKED) THEN
+        CALL GET_ENVIRONMENT_VARIABLE('VESPAW_EDFT_HAUXCONVTOL',CENVVALHAUXTOL)
+        IF(LEN_TRIM(CENVVALHAUXTOL).GT.0) THEN
+          READ(CENVVALHAUXTOL,*) EDFTHAUXCONVTOL
+          PRINT*,'VESPAW_EDFT_HAUXCONVTOL SET -- USING',EDFTHAUXCONVTOL
+        END IF
+        TEDFTHAUXTOLCHECKED=.TRUE.
+      END IF
+!     == COMBINED "IS THE LIVE-OCC SUBSTITUTION ACTUALLY GOING TO ENGAGE      ==
+!     == THIS ITERATION" FLAG -- NOT JUST WHETHER THE ENV VAR IS SET, BUT     ==
+!     == ALSO WHETHER HAUX IS READY AND TEMP>0 (SAME CONDITIONS THE          ==
+!     == SUBSTITUTION ITSELF CHECKS FURTHER DOWN). USED FOR *BOTH* THE       ==
+!     == STOPPING GATE BELOW AND THE SUBSTITUTION ITSELF, SO THE TWO NEVER   ==
+!     == DISAGREE. IF THIS STAYED THE BARE ENV-VAR CHECK INSTEAD, A LIVE-OCC ==
+!     == RUN ON A TEMP=0/INSULATOR DECK (WHERE THE SUBSTITUTION CORRECTLY    ==
+!     == NEVER ENGAGES, SO HAUXRESMAX NEVER LEAVES ITS SENTINEL) WOULD NEVER ==
+!     == BE ALLOWED TO STOP VIA TCONV AT ALL -- A REAL, UNINTENDED           ==
+!     == REGRESSION FOUND WHILE WRITING THIS GATE, NOT JUST A HYPOTHETICAL.  ==
+      IF(TEDFTLIVEOCC) THEN
+        CALL EDFT$ISINI(TEDFTINI)
+        CALL DYNOCC$GETR8('TEMP',EDFTTEMPCHECK)
+        TEDFTLIVEOCCACTIVE=TEDFTINI.AND.EDFTTEMPCHECK.GT.0.D0
+      ELSE
+        TEDFTLIVEOCCACTIVE=.FALSE.
+      END IF
+!
+!     ==========================================================================
+!     == SWITCHES FOR FORCE AND STRESS CALCULATION                            ==
+!     ==========================================================================
+      CALL CELL$GETL4('MOVE',TSTRESS)
+      CALL ATOMS$GETL4('MOVE',TFORCE)
+!     == TATOMSMOVE IS THE RAW "ARE ATOMS ACTUALLY BEING PROPAGATED" FLAG,      ==
+!     == BEFORE TFORCEX (BELOW) UNCONDITIONALLY FORCES TFORCE=T EVERY STEP SO  ==
+!     == FORCES ARE ALWAYS COMPUTED/REPORTED EVEN FOR FIXED-ATOM RUNS. USED    ==
+!     == ONLY TO GATE THE LMTO STRUCTURE-CONSTANT RECOMPUTE BELOW, WHICH IS    ==
+!     == GEOMETRY-DEPENDENT AND PROVABLY UNCHANGED WHEN ATOMS AREN'T MOVING.   ==
+      TATOMSMOVE=TFORCE
+      TSTRESS=TSTRESS.OR.TSTRESSX
+      TFORCE=TFORCE.OR.TFORCEX
+      IF(TSTRESS)CALL POTENTIAL$SETL4('STRESS',TSTRESS)
+      IF(TFORCE)CALL POTENTIAL$SETL4('FORCE',TFORCE)
+!
+!     ==================================================================
+!     == COLLECT VARIABLES                                            ==
+!     ==================================================================
+      NAT=MAP%NAT
+!     == UNIT CELL =====================================================
+      CALL CELL$GETR8A('T0',9,RBAS)
+      STRESS=0.D0
+!     == ATOMIC POSITIONS ==============================================
+      ALLOCATE(R(3,NAT))
+      CALL ATOMLIST$GETR8A('R(0)',0,3*NAT,R)
+      ALLOCATE(FORCE(3,NAT))
+      FORCE(:,:)=0.D0
+!     == NUMBER OF BANDS ===============================================
+      CALL DYNOCC$GETI4('NB',NBX)
+!
+!     ==================================================================
+!     == INITIALIZE GSET: YLM, PRO, EIGR                              ==
+!     ==================================================================
+      IF(TFIRST.OR.TSTRESS) THEN
+        CALL WAVES_UPDATEGSET()
+      END IF
+!
+!     ==================================================================
+!     == DEALLOCATE EIGENVALUES AND EIGENVECTORS                      ==
+!     == SKIPPED IN CG MODE: CG$STATE_BY_STATE NEEDS THE PREVIOUS      ==
+!     == ITERATION'S EIGVAL TO JUDGE PER-BAND CONVERGENCE (SEE         ==
+!     == CG_STATE_BY_STATE'S ABS(EPS(IB)-EPSOLD).LT.CONV CHECK,        ==
+!     == paw_cg.f90). DEALLOCATING HERE UNCONDITIONALLY WAS THE        ==
+!     == ORIGINAL, DIAGNOSED-BUT-UNFIXED KAESTNERCG BUG.               ==
+!     ==================================================================
+      IF(OPTIMIZERTYPE.NE.'CG'.AND.OPTIMIZERTYPE.NE.'DAV'.AND.OPTIMIZERTYPE.NE.'RMM' &
+     &   .AND.OPTIMIZERTYPE.NE.'EDFT') THEN
+        DO IKPT=1,NKPTL
+          DO ISPIN=1,NSPIN
+            CALL WAVES_SELECTWV(IKPT,ISPIN)
+            CALL PLANEWAVE$SELECT(GSET%ID)
+            IF(ASSOCIATED(THIS%EIGVAL))DEALLOCATE(THIS%EIGVAL)
+            IF(ASSOCIATED(THIS%EIGVEC))DEALLOCATE(THIS%EIGVEC)
+          ENDDO
+        ENDDO
+      END IF
+      IF(OPTIMIZERTYPE.EQ.'CG'.OR.OPTIMIZERTYPE.EQ.'DAV'.OR.OPTIMIZERTYPE.EQ.'RMM' &
+     &   .OR.OPTIMIZERTYPE.EQ.'EDFT') THEN   !KAESTNERCG
+        CALL WAVES$KAESTNERCG1(TFIRST)
+      END IF
+!
+!     ==========================================================================
+!     == RANDOMIZE INITIAL WAVE FUNCTIONS                                     ==
+!     ==========================================================================
+      IF(TFIRST.AND.TRANDOM) THEN
+        CALL WAVES$RANDOMIZE()
+      END IF
+!
+!     ==========================================================================
+!     == GRAMM-SCHMIDT ORTHOGONALIZATION OF INITIAL WAVE FUNCTIONS            ==
+!     == ATTENTION THIS REORTHOGONALIZATION MAY GIVE THE                      ==
+!     == AN UNCONTROLLED KICK AFTER RESTARTING                                ==
+!     ==========================================================================
+      IF(TFIRST) THEN
+        CALL WAVES$GRAMMSCHMIDT()
+      END IF
+!
+!     ==========================================================================
+!     == CALCULATE PROJECTIONS                                                ==
+!     ==========================================================================
+      IF(TFIRST) THEN
+        CALL WAVES$PROJECTIONS('PSI0')
+      END IF
+!
+!     ==========================================================================
+!     == CALCULATE LMTO STRUCTURE CONSTANTS -- GEOMETRY-DEPENDENT, SO ONLY    ==
+!     == RECOMPUTED ON THE FIRST STEP OR WHEN THE GEOMETRY CAN ACTUALLY HAVE  ==
+!     == CHANGED (ATOMS PROPAGATING OR CELL MOVING). GATING THIS ON TFORCE    ==
+!     == INSTEAD (AS BEFORE) RECOMPUTED IT ON EVERY SINGLE ENERGY EVALUATION, ==
+!     == SINCE TFORCE DEFAULTS TO TRUE REGARDLESS OF WHETHER ATOMS MOVE (SEE  ==
+!     == TFORCEX ABOVE) -- A SIGNIFICANT, PURELY WASTED COST FOR FIXED-ATOM   ==
+!     == RUNS (E.G. CG/DAV/RMM ELECTRONIC-STRUCTURE-ONLY OPTIMIZATION).       ==
+!     ==========================================================================
+      IF(TFIRST.OR.TATOMSMOVE.OR.TSTRESS) THEN
+                               CALL TIMING$CLOCKON('STRUCTURECONSTANTS')
+        CALL LMTO$MAKESTRUCTURECONSTANTS()
+                               CALL TIMING$CLOCKOFF('STRUCTURECONSTANTS')
+      END IF
+                               CALL TIMING$CLOCKON('WAVES$ETOT')
+                               CALL TIMING$CLOCKON('WAVES$TONTBO')
+      CALL WAVES$TONTBO()
+                               CALL TIMING$CLOCKOFF('WAVES$TONTBO')
+      IF(TFIRST) TFIRST=.FALSE.
+!
+!     ==========================================================================
+!     == KINETIC ENERGY                                                       ==
+!     ==========================================================================
+      CALL WAVES$EKIN(EKIN,STRESSKIN)   !<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+      STRESS(:,:)=STRESS(:,:)+STRESSKIN(:,:)
+      CALL ENERGYLIST$SET('PS  KINETIC',EKIN)
+      CALL ENERGYLIST$ADD('AE  KINETIC',EKIN)
+      CALL ENERGYLIST$ADD('TOTAL ENERGY',EKIN)
+!
+!     ==========================================================================
+!     == ONE-CENTER DENSITY MATRICES                                          ==
+!     == SPIN RESTRICTED NSPIN=1;NDIM=1: (TOTAL)                              ==
+!     == SPIN POLARIZED  NSPIN=2;NDIM=1: (TOTAL,SPIN_Z)                       ==
+!     == NONCOLLINEAR    NSPIN=1;NDIM=2: (TOTAL,SPIN_X,SPIN_Y,SPIN_Z)         ==
+!     ==========================================================================
+      NAT=MAP%NAT
+      LMNXX=0
+      DO ISP=1,MAP%NSP
+        LMNXX=MAX(LMNXX,MAP%LMNX(ISP))
+      ENDDO
+      ALLOCATE(DENMAT(LMNXX,LMNXX,NDIMD,NAT))
+      ALLOCATE(EDENMAT(LMNXX,LMNXX,NDIMD,NAT))
+      CALL WAVES$DENMAT(LMNXX,NDIMD,NAT,DENMAT,EDENMAT) !<<<<<<<<<<<<<<<
+!     == SPACE-GROUP SYMMETRY: THE K-SUM RUNS OVER THE IRREDUCIBLE WEDGE =======
+      CALL SYMMETRY$GETL4('ON',TSYM)
+      IF(TSYM) THEN
+        CALL LMTO$GETL4('ON',TCHK)
+        CALL POTENTIAL$GETL4('TSCANDELOC',TCHK1)
+        IF(TCHK.OR.TCHK1.OR.NDIMD.EQ.4) THEN
+          CALL ERROR$MSG('!KPOINTS SYMMETRY=T IS NOT YET AVAILABLE FOR ONSITE')
+          CALL ERROR$MSG('HYBRIDS (NTBO), TSCANDELOC OR NONCOLLINEAR SPIN')
+          CALL ERROR$STOP('WAVES$ETOT')
+        END IF
+        CALL SYMMETRY$DENMAT(LMNXX,NDIMD,NAT,DENMAT)
+        CALL SYMMETRY$DENMAT(LMNXX,NDIMD,NAT,EDENMAT)
+      END IF
+!     == SPHERE-PROJECTED CHARGES AND MOMENTS FOR THE .PROT REPORT ===========
+      CALL PROTREPORT$ATOMCHARGES(NAT,LMNXX,NDIMD,DENMAT)
+      IF(.NOT.TPREMIXDIAGCHECKED) THEN
+        CENVPREMIXDIAG=' '
+        CALL GET_ENVIRONMENT_VARIABLE('VESPAW_SCAN0R_SWAP_DIAG',CENVPREMIXDIAG)
+        TPREMIXDIAG=(LEN_TRIM(CENVPREMIXDIAG).GT.0)
+        TPREMIXDIAGCHECKED=.TRUE.
+        IF(TPREMIXDIAG) THEN
+          PRINT*,'VESPAW_SCAN0R_SWAP_DIAG SET -- ALSO TRACKING RAW' &
+     &          ,' (PRE-ANDERSON-MIX) DENMAT (MAX-ABS ELEMENT PER ATOM)'
+        END IF
+      END IF
+      IF(TPREMIXDIAG) THEN
+        MAXDENMATPREMIX=0.D0
+        IATMAXDENMATPREMIX=0
+        DO IATPM=1,NAT
+          IF(MAXVAL(ABS(DENMAT(:,:,:,IATPM))).GT.MAXDENMATPREMIX) THEN
+            MAXDENMATPREMIX=MAXVAL(ABS(DENMAT(:,:,:,IATPM)))
+            IATMAXDENMATPREMIX=IATPM
+          END IF
+        ENDDO
+        PRINT*,'VESPAW_SCAN0R_SWAP_DIAG PREMIX MAX|DENMAT|=' &
+     &        ,MAXDENMATPREMIX,' AT IAT=',IATMAXDENMATPREMIX
+      END IF
+!     ==================================================================
+!     == PSEUDO DENSITY STILL WITHOUT PSEUDOCORE                      ==
+!     == SPIN RESTRICTED NSPIN=1;NDIM=1: (TOTAL)                      ==
+!     == SPIN POLARIZED  NSPIN=2;NDIM=1: (TOTAL,SPIN_Z)               ==
+!     == NONCOLLINEAR    NSPIN=1;NDIM=2: (TOTAL,SPIN_X,SPIN_Y,SPIN_Z) ==
+!     ==================================================================
+      NRL=MAP%NRL
+      ALLOCATE(RHO(NRL,NDIMD))
+      CALL WAVES$RHO(NRL,NDIMD,RHO)  !<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+!
+!     ==================================================================
+!     == SCAN0R: INTERSTITIAL KINETIC-ENERGY DENSITY FOR REAL           ==
+!     == DELOCALIZED TSCAN. DEFAULT FLAG IS FALSE, SO THIS BLOCK IS     ==
+!     == INERT UNLESS EXPLICITLY REQUESTED (POTENTIAL$SETL4            ==
+!     == ('TSCANDELOC',.TRUE.)). SEE SCAN0r notes ==
+!     ==================================================================
+      CALL POTENTIAL$GETL4('TSCANDELOC',TCHK)
+      LTSCANDELOC=TCHK
+      IF(LTSCANDELOC) THEN
+        IF(ALLOCATED(TAU_W)) DEALLOCATE(TAU_W)
+        ALLOCATE(TAU_W(NRL,NDIMD))
+        CALL WAVES$TAU(NRL,NDIMD,TAU_W)
+      END IF
+!
+!     ==================================================================
+!     == MIX RHO AND CHECK IF CONVERGED                               ==
+!     ==================================================================
+      IF(OPTIMIZERTYPE.EQ.'CG'.OR.OPTIMIZERTYPE.EQ.'DAV'.OR.OPTIMIZERTYPE.EQ.'RMM' &
+     &   .OR.OPTIMIZERTYPE.EQ.'EDFT') THEN       !KAESTNERCG
+         TSTOP=.TRUE. ! DO NOT PROPAGATE THE WAVE FUNCTION           !KAESTNERCG
+              ! MUST BE SET IN EACH ITERATION, SEE WAVES$PROPAGATE   !KAESTNERCG
+!        == DENMAT'S IMAGINARY PART IS EXACTLY ZERO FOR ANY K-MESH  ==
+!        == CLOSED UNDER K->-K (PSI(-K)=PSI(K)*, SO CONTRIBUTIONS  ==
+!        == CANCEL IN THE SUM OVER K) -- VERIFIED NUMERICALLY, SO   ==
+!        == ONLY THE REAL PART IS PASSED TO THE (REAL-ONLY) MIXER.  ==
+!        == MIXER='VARIATIONAL' DOES NOT MIX THE DENSITY AT ALL: THE ENERGY ==
+!        == BELOW IS EVALUATED AT THE UNMIXED OUTPUT DENSITY, AND THE       ==
+!        == HAMILTONIAN IS MIXED INSTEAD (WAVES_MIXPOT_VAR, AFTER FORCES).  ==
+         IF(MIXERTYPE.NE.'VARIATIONAL') THEN
+!        == RHO IS IN THE DENSITY LAYOUT (DISTRIBUTED OVER THE MONOMER); ==
+!        == THE MIXERS SUM ALL GRID SCALAR PRODUCTS OVER THE MONOMER.     ==
+!        == RHO IS IN THE WAVE-FUNCTION LAYOUT, HOLDING THE PARTIAL DENSITY  ==
+!        == OF THE LOCAL K-POINTS; WAVES_VOFRHO SUMS THE K-GROUPS LATER.     ==
+!        == MIX THE TOTAL DENSITY IN THE DENSITY LAYOUT (EVERY GRID POINT ON ==
+!        == ONE TASK, AS THE KERKER FFT REQUIRES) AND HAND EACH K-GROUP      ==
+!        == 1/NGROUP OF THE RESULT, SO THAT THE SUM IN VOFRHO RESTORES IT.   ==
+         CALL PLANEWAVE$SELECT('DENSITY')
+         CALL PLANEWAVE$GETI4('NR1L',NR1L_VM)
+         CALL PLANEWAVE$GETI4('NR1',NR1M)
+         CALL PLANEWAVE$GETI4('NR2',NR2M)
+         CALL PLANEWAVE$GETI4('NR3',NR3M)
+         NR1L_PM=NRL/(NR2M*NR3M)
+         RNR1LM(1)=REAL(NR1L_PM,KIND=8)
+         CALL MPE$COMBINE('MONOMER','+',RNR1LM)
+         NGROUPM=NINT(RNR1LM(1)/REAL(NR1M,KIND=8))
+         NRLVM=NR1L_VM*NR2M*NR3M
+         ALLOCATE(RHOVM(NRLVM,NDIMD))
+         CALL WAVES_MAPPSITOPOT('PSITOPOT',NR1L_PM,NR1L_VM,NR2M,NR3M,NDIMD,RHO,RHOVM)
+         RHODIM=NRLVM*NDIMD
+         DENDIM=LMNXX*LMNXX*NDIMD*NAT
+         ALLOCATE(DENMATR(DENDIM))
+         DENMATR=RESHAPE(REAL(DENMAT,KIND=8),(/DENDIM/))
+         IF(MIXERTYPE.EQ.'ANDERSON') THEN
+           CALL WAVES_MIXRHO_ANDERSON(NRLVM,NDIMD,MIXG0SQ,MIXNHISTORY,RHODIM,DENDIM,RHOVM,DENMATR,MIXTOL,TCONV,CONVPSI)
+         ELSE
+           CALL WAVES_MIXRHO_PUL(NRLVM,NDIMD,MIXG0SQ,MIXNHISTORY,RHODIM,DENDIM,RHOVM,DENMATR,MIXTOL,TCONV,CONVPSI)
+         END IF
+         CALL WAVES_MAPPSITOPOT('POTTOPSI',NR1L_PM,NR1L_VM,NR2M,NR3M,NDIMD,RHO,RHOVM)
+         RHO=RHO/REAL(NGROUPM,KIND=8)
+         DEALLOCATE(RHOVM)
+         DENMAT=RESHAPE(CMPLX(DENMATR,0.D0,KIND=8),SHAPE(DENMAT))
+         DEALLOCATE(DENMATR)
+!        == HAUX-RESIDUAL-AWARE STOPPING (LIVE OCCUPATIONS ONLY): TCONV       ==
+!        == ABOVE ONLY LOOKS AT THE DENSITY RESIDUAL -- IT HAS NO WAY TO KNOW ==
+!        == WHETHER HAUX (THE OBJECT THAT ACTUALLY DETERMINES THE            ==
+!        == OCCUPATIONS FED INTO THAT DENSITY, ONCE VESPAW_EDFT_LIVE_OCC IS   ==
+!        == ON) HAS ITSELF FINISHED TRACKING THE REAL HAMILTONIAN. DO NOT     ==
+!        == ACCEPT AN OTHERWISE-CONVERGED TCONV UNTIL THE WORST FERMI-WINDOW  ==
+!        == HAUX-TRACKING RESIDUAL SEEN LAST ITERATION (EDFT$GETHAUXRESMAX,   ==
+!        == SET BY DAVIDSON$STATE_BY_BLOCK) IS ALSO BELOW EDFTHAUXCONVTOL     ==
+!        == (DEFAULT 1.D-5 H, TUNABLE VIA VESPAW_EDFT_HAUXCONVTOL). WHEN LIVE ==
+!        == OCCUPATIONS ARE OFF, THIS IS A NO-OP -- TCONV GATES STOPIT EXACTLY==
+!        == AS BEFORE.                                                        ==
+         IF(TCONV.AND.TEDFTLIVEOCCACTIVE) THEN
+           CALL EDFT$GETHAUXRESMAX(EDFTHAUXRESNOW)
+           TCONV=(EDFTHAUXRESNOW.LT.EDFTHAUXCONVTOL)
+         END IF
+         IF(TCONV) THEN
+           CALL STOPIT$SETL4('STOP',.TRUE.)
+           CALL STOPIT$SETCH('REASON','CONVERGED (DENSITY RESIDUAL BELOW MIXTOL)')
+         END IF
+         END IF ! MIXERTYPE.NE.'VARIATIONAL'
+      END IF                                                         !KAESTNERCG
+!
+!     ==================================================================
+!     == MULTIPOLE MOMENTS OF ONE-CENTER PART                         ==
+!     == CONTAINS CORE AND PSEUDOCORE                                 ==
+!     ==================================================================
+      CALL SETUP$GETI4('LMRXX',LMRXX) !FORMER CALL SETUP$LMRXX(LMRXX)
+      ALLOCATE(QLM(LMRXX,NAT))
+      NAT=MAP%NAT
+      CALL WAVES$MOMENTS(NAT,LMRXX,NDIMD,LMNXX,DENMAT,QLM)
+!
+!     ==================================================================
+!     == PREPARE SNAPSHOT OF SPIN TRAJECTORY                          ==
+!     ==================================================================
+!
+!     ==================================================================
+!     == OVERWRITE DENSITY TO FOR FIXED POTENTIAL CALC.               ==
+!     ==================================================================
+      IF(TFIXRHO) THEN
+        CALL WAVES_FIXRHOGET(NRL,NDIMD,LMRXX,NAT,QLM,RHO,DENMAT)
+      END IF
+      IF(TWRITERHO) THEN
+        CALL WAVES_FIXRHOSET(NRL,NDIMD,LMRXX,NAT,QLM,RHO,DENMAT)
+      END IF
+!
+!     ==========================================================================
+!     == ANALYSE SPIN DENSITY                                                 ==
+!     ==========================================================================
+      CALL WAVES$SPINS(NRL,NDIMD,RHO,NAT,LMNXX,DENMAT)
+!
+!     ==================================================================
+!     == POTENTIAL (POTENTIAL IS STORED BACK INTO THE DENSITY ARRAY!) ==
+!     ==================================================================
+      ALLOCATE(VQLM(LMRXX,NAT))
+      CALL WAVES_VOFRHO(NRL,NDIMD,RHO,RHOB,NAT,LMRXX,QLM,VQLM)
+      DEALLOCATE(QLM)
+
+!      ALLOCATE(FORCET(3,NAT))
+!      ALLOCATE(VQLM(LMRXX,NAT))
+!      CALL POTENTIAL$VOFRHO(NRL,NDIMD,RHO,LMRXX,NAT,QLM,VQLM &
+!     &                     ,R,FORCET,RBAS,STRESST,RHOB)
+!      FORCE=FORCE+FORCET
+!      STRESS=STRESS+STRESST
+!      DEALLOCATE(QLM)
+!      DEALLOCATE(FORCET)
+!
+!     ==========================================================================
+!     == AUGMENTATION                                                         ==
+!     ==========================================================================
+      ALLOCATE(DH(LMNXX,LMNXX,NDIMD,NAT))
+      ALLOCATE(DO(LMNXX,LMNXX,NDIMD,NAT))
+      CALL WAVES$SPHERE(LMNXX,NDIMD,NAT,LMRXX,RHOB,DENMAT,EDENMAT &
+     &                 ,VQLM,DH,DO,POTB)
+!
+!     ==========================================================================
+!     == INTERFACE TO NTBO BASIS                                              ==
+!     ==========================================================================
+      ALLOCATE(DH1(LMNXX,LMNXX,NDIMD,NAT))
+      CALL LMTO$ETOT(LMNXX,NDIMD,NAT,DENMAT,DH1)
+      DH=DH+DH1
+      DEALLOCATE(DH1)
+!
+!     ==========================================================================
+!     == DFT+U AND SPIN-ORBIT COUPLING (ONE-CENTER DENSITY MATRIX)            ==
+!     ==========================================================================
+      CALL ONSITE$GETL4('ON',TCHK)
+      IF(TCHK) THEN
+        CALL ONSITE$ETOT(LMNXX,NDIMD,NAT,DENMAT,DH,EONSU,EONSSO)
+        CALL ENERGYLIST$SET('DFT+U',EONSU)
+        CALL ENERGYLIST$SET('SPIN-ORBIT',EONSSO)
+        CALL ENERGYLIST$ADD('TOTAL ENERGY',EONSU+EONSSO)
+      END IF
+!
+!     ===================================================================
+!     ==  SUBTRACT AVERAGE ELECTROSTATIC POTENTIAL =====================
+!     ==  TO ACCOUNT FOR BACKGROUND DENSITY ============================
+!     ==  POTB=-1/OMEGA*INT D^3R(\TILDE{V}+V^1-\TILDE{V}^1) ============
+!     ==  NOTE THAT \INT D^3R \TILDE{V}=0
+!     ===================================================================
+      CALL WAVES$ADDCONSTANTPOT(NRL,LMNXX,NDIMD,NAT,POTB,RHO,DH,DO)
+      CALL GRAPHICS$SETR8('POTSHIFT',POTB)
+!
+!     ==================================================================
+!     == COMMUNICATE DATA WITH OPTICS MODULE                          ==
+!     ==================================================================
+!     CALL OPTICS$GETL4('ON',TCHK)
+!     IF(TCHK) THEN
+!        CALL MPE$COMBINE('~','+',DO) ! DO CURRENTLY USED ONLY FOR OPTICS
+!        IF(NDIM.EQ.2) THEN
+!          CALL ERROR$MSG('OPTICS CODE DOES NOT WORK WITH NONCOLLINEAR MODE')
+!          CALL ERROR$STOP('WAVES$ETOT') 
+!        END IF
+!        CALL OPTICS$WRITEOUT_PARTIALS(NSPIN,NAT,LMNXX,DH,DO)
+!      END IF
+!
+!     ==================================================================
+!     == PRINTOUT FOR TESTING 
+!     ==================================================================
+!!$IF(NSPIN.EQ.2) THEN
+!!$  DO IAT=1,NAT
+!!$    ISP=MAP%ISP(IAT)
+!!$    LMNX=MAP%LMNX(ISP)
+!!$    DO ISPIN=1,NDIMD
+!!$      WRITE(*,FMT='("D ======== ATOM ",I2," SPIN ",I2," =========")')IAT,ISPIN
+!!$      LMN1=0.D0
+!!$      DO LN=1,MAP%LNX(ISP)
+!!$        L=MAP%LOX(LN,ISP)
+!!$        IF(L.NE.2) THEN
+!!$          LMN1=LMN1+2*L+1
+!!$          CYCLE
+!!$        END IF
+!!$        WRITE(*,FMT='("=",I1,10E10.3)') &
+!!$             LN,(REAL(DENMAT(LMN1+M,LMN1+M,ISPIN,IAT),KIND=8),M=1,2*L+1)
+!!$        LMN1=LMN1+2*L+1
+!!$      ENDDO
+!!$    ENDDO
+!!$    DO ISPIN=1,NDIMD
+!!$      WRITE(*,FMT='("H======== ATOM",I2," SPIN ",I2," =========")')IAT,ISPIN
+!!$      LMN1=0.D0
+!!$      DO LN=1,MAP%LNX(ISP)
+!!$        L=MAP%LOX(LN,ISP)
+!!$        IF(L.NE.2) THEN
+!!$          LMN1=LMN1+2*L+1
+!!$          CYCLE
+!!$        END IF
+!!$        WRITE(*,FMT='("=",I2,10E10.3)') &
+!!$             LN,(REAL(DH(LMN1+M,LMN1+M,ISPIN,IAT)),M=1,2*L+1)
+!!$        LMN1=LMN1+2*L+1
+!!$      ENDDO
+!!$    ENDDO
+!!$  ENDDO 
+!!$ELSE
+!!$  DO IAT=1,NAT
+!!$    ISP=MAP%ISP(IAT)
+!!$    LMNX=MAP%LMNX(ISP)
+!!$    DO ISPIN=1,NDIMD
+!!$!      WRITE(*,FMT='("D======== ATOM ",I2," SPIN ",I2," =========")')IAT,ISPIN
+!!$      LMN1=0.D0
+!!$      DO LN=1,MAP%LNX(ISP)
+!!$        L=MAP%LOX(LN,ISP)
+!!$        IF(L.NE.2) THEN
+!!$          LMN1=LMN1+2*L+1
+!!$          CYCLE
+!!$        END IF
+!!$!        WRITE(*,FMT='("=",I2,10E10.3)') &
+!!$!             LN,(REAL(DENMAT(LMN1+M,LMN1+M,ISPIN,IAT),KIND=8),M=1,2*L+1)
+!!$        LMN1=LMN1+2*L+1
+!!$      ENDDO
+!!$    ENDDO
+!!$    DO ISPIN=1,NDIMD
+!!$!      WRITE(*,FMT='("H ======== ATOM ",I2," SPIN ",I2," =========")')IAT,ISPIN
+!!$      LMN1=0.D0
+!!$      DO LN=1,MAP%LNX(ISP)
+!!$        L=MAP%LOX(LN,ISP)
+!!$        IF(L.NE.2) THEN
+!!$!          LMN1=LMN1+2*L+1
+!!$!          CYCLE
+!!$        END IF
+!!$!        WRITE(*,FMT='("=",I2,10E10.3)') &
+!!$!             LN,(REAL(DH(LMN1+M,LMN1+M,ISPIN,IAT)),M=1,2*L+1)
+!!$        LMN1=LMN1+2*L+1
+!!$      ENDDO
+!!$    ENDDO
+!!$  ENDDO 
+!!$END IF
+      DEALLOCATE(VQLM)
+      DEALLOCATE(DENMAT)
+      DEALLOCATE(EDENMAT)
+!
+!     ==================================================================
+!     == DECOMPOSE INTO SPIN-UP AND SPIN DOWN FOR NSPIN=2             ==
+!     ==================================================================
+      IF(NSPIN.EQ.2) THEN
+        DO IR=1,NRL
+          SVAR1=RHO(IR,1)
+          SVAR2=RHO(IR,2)
+          RHO(IR,1)=SVAR1+SVAR2
+          RHO(IR,2)=SVAR1-SVAR2
+        ENDDO
+!       == SCAN0R: VTAU_W FOLLOWS THE SAME (T,Z)->(UP,DN) CONVENTION AS RHO, ==
+!       == SINCE WAVES_VPSI CONSUMES IT THE SAME WAY (SEQUENCE-ASSOCIATED   ==
+!       == PER-SPIN SLICE). HARMLESS WHEN LTSCANDELOC IS FALSE, SINCE       ==
+!       == VTAU_W IS THEN IDENTICALLY ZERO (SEE WAVES_VOFRHO).              ==
+        IF(LTSCANDELOC) THEN
+          DO IR=1,NRL
+            SVAR1=VTAU_W(IR,1)
+            SVAR2=VTAU_W(IR,2)
+            VTAU_W(IR,1)=SVAR1+SVAR2
+            VTAU_W(IR,2)=SVAR1-SVAR2
+          ENDDO
+        END IF
+        DO IAT=1,NAT
+          ISP=MAP%ISP(IAT)
+          LMNX=MAP%LMNX(ISP)
+          DO LMN1=1,LMNX
+            DO LMN2=1,LMNX
+              CSVAR1=DH(LMN1,LMN2,1,IAT)
+              CSVAR2=DH(LMN1,LMN2,2,IAT)
+              DH(LMN1,LMN2,1,IAT)=CSVAR1+CSVAR2
+              DH(LMN1,LMN2,2,IAT)=CSVAR1-CSVAR2
+              CSVAR1=DO(LMN1,LMN2,1,IAT)
+              CSVAR2=DO(LMN1,LMN2,2,IAT)
+              DO(LMN1,LMN2,1,IAT)=CSVAR1+CSVAR2
+              DO(LMN1,LMN2,2,IAT)=CSVAR1-CSVAR2
+            ENDDO
+          ENDDO
+        ENDDO
+      END IF
+!
+!     ==================================================================
+!     ==  SEND DATA TO BANDDATA MODULE                                ==
+!     ==  THIS HAS TO BE DONE HERE, BECAUSE VOFR, DH AND DO ARE ONLY  ==
+!     ==  AVAILABLE HERE                                              ==
+!     ================================================================== 
+      CALL BANDDATA$SETI4('LMNXX',LMNXX)
+      CALL BANDDATA$SETI4('NAT',NAT)
+      CALL BANDDATA$SETI4('NRL',NRL)
+      CALL BANDDATA$SETI4('NDIMD',NDIMD)
+      CALL BANDDATA$SETR8A('VOFRL',NRL*NDIMD,RHO(:,:))
+      CALL BANDDATA$SETC8A('DH',LMNXX*LMNXX*NDIMD*NAT,DH(:,:,:,:))
+      CALL BANDDATA$SETR8A('DO',LMNXX*LMNXX*NDIMD*NAT,DO(:,:,:,:))
+!
+!     ==================================================================
+!     ==  RECEIVE POTENTIALS FROM NTBO INTERFACE                      ==
+!     ================================================================== 
+                               CALL TIMING$CLOCKON('WAVES$FROMNTBO')
+      CALL WAVES$FROMNTBO()
+                               CALL TIMING$CLOCKOFF('WAVES$FROMNTBO')
+!
+!     ==================================================================
+!     == FORCES AND STRESSES                                          ==
+!     ==================================================================
+      FORCE=0.D0
+      IF(TFORCE.OR.TSTRESS) THEN
+!       == THE ORTHOGONALITY CONSTRAINT CONTRIBUTES -DO<P|PSI>LAMBDA. MD SETS ==
+!       == THE LAGRANGE MULTIPLIERS RLAM0 IN WAVES$ORTHOGONALIZE; THE        ==
+!       == EIGENSOLVERS LEAVE RITZ VECTORS WITH RITZ VALUES EIGVAL, FOR WHICH ==
+!       == LAMBDA=DIAG(EIGVAL). WITHOUT THIS THE TERM IS MISSING FOR CG/DAV/  ==
+!       == RMM/EDFT (FORCES WRONG BY SEVERAL PERCENT, STRESS BY FAR MORE).    ==
+        IF(OPTIMIZERTYPE.NE.'MD') THEN
+          DO IKPT=1,NKPTL
+            DO ISPIN=1,NSPIN
+              CALL WAVES_SELECTWV(IKPT,ISPIN)
+              IF(.NOT.ASSOCIATED(THIS%EIGVAL)) CYCLE
+              THIS%RLAM0(:,:)=(0.D0,0.D0)
+              DO IB=1,THIS%NB
+                THIS%RLAM0(IB,IB)=CMPLX(THIS%EIGVAL(IB),0.D0,KIND=8)
+              ENDDO
+            ENDDO
+          ENDDO
+        END IF
+        STRESS1(:,:)=0.D0
+        CALL WAVES$FORCE(NAT,LMNXX,NDIMD,DH,FORCE,STRESS1)
+        STRESS=STRESS+STRESS1
+!WRITE(*,FMT='("PRO STRESS ",3F15.7)')STRESS1(1,:)
+!WRITE(*,FMT='("PRO STRESS ",3F15.7)')STRESS1(2,:)
+!WRITE(*,FMT='("PRO STRESS ",3F15.7)')STRESS1(3,:)
+      END IF
+!
+!     ==================================================================
+!     ==  VARIATIONAL SCF: REPLACE THE OUTPUT HAMILTONIAN (RHO=V_OUT,  ==
+!     ==  DH, VTAU_W) BY THE LINE-SEARCHED PARAMETERS THETA FOR THE     ==
+!     ==  NEXT DIAGONALIZATION. DONE AFTER THE FORCES, WHICH MUST USE   ==
+!     ==  THE HAMILTONIAN OF THE ACTUAL OUTPUT STATE.                   ==
+!     ==================================================================
+      IF((OPTIMIZERTYPE.EQ.'CG'.OR.OPTIMIZERTYPE.EQ.'DAV'.OR.OPTIMIZERTYPE.EQ.'RMM') &
+     &   .AND.MIXERTYPE.EQ.'VARIATIONAL') THEN
+        CALL WAVES_VARMIXHAMILTONIAN(NRL,NDIMD,NAT,LMNXX,RHO,DH,DO,CONVPSI)
+      END IF
+!
+!     ==================================================================
+!     ==  CALL GONJUGATE GRADIENT                                     ==
+!     ================================================================== 
+      IF(OPTIMIZERTYPE.EQ.'CG') THEN                                             !KAESTNERCG
+         CALL TIMING$CLOCKON('CG')                                           !KAESTNERCG
+         CALL CG$STATE_BY_STATE(MAP%NRL,NDIMD,RHO(:,:),CONVPSI,NAT,LMNXX,DH) !KAESTNERCG
+         CALL TIMING$CLOCKOFF('CG')                                          !KAESTNERCG
+      ELSE IF(OPTIMIZERTYPE.EQ.'DAV') THEN
+         CALL TIMING$CLOCKON('DAV')
+         CALL DAVIDSON$STATE_BY_BLOCK(MAP%NRL,NDIMD,RHO(:,:),CONVPSI,NAT,LMNXX,DH)
+         CALL TIMING$CLOCKOFF('DAV')
+      ELSE IF(OPTIMIZERTYPE.EQ.'RMM') THEN
+!        == VASP-STYLE (NELMDL) WARM-UP: RMM-DIIS COLD-STARTED FROM ATOMIC   ==
+!        == SUPERPOSITION CONVERGES NEAR-BUT-NOT-ONTO THE RIGHT EIGENSTATE   ==
+!        == (SEE 20_RMM_DIIS_WAVEFUNCTION_OPTIMIZER.MD IN THE SCAN0R WORKING ==
+!        == DIRECTORY) -- RUN THE FIRST RMMDELAY STEPS (DEFAULT 8) WITH THE  ==
+!        == BLOCK-DAVIDSON SOLVER INSTEAD, THEN SWITCH TO RMM. RMMDELAY=0    ==
+!        == DISABLES THE WARM-UP (E.G. FOR A WARM RESTART).                  ==
+!        == DAVIDSON REPLACED CG HERE (2026-09-27): SAME ENERGY, BUT CG'S    ==
+!        == STATE-BY-STATE SWEEPS MADE THE WARM-UP ~88% OF THE RUN TIME FOR  ==
+!        == 64-ATOM SI (RMM 908 S VS DAV 552 S).                             ==
+         IF(RMMDELAYCOUNT.LT.RMMDELAY) THEN
+            RMMDELAYCOUNT=RMMDELAYCOUNT+1
+            CALL TIMING$CLOCKON('DAV')
+            CALL DAVIDSON$STATE_BY_BLOCK(MAP%NRL,NDIMD,RHO(:,:),CONVPSI,NAT,LMNXX,DH)
+            CALL TIMING$CLOCKOFF('DAV')
+         ELSE
+            CALL TIMING$CLOCKON('RMM')
+            CALL RMM$STATE_BY_BLOCK(MAP%NRL,NDIMD,RHO(:,:),CONVPSI,NAT,LMNXX,DH)
+            CALL TIMING$CLOCKOFF('RMM')
+         END IF
+      ELSE IF(OPTIMIZERTYPE.EQ.'EDFT'.AND.MIXERTYPE.EQ.'VARIATIONAL') THEN
+!        == VARIATIONAL ENSEMBLE DFT: DIRECT JOINT MINIMIZATION OF THE FREE  ==
+!        == ENERGY OVER (PSI,HAUX) WITH THE EXACT HAMILTONIAN OF THE CURRENT ==
+!        == STATE (NOTHING WAS MIXED ABOVE) -- SEE EDFT$VARSTEP.             ==
+         CALL TIMING$CLOCKON('EDFT')
+         CALL ENERGYLIST$RETURN('TOTAL ENERGY',SVAR1)
+         CALL DYNOCC$GETR8('EPOT',SVAR2)
+!        == SEARCH DIRECTION FROM A KERKER-PRECONDITIONED HAMILTONIAN,     ==
+!        == COMMITTED ONLY WHEN THE LINE SEARCH ACCEPTS A NEW POINT (SEE    ==
+!        == MIXKPC$TRIAL). VESPAW_EDFTVAR_NOKERKER=1 USES THE BARE H INSTEAD.==
+         IF(.NOT.TEDFTKPCCHECKED) THEN
+           CALL GET_ENVIRONMENT_VARIABLE('VESPAW_EDFTVAR_NOKERKER',CENVKPC)
+           TEDFTKPC=(LEN_TRIM(CENVKPC).EQ.0)
+           TEDFTKPCCHECKED=.TRUE.
+         END IF
+         ALLOCATE(RHOTH(NRL,NDIMD))
+         ALLOCATE(DHTH(LMNXX,LMNXX,NDIMD,NAT))
+         IF(TEDFTKPC) THEN
+           CALL WAVES_EDFTKERKER(NRL,NDIMD,NAT,LMNXX,RHO,DH,DO,RHOTH,DHTH)
+         ELSE
+           RHOTH=RHO
+           DHTH=DH
+         END IF
+         CALL EDFT$VARSTEP(MAP%NRL,NDIMD,RHOTH,NAT,LMNXX,DHTH,SVAR1+SVAR2 &
+     &                    ,EDIFFTOL,MIXTOL,TCONV)
+         CALL EDFT$VARNEWPOINT(TCHK)
+         IF(TEDFTKPC.AND.TCHK) CALL MIXKPC$COMMIT()
+         DEALLOCATE(RHOTH,DHTH)
+         IF(TCONV) THEN
+           CALL STOPIT$SETL4('STOP',.TRUE.)
+           CALL STOPIT$SETCH('REASON','CONVERGED (ROUTE 2, HAMILTONIAN RESIDUAL)')
+         END IF
+         CALL TIMING$CLOCKOFF('EDFT')
+      ELSE IF(OPTIMIZERTYPE.EQ.'EDFT') THEN
+         CALL TIMING$CLOCKON('EDFT')
+         CALL EDFT$STATE_BY_BLOCK(MAP%NRL,NDIMD,RHO(:,:),CONVPSI,NAT,LMNXX,DH)
+         CALL TIMING$CLOCKOFF('EDFT')
+      END IF                                                                 !KAESTNERCG
+!
+!     ==================================================================
+!     ==  EVALUATE H*PSI                                              ==
+!     ================================================================== 
+      CALL WAVES$HPSI(NRL,NDIMD,NAT,LMNXX,RHO,DH)
+      DEALLOCATE(RHO)
+      DEALLOCATE(DH)
+      DEALLOCATE(DO)
+!
+!     ==================================================================
+!     ==  EVALUATE ENERGY EXPECTATION VALUES                          ==
+!     ================================================================== 
+CALL TIMING$CLOCKON('W:EXPECT')
+      ALLOCATE(EIG(NBX,NKPTL,NSPIN))
+      ALLOCATE(HAMILTON(2,2))
+      DO IKPT=1,NKPTL
+        DO ISPIN=1,NSPIN
+          CALL WAVES_SELECTWV(IKPT,ISPIN)
+          CALL PLANEWAVE$SELECT(GSET%ID)      
+          NB=THIS%NB
+          NBH=THIS%NBH
+          NGL=GSET%NGL
+          IF(.NOT.ASSOCIATED(THIS%EXPECTVAL))ALLOCATE(THIS%EXPECTVAL(NB))
+          DO IB=1,NBH
+!           == GSET%TINV.AND..NOT.GSET%TSUPER: THE N1=1,N2=2 CALL BELOW    ==
+!           == UNCONDITIONALLY FORCES WAVES_OVERLAP'S OWN NBH.NE.NB-GATED  ==
+!           == PACKED PATH (2 !=1), REGARDLESS OF THE LIVE TSUPER STATE -- ==
+!           == CORRECT ONLY FOR THE LEGACY NBH=(NB+1)/2 PACKING (ONE SLOT  ==
+!           == = 2 BANDS). UNDER TSUPER (NBH=NB, NO PACKING -- SEE         ==
+!           == LGAMMASUPER) EACH IB IS ALREADY ONE INDEPENDENT BAND, SO IT ==
+!           == MUST USE THE SAME N1=1,N2=1 CALL AS A NON-TINV K-POINT.     ==
+            IF(GSET%TINV.AND..NOT.GSET%TSUPER) THEN
+              CALL WAVES_OVERLAP(.FALSE.,NGL,NDIM,1,2 &
+     &              ,THIS%PSI0(:,:,IB),THIS%HPSI(:,:,IB),HAMILTON)
+              EIG(2*IB-1,IKPT,ISPIN)=REAL(HAMILTON(1,1),KIND=8)
+              EIG(2*IB  ,IKPT,ISPIN)=REAL(HAMILTON(2,2),KIND=8)
+            ELSE
+              CALL WAVES_OVERLAP(.FALSE.,NGL,NDIM,1,1 &
+     &            ,THIS%PSI0(:,:,IB),THIS%HPSI(:,:,IB),HAMILTON)
+              EIG(IB,IKPT,ISPIN)=REAL(HAMILTON(1,1),KIND=8)
+            END IF
+          ENDDO
+          THIS%EXPECTVAL(:)=EIG(1:NB,IKPT,ISPIN)
+        ENDDO
+      ENDDO
+      DEALLOCATE(HAMILTON)
+!     == OCCUPATIONS ===================================================
+      CALL WAVES_DEDFFROMNTBO(NB,NKPTL,NSPIN,EIG)
+!     == LIVE EDFT OCCUPATION FEED: SUBSTITUTE HAUX'S OWN EIGENVALUES        ==
+!     == (ALREADY EVOLVED TOWARD THE REAL HAMILTONIAN THIS ITERATION INSIDE  ==
+!     == DAVIDSON$STATE_BY_BLOCK'S SHADOW MACHINERY, VIA EDFT$HAUXFORCE +    ==
+!     == EDFT$HAUXSTEP_ADAPTIVE -- SEE VESPAW_CG.F90) FOR THE RAW,           ==
+!     == INSTANTANEOUS <PSI|H|PSI> EXPECTATION VALUE JUST COMPUTED ABOVE,    ==
+!     == BEFORE EIG REACHES DYNOCC'S OWN OCCUPATION-DETERMINATION MACHINERY  ==
+!     == (DYNOCC$PROPAGATE'S ADIABATIC BRANCH, ITSELF LEFT ENTIRELY          ==
+!     == UNCHANGED). THIS DECOUPLES OCCUPATION DETERMINATION FROM THE        ==
+!     == INSTANTANEOUS SINGLE-PARTICLE SPECTRUM -- THE ACTUAL POINT OF THE   ==
+!     == ENSEMBLE-DFT/MVP APPROACH THIS WHOLE PROTOTYPE IS BUILT AROUND (SEE ==
+!     == THE DEV NOTES). ONLY OVERRIDES DYNOCC'S INPUT HERE -- EIG'S     ==
+!     == EARLIER USE ABOVE (THIS%EXPECTVAL) AND WAVES_DEDFFROMNTBO'S NTBO    ==
+!     == DOUBLE-COUNTING CORRECTION ALREADY RAN ON THE REAL VALUES, AND      ==
+!     == NOTHING ELSE (BAND-STRUCTURE/PDOS OUTPUT, WHICH READS THE           ==
+!     == DAVIDSON-DIAGONALIZER'S OWN THIS%EIGVAL, NOT THIS EIG ARRAY) IS     ==
+!     == TOUCHED AT ALL. OFF BY DEFAULT; ENABLED BY SETTING                  ==
+!     == VESPAW_EDFT_LIVE_OCC (ANY NONEMPTY VALUE). ALSO REQUIRES HAUX TO BE ==
+!     == INITIALIZED ALREADY (TRUE FROM THE FIRST BLOCK OF THE FIRST         ==
+!     == ITERATION ONWARD -- SEE EDFT$ISINI) AND TEMP>0 (NO FINITE-          ==
+!     == TEMPERATURE SMEARING MEANS NO MERMIN FREE ENERGY TO SPEAK OF).      ==
+!     == RECHECKED HERE RATHER THAN REUSING THE EARLY TEDFTLIVEOCCACTIVE      ==
+!     == (COMPUTED ABOVE, BEFORE DAVIDSON$STATE_BY_BLOCK RAN THIS ITERATION,  ==
+!     == FOR THE STOPPING GATE) -- ON THE VERY FIRST OUTER ITERATION, TINI    ==
+!     == FLIPS FALSE->TRUE *DURING* DAVIDSON$STATE_BY_BLOCK, BETWEEN THE TWO  ==
+!     == CHECKS, SO REUSING THE EARLY VALUE HERE WOULD WRONGLY SKIP THE       ==
+!     == SUBSTITUTION ON ITERATION 1 EVEN THOUGH HAUX IS ALREADY SEEDED BY    ==
+!     == THE TIME WE REACH THIS POINT.                                       ==
+!     == ALSO UNCONDITIONAL FOR OPTIMIZERTYPE='EDFT' (THE REAL JOINT          ==
+!     == ORBITAL+OCCUPATION OPTIMIZER, VESPAW_CG.F90): THERE, PSI HAS         ==
+!     == ALREADY BEEN ROTATED INTO HAUX'S OWN NATURAL-ORBITAL EIGENBASIS      ==
+!     == THIS ITERATION (STEP C OF EDFT$STATE_BY_BLOCK) -- FERMI-FILLING      ==
+!     == HAUX'S OWN EIGENVALUES HERE, NOT THE FRESHLY-RECOMPUTED <PSI|H|PSI>  ==
+!     == (WHICH DIFFERS FROM THEM BY EXACTLY EDFT$HAUXFORCE'S RESIDUAL),      ==
+!     == KEEPS DYNOCC'S OCCUPATIONS CONSISTENT WITH WHAT ACTUALLY DETERMINED  ==
+!     == THE ORBITAL ROTATION THIS ITERATION, NOT A SEPARATE, SLIGHTLY        ==
+!     == DIFFERENT QUANTITY. (DELIBERATELY NOT EXTENDING THE EARLIER          ==
+!     == TEDFTLIVEOCCACTIVE-GATED STOPPING CHECK TO 'EDFT': THAT GATE READS   ==
+!     == EDFT$GETHAUXRESMAX, WHICH ONLY DAVIDSON$STATE_BY_BLOCK EVER SETS --  ==
+!     == EDFT$STATE_BY_BLOCK DOESN'T, SO IT WOULD STAY AT ITS SENTINEL AND    ==
+!     == BLOCK STOPPING FOREVER. NOT NEEDED THERE ANYWAY: SINCE PSI ITSELF IS ==
+!     == TIED TO HAUX'S ROTATION EVERY ITERATION IN THE JOINT OPTIMIZER, THE  ==
+!     == ORDINARY DENSITY-RESIDUAL CRITERION ALREADY CANNOT SETTLE WHILE HAUX ==
+!     == IS STILL CHANGING -- UNLIKE THE BOLTED-ON LIVE-OCC CASE, WHERE PSI   ==
+!     == EVOLVED INDEPENDENTLY OF HAUX.)                                      ==
+      IF(TEDFTLIVEOCC.OR.OPTIMIZERTYPE.EQ.'EDFT') THEN
+        CALL EDFT$ISINI(TEDFTINI)
+        CALL DYNOCC$GETR8('TEMP',EDFTTEMPCHECK)
+        IF(TEDFTINI.AND.EDFTTEMPCHECK.GT.0.D0) THEN
+          ALLOCATE(HAUXEIGTMP(NB))
+          DO IKPT=1,NKPTL
+            DO ISPIN=1,NSPIN
+              CALL EDFT$HAUXEIG(IKPT,ISPIN,NB,HAUXEIGTMP)
+              EIG(1:NB,IKPT,ISPIN)=HAUXEIGTMP(:)
+            ENDDO
+          ENDDO
+          DEALLOCATE(HAUXEIGTMP)
+        END IF
+      END IF
+      CALL WAVES_DYNOCCSETR8A('EPSILON',NB*NKPTL*NSPIN,EIG)
+      DEALLOCATE(EIG)
+!
+!     ==================================================================
+!     ==  EVALUATE <S^2>                                              ==
+!     ==================================================================
+      IF ((NDIM.EQ.2).AND.THAMILTON) THEN   ! THAMILTON SHOULD BE REPLACED
+        CALL TIMING$CLOCKON('S2')
+        ALLOCATE(OCC(NBX,NKPTL,NSPIN))
+        CALL WAVES_DYNOCCGETR8A('OCC',NBX*NKPTL*NSPIN,OCC)
+        CALL WAVES_TOTALSPINRESET()
+        DO IKPT=1,NKPTL
+          CALL WAVES_SELECTWV(IKPT,1)
+          CALL PLANEWAVE$SELECT(GSET%ID)      
+          NB=THIS%NB
+          NBH=THIS%NBH
+          NGL=GSET%NGL         
+          ALLOCATE(QMAT(2*NB*NSPIN,2*NB*NSPIN))
+          CALL WAVES_SPINOROVERLAP(NBH,NB,IKPT,QMAT)
+          CALL WAVES_TOTALSPIN(NBX,NB,NKPT,IKPT,NSPIN,OCC,QMAT)
+          DEALLOCATE(QMAT)
+        END DO
+        DEALLOCATE(OCC)
+        CALL TIMING$CLOCKOFF('S2')
+        CALL FILEHANDLER$UNIT('PROT',NFILO)
+        CALL WAVES$REPORTSPIN(NFILO)
+      END IF
+!
+!     ==================================================================
+!     ==  EVALUATE <PSI|H|PSI>                                        ==
+!     ================================================================== 
+      IF(THAMILTON) THEN
+        DO IKPT=1,NKPTL
+          DO ISPIN=1,NSPIN
+            CALL WAVES_SELECTWV(IKPT,ISPIN)
+            CALL PLANEWAVE$SELECT(GSET%ID)      
+            NB=THIS%NB
+            NBH=THIS%NBH
+            NGL=GSET%NGL
+            ALLOCATE(HAMILTON(NB,NB))
+            CALL WAVES_OVERLAP(.FALSE.,NGL,NDIM,NBH,NB,THIS%PSI0,THIS%HPSI &
+     &                        ,HAMILTON)
+            IF(.NOT.ASSOCIATED(THIS%EIGVAL))ALLOCATE(THIS%EIGVAL(NB))
+            IF(.NOT.ASSOCIATED(THIS%EIGVEC))ALLOCATE(THIS%EIGVEC(NB,NB))
+            CALL LIB$DIAGC8(NB,HAMILTON,THIS%EIGVAL,THIS%EIGVEC)
+            DEALLOCATE(HAMILTON)
+!
+!           ====================================================================
+!           == TRANSFORMS STATES ONTO HAMILTON EIGENSTATES. THIS ACCELERATES  ==
+!           == CONERGENCE FOR SAFEORTHO=F. IT DOES NOT AFFECT THE OCCUPATIONS.==
+!           == THEREFORE IT IS RECOMMENDED TO RESTART IT AS WELL.             ==
+!           ==                                                                ==
+!           == A SECOND CALL GIVES VELOCITY TO THE WAVE FUNCTIONS, WHICH IS   ==
+!           == NOT UNDERSTOOD. THEREFORE IT IS EXECUTED ONLY ONCE AND         ==
+!           == SWITCHED OFF BELOW.                                            ==
+!           ====================================================================
+            IF(TSTRAIGHTEN) THEN
+PRINT*,'STRAIGHTENING STATES...'
+              CALL WAVES_STRAIGHTEN(NDIM,NBH,NB,NGL,MAP%NPRO,THIS%EIGVEC &
+    &                              ,THIS%PSI0,THIS%PSIM,THIS%HPSI,THIS%PROJ &
+    &                              ,THIS%RLAM0)
+!THE FOLLOWING HAS LITTLE USE USE
+!!$              IF(ASSOCIATED(THIS%RLAMM))DEALLOCATE(THIS%RLAMM)
+!!$              IF(ASSOCIATED(THIS%RLAM2M))DEALLOCATE(THIS%RLAM2M)
+!!$              IF(ASSOCIATED(THIS%RLAM3M))DEALLOCATE(THIS%RLAM3M)
+!!$              THIS%PSIM=THIS%PSI0
+              CALL WAVES$SETL4('STOP',.TRUE.)
+PRINT*,'......STATES STRAIGHTENED'
+            END IF !TSTRAIGHTEN
+          ENDDO
+        ENDDO
+      ELSE
+        IF(OPTIMIZERTYPE.NE.'CG'.AND.OPTIMIZERTYPE.NE.'DAV'.AND.OPTIMIZERTYPE.NE.'RMM' &
+     &     .AND.OPTIMIZERTYPE.NE.'EDFT') THEN    !KAESTNERCG
+          IF(ASSOCIATED(THIS%EIGVAL))DEALLOCATE(THIS%EIGVAL)
+          IF(ASSOCIATED(THIS%EIGVEC))DEALLOCATE(THIS%EIGVEC)
+        END IF                         !KAESTNERCG
+      END IF
+!
+!     == DIAGONALIZATION IS DONE ONLY ONCE...
+      IF(TSTRAIGHTEN.AND.THAMILTON) TSTRAIGHTEN=.FALSE.
+!
+CALL TIMING$CLOCKOFF('W:EXPECT')
+!
+!     ==================================================================
+!     ==  FIRST HALF OF WAVE FUNCTIONS KINETIC ENERGY                 ==
+!     ==================================================================
+      IF(OPTIMIZERTYPE.EQ.'CG'.OR.OPTIMIZERTYPE.EQ.'DAV'.OR.OPTIMIZERTYPE.EQ.'RMM' &
+     &   .OR.OPTIMIZERTYPE.EQ.'EDFT') THEN   !KAESTNERCG
+!       == THESE OPTIMIZERS DON'T PROPAGATE A CONTINUOUS WAVEFUNCTION           ==
+!       == TRAJECTORY: PSI0 IS AN INDEPENDENT DIAGONALIZATION RESULT EACH       ==
+!       == STEP AND CAN DIFFER FROM THE PREVIOUS STEP'S PSI0 BY AN ARBITRARY    ==
+!       == PHASE/SIGN EVEN WHEN THE UNDERLYING PHYSICAL STATE (DENSITY, TOTAL   ==
+!       == ENERGY) IS UNCHANGED, SO THE FICTITIOUS (PSI0-PSIM)/DT "VELOCITY"    ==
+!       == WAVES_WAVEKINETIC COMPUTES IS MEANINGLESS HERE -- IT WAS OBSERVED TO ==
+!       == INFLATE 'CONSTANT ENERGY' BY HUNDREDS OF HARTREE WHILE THE ACTUAL    ==
+!       == TOTAL ENERGY STAYED CORRECT. REPORT ZERO FICTITIOUS KINETIC ENERGY   ==
+!       == FOR THESE NON-DYNAMICAL OPTIMIZERS INSTEAD.                         ==
+        WAVEEKIN1=0.D0
+      ELSE
+        CALL WAVES_WAVEKINETIC(WAVEEKIN1)
+      END IF   !KAESTNERCG
+!
+!     ==================================================================
+!     ==  CLOSE DOWN                                                  ==
+!     ================================================================== 
+!     == FORCES ========================================================
+      ALLOCATE(FORCET(3,NAT))
+      CALL ATOMLIST$GETR8A('FORCE',0,3*NAT,FORCET)
+      FORCE=FORCET+FORCE
+      CALL ATOMLIST$SETR8A('FORCE',0,3*NAT,FORCE)
+      DEALLOCATE(FORCET)
+!     == STRESS ========================================================
+      CALL CELL$GETR8A('STRESS_I',9,STRESS1)
+      STRESS=STRESS1-STRESS  ! IN THIS ROUTINE STRESS=+DE/DEPSILON!
+      CALL CELL$SETR8A('STRESS_I',9,STRESS)
+!     == DEALLOCATE ARRAYS =============================================
+      DEALLOCATE(FORCE)
+      DEALLOCATE(R)
+                              CALL TIMING$CLOCKOFF('WAVES$ETOT')
+                              CALL TRACE$POP
+      RETURN
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WAVES_VARMIXHAMILTONIAN(NRL,NDIMD,NAT,LMNXX,POT,DH,DO,CONVPSI)
+!     **************************************************************************
+!     **  MIXER='VARIATIONAL': PACKS THE HAMILTONIAN PARAMETERS OF THE        **
+!     **  CURRENT OUTPUT STATE (GRID POTENTIAL POT, VTAU_W IF DELOCALIZED     **
+!     **  TAU IS ON, ONE-CENTER DH) INTO ONE VECTOR, HANDS IT TOGETHER WITH   **
+!     **  THE FREE ENERGY OF THAT STATE TO WAVES_MIXPOT_VAR, AND UNPACKS THE  **
+!     **  RETURNED PARAMETERS THETA FOR THE NEXT DIAGONALIZATION.             **
+!     **                                                                      **
+!     **  THE FREE ENERGY IS THE ENERGYLIST TOTAL SO FAR (KINETIC + ALL       **
+!     **  DENSITY-DEPENDENT TERMS, EVALUATED AT THE UNMIXED OUTPUT DENSITY)   **
+!     **  PLUS DYNOCC'S -TS TERM FOR THE OCCUPATIONS THAT BUILT THIS DENSITY. **
+!     **  THE NTBO HYBRID ENTERS H THROUGH DH (DOUBLE COUNTING, PART OF      **
+!     **  THETA) AND THROUGH ITS OWN NTBO-BASIS HAMILTONIAN (LMTO HAMILOP,    **
+!     **  APPLIED IN WAVES_HPSI), WHICH IS TAKEN FROM THE CURRENT STATE       **
+!     **  RATHER THAN LINE-SEARCHED: INCLUDING ITS MATRIX ELEMENTS IN THETA   **
+!     **  WAS TRIED AND LEFT A RESIDUAL IN THAT BLOCK THAT NEVER DECAYED      **
+!     **  (PBE0R NIO), WHILE THE CURRENT-STATE OPERATOR CONVERGES CLEANLY.    **
+!     **  THE FIXED POINT IS THE SAME, AND EVERY ENERGY IS STILL THAT OF AN   **
+!     **  ACTUAL STATE, SO THE ACCEPTED ENERGIES STILL DECREASE MONOTONICALLY.**
+!     **************************************************************************
+      USE MPE_MODULE
+      USE WAVES_MODULE, ONLY : MIXG0SQ,MIXNHISTORY,MIXTOL,EDIFFTOL,LTSCANDELOC &
+     &                        ,VTAU_W,THIS,NKPTL,NSPIN,WAVES_SELECTWV
+      IMPLICIT NONE
+      REAL(8)                  :: GSHIFT
+      INTEGER(4)               :: IKPT,ISPIN
+      INTEGER(4),INTENT(IN)    :: NRL
+      INTEGER(4),INTENT(IN)    :: NDIMD
+      INTEGER(4),INTENT(IN)    :: NAT
+      INTEGER(4),INTENT(IN)    :: LMNXX
+      REAL(8)   ,INTENT(INOUT) :: POT(NRL,NDIMD)
+      COMPLEX(8),INTENT(INOUT) :: DH(LMNXX,LMNXX,NDIMD,NAT)
+      REAL(8)   ,INTENT(IN)    :: DO(LMNXX,LMNXX,NDIMD,NAT)
+      REAL(8)   ,INTENT(OUT)   :: CONVPSI
+      REAL(8)   ,ALLOCATABLE   :: X(:)
+      REAL(8)   ,ALLOCATABLE   :: XOUT(:)
+      REAL(8)   ,ALLOCATABLE   :: SHIFT(:)
+      INTEGER(4)               :: NGRID,NDH,NTAU,NTOT,I0
+      REAL(8)                  :: ETOT,ENTROPYTERM
+      REAL(8)                  :: CSHIFT(2)
+      LOGICAL(4)               :: TCONV
+      REAL(8)   ,ALLOCATABLE   :: POTV(:,:),VTAUV(:,:)
+      INTEGER(4)               :: NR1L_P,NR1L_V,NR1,NR2,NR3,NRLV,NGROUP
+      REAL(8)                  :: RNR1L(1)
+!     **************************************************************************
+!     == WORK IN THE LAYOUT OF THE DENSITY GRID, WHERE EVERY POINT IS HELD  ==
+!     == BY EXACTLY ONE TASK. WITH K-POINT PARALLELIZATION THE WAVE-FUNCTION==
+!     == LAYOUT REPLICATES THE GRID IN EVERY K-GROUP (NGROUP COPIES), AND   ==
+!     == PSITOPOT SUMS THOSE COPIES.                                        ==
+      CALL PLANEWAVE$SELECT('DENSITY')
+      CALL PLANEWAVE$GETI4('NR1L',NR1L_V)
+      CALL PLANEWAVE$GETI4('NR1',NR1)
+      CALL PLANEWAVE$GETI4('NR2',NR2)
+      CALL PLANEWAVE$GETI4('NR3',NR3)
+      NR1L_P=NRL/(NR2*NR3)
+      RNR1L(1)=REAL(NR1L_P,KIND=8)
+      CALL MPE$COMBINE('MONOMER','+',RNR1L)
+      NGROUP=NINT(RNR1L(1)/REAL(NR1,KIND=8))
+      NRLV=NR1L_V*NR2*NR3
+      ALLOCATE(POTV(NRLV,NDIMD))
+      CALL WAVES_MAPPSITOPOT('PSITOPOT',NR1L_P,NR1L_V,NR2,NR3,NDIMD,POT,POTV)
+      POTV=POTV/REAL(NGROUP,KIND=8)
+      IF(LTSCANDELOC) THEN
+        ALLOCATE(VTAUV(NRLV,NDIMD))
+        CALL WAVES_MAPPSITOPOT('PSITOPOT',NR1L_P,NR1L_V,NR2,NR3,NDIMD,VTAU_W,VTAUV)
+        VTAUV=VTAUV/REAL(NGROUP,KIND=8)
+      END IF
+      NGRID=NRLV*NDIMD
+      NDH=LMNXX*LMNXX*NDIMD*NAT
+      NTAU=0
+      IF(LTSCANDELOC) NTAU=NGRID
+      NTOT=NGRID+NTAU+2*NDH
+      ALLOCATE(X(NTOT))
+      X(1:NGRID)=RESHAPE(POTV,(/NGRID/))
+      I0=NGRID
+      IF(NTAU.GT.0) THEN
+        X(I0+1:I0+NTAU)=RESHAPE(VTAUV,(/NTAU/))
+        I0=I0+NTAU
+      END IF
+      X(I0+1:I0+NDH)=RESHAPE(REAL(DH,KIND=8),(/NDH/))
+      X(I0+NDH+1:I0+2*NDH)=RESHAPE(AIMAG(DH),(/NDH/))
+!
+      ALLOCATE(SHIFT(NTOT))
+      CALL WAVES_THETASHIFT(NRLV,NDIMD,NAT,LMNXX,DO,NTOT,I0,SHIFT)
+!
+      CALL ENERGYLIST$RETURN('TOTAL ENERGY',ETOT)
+      CALL DYNOCC$GETR8('EPOT',ENTROPYTERM)
+      ALLOCATE(XOUT(NGRID))
+      XOUT=X(1:NGRID)
+      CALL WAVES_MIXPOT_VAR(NRLV,NDIMD,MIXG0SQ,MIXNHISTORY,NTOT,NGRID,X,SHIFT &
+     &                     ,ETOT+ENTROPYTERM,MIXTOL,EDIFFTOL,TCONV,CONVPSI)
+!     == THETA WAS SHIFTED UNIFORMLY (H -> H+C*O) TO FOLLOW THE GAUGE OF  ==
+!     == V_OUT; SHIFT THE STORED EIGENVALUES WITH IT, OTHERWISE RMM-DIIS  ==
+!     == STARTS FROM STALE EIGENVALUES AND LOCKS INTO EXCITED STATES      ==
+!     == (MGO SCAN0R).                                                     ==
+      CALL MIXVAR$GETGAUGESHIFT(GSHIFT)
+      IF(GSHIFT.NE.0.D0) THEN
+        DO IKPT=1,NKPTL
+          DO ISPIN=1,NSPIN
+            CALL WAVES_SELECTWV(IKPT,ISPIN)
+            IF(ASSOCIATED(THIS%EIGVAL)) THIS%EIGVAL=THIS%EIGVAL+GSHIFT
+          ENDDO
+        ENDDO
+      END IF
+!
+!     == THE MIXER PROJECTS THE UNIFORM SHIFT OUT OF EVERY STEP, SO THE GAUGE ==
+!     == OF THETA STAYS AT ITS STARTING VALUE WHILE THE AVERAGE POTENTIAL OF  ==
+!     == THE OUTPUT STATE MOVES. ENERGIES AND EIGENVECTORS DO NOT CARE, BUT   ==
+!     == EIGENVALUES, THE FERMI LEVEL AND THE LAGRANGE MULTIPLIERS IN FORCES  ==
+!     == AND STRESS DO (SI: EIGENVALUES 0.49 EV LOW, FORCES 0.5% AND STRESS   ==
+!     == 40% OFF). MOVE THETA ALONG THE GAUGE DIRECTION TO THE MEAN GRID      ==
+!     == POTENTIAL OF THE OUTPUT STATE.                                       ==
+      CSHIFT(1)=SUM((XOUT-X(1:NGRID))*SHIFT(1:NGRID))
+      CSHIFT(2)=SUM(SHIFT(1:NGRID)**2)
+      CALL MPE$COMBINE('MONOMER','+',CSHIFT)
+      X=X+CSHIFT(1)/CSHIFT(2)*SHIFT
+      DEALLOCATE(XOUT)
+      DEALLOCATE(SHIFT)
+!
+      POTV=RESHAPE(X(1:NGRID),(/NRLV,NDIMD/))
+      CALL WAVES_MAPPSITOPOT('POTTOPSI',NR1L_P,NR1L_V,NR2,NR3,NDIMD,POT,POTV)
+      DEALLOCATE(POTV)
+      I0=NGRID
+      IF(NTAU.GT.0) THEN
+        VTAUV=RESHAPE(X(I0+1:I0+NTAU),(/NRLV,NDIMD/))
+        CALL WAVES_MAPPSITOPOT('POTTOPSI',NR1L_P,NR1L_V,NR2,NR3,NDIMD,VTAU_W,VTAUV)
+        DEALLOCATE(VTAUV)
+        I0=I0+NTAU
+      END IF
+      DH=RESHAPE(CMPLX(X(I0+1:I0+NDH),X(I0+NDH+1:I0+2*NDH),KIND=8) &
+     &          ,(/LMNXX,LMNXX,NDIMD,NAT/))
+      DEALLOCATE(X)
+      IF(TCONV) THEN
+        CALL STOPIT$SETL4('STOP',.TRUE.)
+        CALL STOPIT$SETCH('REASON','CONVERGED (VARIATIONAL MIXER: RESIDUAL OR ENERGY CHANGE)')
+      END IF
+      RETURN
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WAVES_THETASHIFT(NRL,NDIMD,NAT,LMNXX,DO,NTOT,IDH,SHIFT)
+!     **************************************************************************
+!     **  UNIFORM SHIFT OF H IN THE PACKED THETA LAYOUT [GRID|...|RE DH|IM DH] **
+!     **  (DH BLOCK STARTING AFTER INDEX IDH): WAVES$ADDCONSTANTPOT ADDS C TO  **
+!     **  THE TOTAL GRID CHANNEL AND C*DO TO THE TOTAL DH CHANNEL. HERE NSPIN=2**
+!     **  HAS ALREADY BEEN REWRITTEN TO (UP,DOWN), SO THE SAME SHIFT ACTS ON   **
+!     **  BOTH CHANNELS; FOR NDIMD=1 AND NONCOLLINEAR (NDIMD=4, STILL          **
+!     **  (TOTAL,X,Y,Z)) IT ACTS ON CHANNEL 1 ONLY. A UNIFORM SHIFT CHANGES    **
+!     **  NOTHING AT FIXED ELECTRON NUMBER: IT IS THE GAUGE DIRECTION.         **
+!     **************************************************************************
+      USE WAVES_MODULE, ONLY : NSPIN
+      IMPLICIT NONE
+      INTEGER(4),INTENT(IN)  :: NRL,NDIMD,NAT,LMNXX,NTOT,IDH
+      REAL(8)   ,INTENT(IN)  :: DO(LMNXX,LMNXX,NDIMD,NAT)
+      REAL(8)   ,INTENT(OUT) :: SHIFT(NTOT)
+      REAL(8)   ,ALLOCATABLE :: SHIFTDH(:,:,:,:)
+      INTEGER(4)             :: NSHIFTDIM,NDH
+!     **************************************************************************
+      NDH=LMNXX*LMNXX*NDIMD*NAT
+      NSHIFTDIM=1
+      IF(NSPIN.EQ.2) NSHIFTDIM=2
+      ALLOCATE(SHIFTDH(LMNXX,LMNXX,NDIMD,NAT))
+      SHIFT=0.D0
+      SHIFTDH=0.D0
+      SHIFT(1:NRL*NSHIFTDIM)=1.D0
+      SHIFTDH(:,:,1:NSHIFTDIM,:)=DO(:,:,1:NSHIFTDIM,:)
+      SHIFT(IDH+1:IDH+NDH)=RESHAPE(SHIFTDH,(/NDH/))
+      DEALLOCATE(SHIFTDH)
+      RETURN
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WAVES_EDFTKERKER(NRL,NDIMD,NAT,LMNXX,POT,DH,DO,POTTH,DHTH)
+!     **************************************************************************
+!     **  ROUTE 2 (OPTIMIZER='EDFT' MIXER='VARIATIONAL'): THE HAMILTONIAN     **
+!     **  (POTTH,DHTH) FROM WHICH EDFT$VARSTEP BUILDS ITS SEARCH DIRECTION,   **
+!     **  KERKER-PRECONDITIONED FROM THE CURRENT STATE'S (POT,DH) -- SEE      **
+!     **  MIXKPC$TRIAL. VTAU AND THE NTBO HYBRID OPERATOR ARE TAKEN FROM THE  **
+!     **  CURRENT STATE UNCHANGED.                                            **
+!     **  POT AND POTTH ARE IN THE WAVE-FUNCTION LAYOUT; THE KERKER FILTER    **
+!     **  WORKS IN THE LAYOUT OF THE DENSITY GRID (AS WAVES_VARMIXHAMILTONIAN)**
+!     **  SO THAT IT IS CORRECT WITH MPI K-POINT AND G PARALLELIZATION.       **
+!     **************************************************************************
+      USE MPE_MODULE
+      USE WAVES_MODULE, ONLY : MIXG0SQ
+      IMPLICIT NONE
+      INTEGER(4),INTENT(IN)  :: NRL,NDIMD,NAT,LMNXX
+      REAL(8)   ,INTENT(IN)  :: POT(NRL,NDIMD)
+      COMPLEX(8),INTENT(IN)  :: DH(LMNXX,LMNXX,NDIMD,NAT)
+      REAL(8)   ,INTENT(IN)  :: DO(LMNXX,LMNXX,NDIMD,NAT)
+      REAL(8)   ,INTENT(OUT) :: POTTH(NRL,NDIMD)
+      COMPLEX(8),INTENT(OUT) :: DHTH(LMNXX,LMNXX,NDIMD,NAT)
+      REAL(8)   ,ALLOCATABLE :: X(:),SHIFT(:)
+      REAL(8)   ,ALLOCATABLE :: POTV(:,:)
+      INTEGER(4)             :: NGRID,NDH,NTOT
+      INTEGER(4)             :: NR1L_P,NR1L_V,NR1,NR2,NR3,NRLV,NGROUP
+      REAL(8)                :: RNR1L(1)
+!     **************************************************************************
+      CALL PLANEWAVE$SELECT('DENSITY')
+      CALL PLANEWAVE$GETI4('NR1L',NR1L_V)
+      CALL PLANEWAVE$GETI4('NR1',NR1)
+      CALL PLANEWAVE$GETI4('NR2',NR2)
+      CALL PLANEWAVE$GETI4('NR3',NR3)
+      NR1L_P=NRL/(NR2*NR3)
+      RNR1L(1)=REAL(NR1L_P,KIND=8)
+      CALL MPE$COMBINE('MONOMER','+',RNR1L)
+      NGROUP=NINT(RNR1L(1)/REAL(NR1,KIND=8))
+      NRLV=NR1L_V*NR2*NR3
+      ALLOCATE(POTV(NRLV,NDIMD))
+      CALL WAVES_MAPPSITOPOT('PSITOPOT',NR1L_P,NR1L_V,NR2,NR3,NDIMD,POT,POTV)
+      POTV=POTV/REAL(NGROUP,KIND=8)
+      NGRID=NRLV*NDIMD
+      NDH=LMNXX*LMNXX*NDIMD*NAT
+      NTOT=NGRID+2*NDH
+      ALLOCATE(X(NTOT))
+      ALLOCATE(SHIFT(NTOT))
+      X(1:NGRID)=RESHAPE(POTV,(/NGRID/))
+      X(NGRID+1:NGRID+NDH)=RESHAPE(REAL(DH,KIND=8),(/NDH/))
+      X(NGRID+NDH+1:NTOT)=RESHAPE(AIMAG(DH),(/NDH/))
+      CALL WAVES_THETASHIFT(NRLV,NDIMD,NAT,LMNXX,DO,NTOT,NGRID,SHIFT)
+      CALL MIXKPC$TRIAL(NRLV,NDIMD,MIXG0SQ,NTOT,NGRID,X,SHIFT)
+      POTV=RESHAPE(X(1:NGRID),(/NRLV,NDIMD/))
+      CALL WAVES_MAPPSITOPOT('POTTOPSI',NR1L_P,NR1L_V,NR2,NR3,NDIMD,POTTH,POTV)
+      DHTH=RESHAPE(CMPLX(X(NGRID+1:NGRID+NDH),X(NGRID+NDH+1:NTOT),KIND=8) &
+     &            ,(/LMNXX,LMNXX,NDIMD,NAT/))
+      DEALLOCATE(X,SHIFT,POTV)
+      RETURN
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WAVES_STRAIGHTEN(NDIM,NBH,NB,NGL,NPRO,UMAT &
+    &                             ,PSI0,PSIM,HPSI,PROJ,RLAM0)
+!     **************************************************************************
+!     ** PERFORMS A UNITARY TRANSFORM OF THE ACTIAL STATE OF WAVE FUNCTIONS
+!     **************************************************************************
+      IMPLICIT NONE
+      INTEGER(4),INTENT(IN)    :: NDIM         ! #(SPINOR COMPONENTS)
+      INTEGER(4),INTENT(IN)    :: NBH          ! #(SUPER WAVE FUNCTIONS)
+      INTEGER(4),INTENT(IN)    :: NB           ! #(BANDS)
+      INTEGER(4),INTENT(IN)    :: NGL          ! #(LOCAL G-VECTORS)
+      INTEGER(4),INTENT(IN)    :: NPRO         ! #(PROJECTIONS)
+      COMPLEX(8),INTENT(INOUT) :: UMAT(NB,NB)  ! TRANSFORMATION
+      COMPLEX(8),INTENT(INOUT) :: PSI0(NGL,NDIM,NBH)
+      COMPLEX(8),INTENT(INOUT) :: PSIM(NGL,NDIM,NBH)
+      COMPLEX(8),INTENT(INOUT) :: HPSI(NGL,NDIM,NBH)
+      COMPLEX(8),INTENT(INOUT) :: PROJ(NDIM,NBH,NPRO)
+      COMPLEX(8),INTENT(INOUT) :: RLAM0(NB,NB)
+      COMPLEX(8),ALLOCATABLE   :: AUX(:,:,:)
+      INTEGER(4)               :: I
+!     **************************************************************************
+!
+!     ==========================================================================
+!     ==  TRANSFORM WAVE FUNCTIONS                                            ==
+!     ==========================================================================
+      ALLOCATE(AUX(NGL,NDIM,NBH))
+      AUX=PSI0
+      PSI0=(0.D0,0.D0)
+      CALL WAVES_ADDPSI(NGL,NDIM,NBH,NB,PSI0,AUX,UMAT)
+      AUX=PSIM
+      PSIM=(0.D0,0.D0)
+      CALL WAVES_ADDPSI(NGL,NDIM,NBH,NB,PSIM,AUX,UMAT)
+      AUX=HPSI
+      HPSI=(0.D0,0.D0)
+      CALL WAVES_ADDPSI(NGL,NDIM,NBH,NB,HPSI,AUX,UMAT)
+      DEALLOCATE(AUX)
+!
+!     ==========================================================================
+!     ==  TRANSFORM PROJECTIONS                                               ==
+!     ==========================================================================
+      ALLOCATE(AUX(NDIM,NBH,NPRO))
+      AUX=PROJ
+      PROJ=(0.D0,0.D0)
+      CALL WAVES_ADDOPROJ(NPRO,NDIM,NBH,NB,PROJ,AUX,UMAT)
+      DEALLOCATE(AUX)
+!
+!     ==========================================================================
+!     ==  TRANSFORM LAGRANGE MULTIPLIERS                                      ==
+!     ==========================================================================
+      RLAM0=MATMUL(TRANSPOSE(CONJG(UMAT)),MATMUL(RLAM0,UMAT))
+!
+!     ==========================================================================
+!     == FINALLY, TRANSFORM EIGENSTATES TO A UNIT MATRIX.                     ==
+!     ==========================================================================
+      UMAT(:,:)=(0.D0,0.D0)
+      DO I=1,NB
+        UMAT(I,I)=(1.D0,0.D0)
+      ENDDO
+      RETURN
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WAVES_VOFRHO(NRL,NDIMD,RHO,RHOB,NAT,LMRXX,QLM,VQLM)
+!     ******************************************************************
+!     **                                                              **
+!     **                                                              **
+!     ************P.E. BLOECHL, TU-CLAUSTHAL (2005)*********************
+      USE WAVES_MODULE, ONLY : TAU_W,VTAU_W
+      IMPLICIT NONE
+      INTEGER(4),INTENT(IN)   :: NDIMD  !#(DENSITY COMPONENTS)
+      INTEGER(4),INTENT(IN)   :: NRL    !#(LOCAL R-SPACE GRID POINTS)
+      REAL(8)   ,INTENT(INOUT):: RHO(NRL,NDIMD)
+      REAL(8)   ,INTENT(OUT)  :: RHOB   ! BACKGROUND DENSITY
+      INTEGER(4),INTENT(IN)   :: NAT    !#(ATOMS)
+      INTEGER(4),INTENT(IN)   :: LMRXX   !#(ANGULAR MOMENTA FOR 1-C DENSITY)
+      REAL(8)   ,INTENT(IN)   :: QLM(LMRXX,NAT)  ! MULTIPOLE MOMENTS
+      REAL(8)   ,INTENT(OUT)  :: VQLM(LMRXX,NAT) ! "MULTIPOLE" POTENTIALS
+      REAL(8)   ,ALLOCATABLE  :: RHO_V(:,:)     ! CHARGE DENSITY
+      REAL(8)   ,ALLOCATABLE  :: TAU_V(:,:)     ! SCAN0R: KINETIC-ENERGY DENSITY
+      REAL(8)   ,ALLOCATABLE  :: VTAU_V(:,:)    ! SCAN0R: DE/DTAU
+      LOGICAL(4)               :: TTSCANDELOC
+      REAL(8)                 :: RBAS(3,3)      ! LATTICE VECTORS
+      REAL(8)                 :: R(3,NAT)       ! ATOMIC POSITIONS
+      REAL(8)                 :: STRESS(3,3)    ! STRESS TENSOR
+      REAL(8)                 :: STRESST(3,3)    ! STRESS TENSOR
+      REAL(8)                 :: FORCE(3,NAT)
+      REAL(8)                 :: FORCET(3,NAT)
+      INTEGER(4)              :: NR1L,NR1L_V,NR2,NR3
+!     ******************************************************************
+                              CALL TRACE$PUSH('WAVES_VOFRHO')
+
+!     == ASSUMES THAT NR2 AND NR3 ARE IDENTICAL FOR DENSITY AND FOR
+!     == ALL WAVES IN THE GROUP/ NR1L ON THE OTHER HAND MAY DIFFER
+      CALL PLANEWAVE$SELECT('DENSITY')
+      CALL PLANEWAVE$GETI4('NR1L',NR1L_V)
+      CALL PLANEWAVE$GETI4('NR2',NR2)
+      CALL PLANEWAVE$GETI4('NR3',NR3)
+      NR1L=NRL/(NR2*NR3)  ! NRL=NR1L*NR2*NR3  REFERS TO THE WAVE FUNCTION!
+!
+!     ==================================================================
+!     == PERFORM SUM OVER K-POINT GROUPS AND REDISTRIBUTE             ==
+!     ==================================================================
+      ALLOCATE(RHO_V(NR1L_V*NR2*NR3,NDIMD))
+      CALL WAVES_MAPPSITOPOT('PSITOPOT',NR1L,NR1L_V,NR2,NR3,NDIMD,RHO,RHO_V)
+      CALL SYMMETRY$RHO(NR1L_V*NR2*NR3,NDIMD,RHO_V)
+!     == VACUUM MASK OF THE VARIATIONAL MIXER, FROM THE TOTAL DENSITY IN THE ==
+!     == DENSITY-GRID LAYOUT (THE LAYOUT THE MIXER WORKS IN)                  ==
+      CALL MIXVAR$SETDENSITY(NR1L_V*NR2*NR3,RHO_V(:,1))
+!
+!     ==================================================================
+!     == SCAN0R: MAP KINETIC-ENERGY DENSITY ONTO THE DENSITY GRID AND ==
+!     == HAND IT TO THE POTENTIAL OBJECT. INERT UNLESS TSCANDELOC IS  ==
+!     == ACTIVE (DEFAULT FALSE) -- SEE                                ==
+!     == SCAN0r notes                      ==
+!     ==================================================================
+      CALL POTENTIAL$GETL4('TSCANDELOC',TTSCANDELOC)
+      IF(TTSCANDELOC) THEN
+        ALLOCATE(TAU_V(NR1L_V*NR2*NR3,NDIMD))
+        CALL WAVES_MAPPSITOPOT('PSITOPOT',NR1L,NR1L_V,NR2,NR3,NDIMD,TAU_W,TAU_V)
+        CALL POTENTIAL$SETTAU(NR1L_V*NR2*NR3,NDIMD,TAU_V)
+        DEALLOCATE(TAU_V)
+      END IF
+!
+!     ==================================================================
+!     == CALCULATE POTENTIAL FROM THE CHARGE DENSITY                  ==
+!     ==================================================================
+      CALL CELL$GETR8A('T0',9,RBAS)
+      CALL ATOMLIST$GETR8A('R(0)',0,3*NAT,R)
+      FORCE(:,:)=0.D0
+      STRESS(:,:)=0.D0
+      VQLM(:,:)=0.D0
+      CALL POTENTIAL$VOFRHO(NR1L_V*NR2*NR3,NDIMD,RHO_V,LMRXX,NAT,QLM,VQLM &
+     &                     ,R,FORCE,RBAS,STRESS,RHOB)
+!
+!     ==================================================================
+!     == SCAN0R: MAP DE/DTAU BACK ONTO THE WAVE FUNCTION GRID FOR USE ==
+!     == BY WAVES_VPSI (VIA WAVES_TAUHPSI). VTAU_W IS ALWAYS LEFT     ==
+!     == ALLOCATED AND ZEROED HERE, REGARDLESS OF TSCANDELOC, SO THAT ==
+!     == WAVES_VPSI CAN ALWAYS SAFELY SEQUENCE-ASSOCIATE IT (SAME     ==
+!     == CONVENTION AS RHO/POT) WITHOUT A RUNTIME ALLOCATION CHECK.   ==
+!     ==================================================================
+      IF(ALLOCATED(VTAU_W)) DEALLOCATE(VTAU_W)
+      ALLOCATE(VTAU_W(NRL,NDIMD))
+      VTAU_W(:,:)=0.D0
+      IF(TTSCANDELOC) THEN
+        ALLOCATE(VTAU_V(NR1L_V*NR2*NR3,NDIMD))
+        CALL POTENTIAL$GETVTAU(NR1L_V*NR2*NR3,NDIMD,VTAU_V)
+        CALL WAVES_MAPPSITOPOT('POTTOPSI',NR1L,NR1L_V,NR2,NR3,NDIMD,VTAU_W,VTAU_V)
+        DEALLOCATE(VTAU_V)
+      END IF
+!
+!     ==================================================================
+!     == MAP POTENTIAL BACK ONTO THE WAVE FUNCTION GRID               ==
+!     ==================================================================
+      CALL WAVES_MAPPSITOPOT('POTTOPSI',NR1L,NR1L_V,NR2,NR3,NDIMD,RHO,RHO_V)
+      DEALLOCATE(RHO_V)
+!
+!     ==================================================================
+!     ==  STORE FORCES AND STRESSES BACK TO THE OWNING OBJECTS        ==
+!     ==================================================================
+      CALL ATOMLIST$GETR8A('FORCE',0,3*NAT,FORCET)
+      FORCE=FORCET+FORCE
+      CALL ATOMLIST$SETR8A('FORCE',0,3*NAT,FORCE)
+!
+      CALL CELL$GETR8A('STRESS_I',9,STRESST)
+      STRESS=STRESST-STRESS  ! IN THIS ROUTINE STRESS=+DE/DEPSILON!
+      CALL CELL$SETR8A('STRESS_I',9,STRESS)
+!
+                              CALL TRACE$POP
+      RETURN
+      END SUBROUTINE WAVES_VOFRHO
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WAVES_MAPPSITOPOT(ID,NR1L_P,NR1L_V,NR2,NR3,NDIMD,RHO_P,RHO_V)
+!     ******************************************************************
+!     **                                                              **
+!     **  ADDS UP THE DENSITY OVER K-POINTS AND MAPS THE DENSITY      **
+!     **  FROM THE SHEETS OF THE WAVE FUNCTIONS INTO THOSE OF THE     **
+!     **  POTENTIAL AND VICE VERSA.                                   **
+!     **                                                              **
+!     **  THE DENSITY IS DIVIDED INTO SHEETS, WHERE EACH SHEET IS     **
+!     **  KEPT BY ONE NODE. IN THE K-POINT PARALLELIZATION, THE       **
+!     **  SHEETS DIFFER FOR THE WAVE FUNCTIONS AND THE DENSITY,       **
+!     **  BECAUSE A K-GROUP MUST KEEP ALL GRID POINTS OF THE DENSITY  **
+!     **  WHILE FOR THE POTENTIAL, THEY ARE DISTRIBUTED OVER ALL      **
+!     **  NODES OF THE MONOMER GROUP.                                 **
+!     **                                                              **
+!     **  REMARKS:                                                    **
+!     **    THE DIVISION IN SHEETS IS THE SAME FOR ALL KPOINTS WITHIN **
+!     **    ONE K-GROUP                                               **
+!     **                                                              **
+!     ************P.E. BLOECHL, TU-CLAUSTHAL (2005)*********************
+      USE WAVES_MODULE, ONLY : WAVES_SELECTWV,GSET,NKPTL
+      USE MPE_MODULE
+      IMPLICIT NONE
+      CHARACTER(*),INTENT(IN) :: ID
+      INTEGER(4)  ,INTENT(IN) :: NDIMD
+      INTEGER(4)  ,INTENT(IN) :: NR1L_P
+      INTEGER(4)  ,INTENT(IN) :: NR1L_V
+      INTEGER(4)  ,INTENT(IN) :: NR2
+      INTEGER(4)  ,INTENT(IN) :: NR3
+      REAL(8)     ,INTENT(INOUT) :: RHO_P(NR1L_P,NR2,NR3,NDIMD)
+      REAL(8)     ,INTENT(INOUT) :: RHO_V(NR1L_V,NR2,NR3,NDIMD)
+      REAL(8)     ,ALLOCATABLE   :: ARR(:,:,:,:)
+      INTEGER(4)  ,ALLOCATABLE   :: NR1FIRST_P(:)
+      INTEGER(4)  ,ALLOCATABLE   :: NR1LAST_P(:)
+      INTEGER(4)  ,ALLOCATABLE   :: NR1FIRST_V(:)
+      INTEGER(4)  ,ALLOCATABLE   :: NR1LAST_V(:)
+      INTEGER(4)  ,ALLOCATABLE   :: NR1LARR(:)
+      INTEGER(4)            :: NTASKS,THISTASK
+      INTEGER(4)            :: ISVAR
+      INTEGER(4)            :: NR1START_P
+      INTEGER(4)            :: ITASK,ITASK_P,ITASK_V
+      INTEGER(4)            :: IWORK2(2)
+      INTEGER(4)            :: IRSTART,IREND
+      INTEGER(4)            :: IR1_P,IR2_P,IR1_V,IR2_V
+!     ******************************************************************
+                              CALL TRACE$PUSH('WAVES_MAPPSITOPOT')
+      IF(ID.NE.'PSITOPOT'.AND.ID.NE.'POTTOPSI') THEN
+        CALL ERROR$MSG('ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID',ID)
+        CALL ERROR$STOP('WAVES_MAPPSITOPOT')
+      ENDIF
+!
+      CALL MPE$QUERY('MONOMER',NTASKS,THISTASK)      
+!
+!     ====================================================================
+!     == DETERMINE WHICH PLANES OF RHO_V ARE HELD BY EACH PROCESSOR   ==
+!     ====================================================================
+      CALL PLANEWAVE$SELECT('DENSITY')
+      ALLOCATE(NR1LARR(NTASKS))
+      CALL PLANEWAVE$GETI4A('NR1LARR',NTASKS,NR1LARR)
+!
+      ALLOCATE(NR1FIRST_V(NTASKS))
+      ALLOCATE(NR1LAST_V(NTASKS))
+      ISVAR=0
+      DO ITASK=1,NTASKS
+        NR1FIRST_V(ITASK)=ISVAR+1
+        ISVAR=ISVAR+NR1LARR(ITASK)
+        NR1LAST_V(ITASK)=ISVAR
+      ENDDO
+!
+      DEALLOCATE(NR1LARR)
+!
+!     ====================================================================
+!     == COMMUNICATE WHICH PLANES OF RHO_P ARE HELD BY EACH PROCESSOR   ==
+!     ====================================================================
+!     __ IT IS POSSIBLE THAT THERE IS NO K-POINT ON A TASK
+      IF(NKPTL.GT.0) THEN
+        CALL WAVES_SELECTWV(1,1)
+        CALL PLANEWAVE$SELECT(GSET%ID)
+        CALL PLANEWAVE$GETI4('NR1START',NR1START_P)
+      ELSE
+        NR1START_P=1
+      END IF
+      ALLOCATE(NR1FIRST_P(NTASKS))
+      ALLOCATE(NR1LAST_P(NTASKS))
+      DO ITASK=1,NTASKS
+        IWORK2(1)=NR1START_P
+        IWORK2(2)=NR1START_P-1+NR1L_P
+        CALL MPE$BROADCAST('MONOMER',ITASK,IWORK2(:))
+        NR1FIRST_P(ITASK)=IWORK2(1)
+        NR1LAST_P(ITASK)=IWORK2(2)
+      ENDDO
+!
+!     ====================================================================
+!     ==                                                                ==
+!     ====================================================================
+      IF(ID.EQ.'PSITOPOT') THEN
+        ALLOCATE(ARR(NR1L_V,NR2,NR3,NDIMD))
+        RHO_V(:,:,:,:)=0.D0
+      END IF
+!
+!     ====================================================================
+!     ==  DISTRIBUETE THE DENSITY/POTENTIAL                             ==
+!     ====================================================================
+      DO ITASK_P=1,NTASKS
+        DO ITASK_V=1,NTASKS
+          IF(.NOT.(ITASK_P.EQ.THISTASK.OR.ITASK_V.EQ.THISTASK)) CYCLE
+!
+          IRSTART=MAX(NR1FIRST_V(ITASK_V),NR1FIRST_P(ITASK_P)) 
+          IREND  =MIN(NR1LAST_V(ITASK_V),NR1LAST_P(ITASK_P)) 
+          IF(IRSTART.GT.IREND) CYCLE  ! NO MESSAGE, GO TO NEXT....
+!
+!         ==============================================================
+!         ==                                                          ==
+!         ==============================================================
+          IR1_P=IRSTART-NR1FIRST_P(ITASK_P)+1
+          IR2_P=IREND-NR1FIRST_P(ITASK_P)+1
+          IR1_V=IRSTART-NR1FIRST_V(ITASK_V)+1
+          IR2_V=IREND-NR1FIRST_V(ITASK_V)+1
+          IF(ITASK_P.EQ.ITASK_V) THEN
+!           == BOTH ON THE SAME TASK; JUST COPY
+            IF(ID.EQ.'PSITOPOT') THEN
+              RHO_V(IR1_V:IR2_V,:,:,:)=RHO_V(IR1_V:IR2_V,:,:,:) &
+     &                                +RHO_P(IR1_P:IR2_P,:,:,:)
+            ELSE
+              RHO_P(IR1_P:IR2_P,:,:,:)=RHO_V(IR1_V:IR2_V,:,:,:)
+            END IF
+          ELSE
+            IF(ID.EQ.'PSITOPOT') THEN
+              IF(THISTASK.EQ.ITASK_P) THEN
+!               __ SEND ____
+                CALL MPE$SENDRECEIVE('MONOMER',ITASK_P,ITASK_V &
+     &                              ,RHO_P(IR1_P:IR2_P,:,:,:))
+              ELSE
+!               __ RECEIVE ____
+                CALL MPE$SENDRECEIVE('MONOMER',ITASK_P,ITASK_V &
+     &                              ,ARR(1:IR2_P-IR1_P+1,:,:,:))
+                RHO_V(IR1_V:IR2_V,:,:,:)=RHO_V(IR1_V:IR2_V,:,:,:) &
+     &                                +ARR(1:IR2_P-IR1_P+1,:,:,:)
+              END IF
+            ELSE
+              IF(THISTASK.EQ.ITASK_V) THEN
+!               ____SEND____
+                CALL MPE$SENDRECEIVE('MONOMER',ITASK_V,ITASK_P,RHO_V(IR1_V:IR2_V,:,:,:))
+              ELSE
+!               __ RECEIVE______
+                CALL MPE$SENDRECEIVE('MONOMER',ITASK_V,ITASK_P,RHO_P(IR1_P:IR2_P,:,:,:))
+              END IF
+            END IF
+          END IF
+        ENDDO
+      ENDDO
+      IF(ALLOCATED(ARR))DEALLOCATE(ARR)
+                              CALL TRACE$POP
+      RETURN
+      END SUBROUTINE WAVES_MAPPSITOPOT
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WAVES$KAESTNERCG1(TFIRST_)
+!     ******************************************************************
+!     **                                                              **
+!     **  THIS IS FOR KAESTNERS CONJUGATE GRADIENT IMPLEMENTATION    **
+!     **  HANDLE WITH SPECIAL CARE TO AVOID PROBLEMS WITH ALLOCATION  **
+!     **                                                              **
+!     **  SCAN0R: THE ORIGINAL CODING ERROR THIS ROUTINE'S COMMENTS   **
+!     **  WARNED ABOUT (EIGVAL/EIGVEC DEALLOCATED IN WAVES$ETOT       **
+!     **  BEFORE THIS ROUTINE COULD USE THEIR PREVIOUS VALUES) IS     **
+!     **  FIXED AT THE CALL SITE: THAT DEALLOCATION LOOP IS NOW       **
+!     **  SKIPPED WHENEVER OPTIMIZERTYPE='CG'. THIS ROUTINE ONLY      **
+!     **  NEEDS TO ALLOCATE ON FIRST USE AND SEED THE INITIAL GUESS.  **
+!     **                                                              **
+!     ************P.E. BLOECHL, TU-CLAUSTHAL (2005)*********************
+      USE WAVES_MODULE
+      IMPLICIT NONE
+      LOGICAL(4),INTENT(IN) :: TFIRST_
+      INTEGER(4)            :: IKPT,ISPIN
+      INTEGER(4)            :: NB
+!     ******************************************************************
+                              CALL TRACE$PUSH('WAVES$KAESTNERCG1')
+      DO IKPT=1,NKPTL
+        DO ISPIN=1,NSPIN
+          CALL WAVES_SELECTWV(IKPT,ISPIN)
+          CALL PLANEWAVE$SELECT(GSET%ID)
+          NB=THIS%NB
+          IF(.NOT.ASSOCIATED(THIS%EIGVAL))ALLOCATE(THIS%EIGVAL(NB))
+          IF(.NOT.ASSOCIATED(THIS%EIGVEC))ALLOCATE(THIS%EIGVEC(NB,NB))
+          IF(TFIRST_) THEN
+            THIS%EIGVAL(:)=1.D100
+          END IF
+        ENDDO
+      ENDDO
+                              CALL TRACE$POP
+      RETURN
+      END SUBROUTINE WAVES$KAESTNERCG1
+!
+!     ..................................................................
+      SUBROUTINE WAVES$RANDOMIZE()
+!     ******************************************************************
+!     **                                                              **
+!     **                                                              **
+!     ************P.E. BLOECHL, TU-CLAUSTHAL (2005)*********************
+      USE WAVES_MODULE !, ONLY : NSPIN,NKPTL,NDIM,GSET,THIS,AMPRANDOM
+      IMPLICIT NONE
+      INTEGER(4)             :: IKPT,ISPIN
+      INTEGER(4)             :: NGL
+      INTEGER(4)             :: NBH
+      REAL(8)   ,ALLOCATABLE :: G2(:)
+!     ******************************************************************
+                              CALL TRACE$PUSH('WAVES$RANDOMIZE')
+      DO IKPT=1,NKPTL
+        DO ISPIN=1,NSPIN
+          CALL WAVES_SELECTWV(IKPT,ISPIN)
+          CALL PLANEWAVE$SELECT(GSET%ID)
+          NGL=GSET%NGL
+          NBH=THIS%NBH
+          ALLOCATE(G2(NGL))
+          CALL PLANEWAVE$GETR8A('G2',NGL,G2)
+          CALL WAVES_RANDOMIZE(NGL,NDIM,NBH,AMPRANDOM,G2,THIS%PSIM)
+          DEALLOCATE(G2)
+        ENDDO
+      ENDDO
+                              CALL TRACE$POP
+      RETURN
+      END SUBROUTINE WAVES$RANDOMIZE
+!
+!     ..................................................................
+      SUBROUTINE WAVES$GRAMMSCHMIDT()
+!     ******************************************************************
+!     **                                                              **
+!     **                                                              **
+!     **  REMARK: I IS IMPORTANT TO DO THE ORTHOGONALIZATION WITH THE **
+!     **    CONSISTENT SET OF ATOMIC POSITIONS.                        **
+!     **                                                              **
+!     ************P.E. BLOECHL, TU-CLAUSTHAL (2005)*********************
+      USE WAVES_MODULE, ONLY : NKPTL,NSPIN,NDIM,MAP,GSET,THIS &
+     &                        ,WAVES_SELECTWV
+      IMPLICIT NONE
+      INTEGER(4)             :: IKPT,ISPIN
+      INTEGER(4)             :: NGL
+      INTEGER(4)             :: NB
+      INTEGER(4)             :: NBH
+      INTEGER(4)             :: NAT
+      REAL(8)   ,ALLOCATABLE :: R0(:,:)
+      REAL(8)   ,ALLOCATABLE :: RM(:,:)
+!     ******************************************************************
+                              CALL TRACE$PUSH('WAVES$GRAMMSCHMIDT')
+                              CALL TIMING$CLOCKON('W:GRAMSCHMIDT')
+      NAT=MAP%NAT
+      ALLOCATE(R0(3,NAT))
+      ALLOCATE(RM(3,NAT))
+      CALL ATOMLIST$GETR8A('R(0)',0,3*NAT,R0)
+      CALL ATOMLIST$GETR8A('R(-)',0,3*NAT,RM)
+      DO IKPT=1,NKPTL
+        DO ISPIN=1,NSPIN
+          CALL WAVES_SELECTWV(IKPT,ISPIN)
+          CALL PLANEWAVE$SELECT(GSET%ID)
+          NGL=GSET%NGL
+          NB=THIS%NB
+          NBH=THIS%NBH
+          CALL WAVES_GRAMSCHMIDT(MAP,GSET,NAT,R0,NGL,NDIM,NBH,NB,THIS%PSI0)
+          CALL WAVES_GRAMSCHMIDT(MAP,GSET,NAT,RM,NGL,NDIM,NBH,NB,THIS%PSIM)
+        ENDDO
+      ENDDO
+                              CALL TIMING$CLOCKOFF('W:GRAMSCHMIDT')
+                              CALL TRACE$POP
+      RETURN
+      END SUBROUTINE WAVES$GRAMMSCHMIDT
+!
+!     ..................................................................
+      SUBROUTINE WAVES$PROJECTIONS(ID)
+!     ******************************************************************
+!     **                                                              **
+!     **                                                              **
+!     ************P.E. BLOECHL, TU-CLAUSTHAL (2005)*********************
+      USE MPE_MODULE
+      USE WAVES_MODULE
+      IMPLICIT NONE
+      CHARACTER(*),INTENT(IN):: ID
+      INTEGER(4)             :: IKPT,ISPIN
+      INTEGER(4)             :: NGL
+      INTEGER(4)             :: NBH
+      INTEGER(4)             :: NAT
+      REAL(8)   ,ALLOCATABLE :: R(:,:)
+!     ******************************************************************
+                              CALL TRACE$PUSH('WAVES$PROJECTIONS')
+                              CALL TIMING$CLOCKON('W:PROJ')
+      NAT=MAP%NAT
+      ALLOCATE(R(3,NAT))
+      CALL ATOMLIST$GETR8A('R(0)',0,3*NAT,R)
+!
+!     ==================================================================
+!     ==                                                              ==
+!     ==================================================================
+      DO IKPT=1,NKPTL
+        DO ISPIN=1,NSPIN
+          CALL WAVES_SELECTWV(IKPT,ISPIN)
+          CALL PLANEWAVE$SELECT(GSET%ID)
+          NGL=GSET%NGL
+          NBH=THIS%NBH
+          IF(ID.EQ.'PSI0') THEN
+            CALL WAVES_PROJECTIONS(MAP,GSET,NAT,R,NGL,NDIM,NBH,MAP%NPRO &
+     &                            ,THIS%PSI0,THIS%PROJ)
+            CALL MPE$COMBINE('K','+',THIS%PROJ)
+          ELSE
+            CALL ERROR$MSG('ID NOT RECOGNIZED')
+            CALL ERROR$CHVAL('ID',ID)
+            CALL ERROR$STOP('WAVES$PROJECTIONS')
+          END IF
+        ENDDO
+      ENDDO
+      DEALLOCATE(R)
+                              CALL TIMING$CLOCKOFF('W:PROJ')
+                              CALL TRACE$POP
+      RETURN
+      END SUBROUTINE WAVES$PROJECTIONS
+!
+!     ..................................................................
+      SUBROUTINE WAVES$EKIN(EKIN,STRESS)
+!     ******************************************************************
+!     **                                                              **
+!     **  EVALUATES PSEUDO-KINETIC ENERGY                             **
+!     **  AND THE CORRESPONDING STRESS                                **
+!     **                                                              **
+!     ************P.E. BLOECHL, TU-CLAUSTHAL (2005)*********************
+      USE MPE_MODULE
+      USE WAVES_MODULE
+      IMPLICIT NONE
+      REAL(8)   ,INTENT(OUT) :: EKIN
+      REAL(8)   ,INTENT(OUT) :: STRESS(3,3)
+      INTEGER(4)             :: IKPT,ISPIN
+      INTEGER(4)             :: NGL,NBH,NB,NBX
+      REAL(8)                :: GWEIGHT
+      REAL(8)                :: EKIN1
+      REAL(8)                :: STRESS1(3,3)
+      LOGICAL(4)             :: TSTRESS
+!REDUCEKPOINTS UP TO HERE
+      REAL(8)   ,ALLOCATABLE :: OCC(:,:,:) !(NBX,NKPTL,NSPIN)
+!     ******************************************************************      
+                              CALL TRACE$PUSH('WAVES$EKIN')
+                              CALL TIMING$CLOCKON('W:EKIN')
+!
+!     ==================================================================
+!     ==  GET OCCUPATIONS FROM DYNOCC OBJECT                          ==
+!     ==================================================================
+      CALL CELL$GETL4('MOVE',TSTRESS)
+      TSTRESS=TSTRESS.OR.TSTRESSX   ! STRESS=T: STRESS ALSO FOR A FIXED CELL
+      CALL DYNOCC$GETI4('NB',NBX)
+      ALLOCATE(OCC(NBX,NKPTL,NSPIN))
+      CALL WAVES_DYNOCCGETR8A('OCC',NBX*NKPTL*NSPIN,OCC)
+!
+!     ==================================================================
+!     ==                                                              ==
+!     ==================================================================
+      EKIN=0.D0
+      STRESS(:,:)=0.D0
+      DO IKPT=1,NKPTL
+        DO ISPIN=1,NSPIN
+          CALL WAVES_SELECTWV(IKPT,ISPIN)
+          CALL PLANEWAVE$SELECT(GSET%ID)
+          CALL PLANEWAVE$GETR8('GWEIGHT',GWEIGHT)
+          NGL=GSET%NGL
+          NBH=THIS%NBH
+          NB=THIS%NB
+          CALL WAVES_EKIN(NGL,NDIM,NBH,NB,OCC(1,IKPT,ISPIN),GWEIGHT &
+      &                         ,THIS%PSI0,EKIN1,TSTRESS,STRESS1 &
+      &                         ,TBUCKET,GSET%BUCKET,GSET%DBUCKET)
+          EKIN  =EKIN  +EKIN1
+          STRESS=STRESS+STRESS1
+        ENDDO
+      ENDDO
+      DEALLOCATE(OCC)
+      CALL MPE$COMBINE('MONOMER','+',EKIN)
+      CALL MPE$COMBINE('MONOMER','+',STRESS)
+                              CALL TIMING$CLOCKOFF('W:EKIN')
+                              CALL TRACE$POP
+      RETURN
+      END SUBROUTINE WAVES$EKIN
+!
+!     ..................................................................
+      SUBROUTINE WAVES_EKIN(NGL,NDIM,NBH,NB,F,GWEIGHT,PSI,EKIN &
+     &                         ,TSTRESS,STRESS,TBUCKET,BUCKET,DBUCKET)
+!     ******************************************************************
+!     **                                                              **
+!     **  EVALUATE PS KINETIC ENERGY IN G-SPACE                       **
+!     **  EVALUATE NUMBER OF ELECTRONS IN G-SPACE                     **
+!     **                                                              **
+!     **  REMARKS:                                                    **
+!     **    REQUIRES PLANEWAVE OBJECT TO BE SET PROPERLY              **
+!     **                                                              **
+!     *******************************************P.E. BLOECHL, (1999)***
+      IMPLICIT NONE
+      INTEGER(4),INTENT(IN) :: NB         ! #(STATES)
+      INTEGER(4),INTENT(IN) :: NBH        ! #(WAVE FUNCTIONS)
+      INTEGER(4),INTENT(IN) :: NDIM       ! #(SPINOR COMPONENTS)
+      INTEGER(4),INTENT(IN) :: NGL        ! #(PLANE WAVES)
+      REAL(8)   ,INTENT(IN) :: F(NB)      ! OCCUPATION
+      REAL(8)   ,INTENT(IN) :: GWEIGHT
+      COMPLEX(8),INTENT(IN) :: PSI(NGL,NDIM,NBH) ! PS-WAVE FUNCTION
+      REAL(8)   ,INTENT(OUT):: EKIN       ! KINETIC ENERGY
+      LOGICAL(4),INTENT(IN) :: TSTRESS    ! SWITCH STRESS ON/OFF
+      REAL(8)   ,INTENT(OUT):: STRESS(3,3)! STRESS
+      LOGICAL(4),INTENT(IN) :: TBUCKET    ! BUCKET POTENTIAL PRESENT
+      REAL(8)   ,INTENT(IN) :: BUCKET(NGL) ! BUCKET POTENTIAL
+      REAL(8)   ,INTENT(IN) :: DBUCKET(NGL) ! 1/G *DBUCKET/DG
+      REAL(8)   ,ALLOCATABLE:: G2(:)      ! G**2
+      REAL(8)   ,ALLOCATABLE:: GVEC(:,:)  ! G   
+      COMPLEX(8),ALLOCATABLE:: PSI1(:,:)
+      REAL(8)   ,ALLOCATABLE:: DMAT(:)
+      LOGICAL(4)            :: TINV
+      LOGICAL(4)            :: TSUPER
+      INTEGER(4)            :: NGAMMA
+      INTEGER(4)            :: IB,IG,IDIM
+      REAL(8)               :: FP,FM
+      REAL(8)   ,PARAMETER  :: DSMALL=1.D-12
+      REAL(8)               :: EBUCKET
+      REAL(8)               :: SVAR
+!     ******************************************************************
+!
+!     ==================================================================
+!     ==  CHECK IF SUPERWAVEFUNCTIONS ARE USED AND IF #(BANDS) CORRECT==
+!     ==================================================================
+      CALL PLANEWAVE$GETL4('TINV',TINV)
+      CALL PLANEWAVE$GETL4('SUPER',TSUPER)
+      IF(TSUPER) THEN
+        IF(NBH.NE.NB) THEN
+          CALL ERROR$MSG('INCONSISTENT NUMBER OF BANDS')
+          CALL ERROR$STOP('WAVES_EKIN')
+        END IF
+      ELSE IF(TINV) THEN
+        IF(NBH.NE.(NB+1)/2) THEN
+          CALL ERROR$MSG('INCONSISTENT NUMBER OF BANDS')
+          CALL ERROR$STOP('WAVES_EKIN')
+        END IF
+      ELSE
+        IF(NBH.NE.NB) THEN
+          CALL ERROR$MSG('INCONSISTENT NUMBER OF BANDS')
+          CALL ERROR$STOP('WAVES_EKIN')
+        END IF
+      END IF
+!
+!     ==================================================================
+!     ==  CALCULATE DMAT(G)=F(IB)*PSI^*(G,IB)*PSI(G,IB)               ==
+!     ==================================================================
+      ALLOCATE(DMAT(NGL))
+      ALLOCATE(PSI1(NGL,NDIM))
+      DMAT(:)=0.D0
+      IF(TSUPER) THEN
+!       == TSUPER: EACH ORBITAL STORED INDEPENDENTLY AT HALF RESOLUTION ==
+!       == (NBH=NB, NO BAND PAIRING -- SEE LGAMMASUPER). NO FP/FM/      ==
+!       == PLANEWAVE$INVERTG CROSS TERM IS NEEDED (THAT TRICK ONLY      ==
+!       == EXISTS TO SEPARATE TWO ORBITALS SHARING ONE PACKED SLOT; NO  ==
+!       == PACKING HERE). DMAT IS BUILT OVER THE HALF-SPHERE G-SET, SO  ==
+!       == IT IS THEN DOUBLED (EXCEPT AT G=0, WHICH IS ITS OWN MIRROR   ==
+!       == AND WOULD OTHERWISE BE COUNTED TWICE) SO THE UNCHANGED       ==
+!       == DOWNSTREAM DO IG=1,NGL ACCUMULATION BELOW RECOVERS THE       ==
+!       == CORRECT FULL-SPHERE SUM WITHOUT ITSELF NEEDING TO CHANGE.    ==
+        DO IB=1,NBH
+          FP=F(IB)
+          IF(FP.EQ.0.D0) CYCLE
+          DO IDIM=1,NDIM
+            DO IG=1,NGL
+              DMAT(IG)=DMAT(IG) &
+    &                 +FP*REAL(CONJG(PSI(IG,IDIM,IB))*PSI(IG,IDIM,IB),KIND=8)
+            ENDDO
+          ENDDO
+        ENDDO
+        CALL PLANEWAVE$GETI4('NGAMMA',NGAMMA)
+        DMAT(:)=2.D0*DMAT(:)
+        IF(NGAMMA.NE.0) DMAT(NGAMMA)=0.5D0*DMAT(NGAMMA)
+      ELSE
+      DO IB=1,NBH
+!       == DETERMINE OCCUPATIONS =======================================
+        IF(TINV) THEN
+          FP=0.5D0*(F(2*IB-1)+F(2*IB))
+          FM=0.5D0*(F(2*IB-1)-F(2*IB))
+        ELSE
+          FP=F(IB)
+          FM=0.D0
+        END IF
+!
+!       ================================================================
+!       == GENERAL WAVE FUNCTION / FIRST PART OF SUPER WAVE FUNCTIONS ==
+!       == <PSI_+|G^2|PSI_+> FOR SUPER WAVE FUNCTIONS                 ==
+!       ================================================================
+        IF(FP.EQ.0.D0.AND.FM.EQ.0.D0) CYCLE
+        DO IDIM=1,NDIM
+          DO IG=1,NGL
+            DMAT(IG)=DMAT(IG) &
+    &                 +FP*REAL(CONJG(PSI(IG,IDIM,IB))*PSI(IG,IDIM,IB),KIND=8)
+          ENDDO
+        ENDDO
+!
+!       ================================================================
+!       ==  <PSI_+|G^2|PSI_->                                         ==
+!       ================================================================
+        IF(.NOT.TINV.OR.ABS(FM).LT.DSMALL) CYCLE
+        DO IDIM=1,NDIM
+          CALL PLANEWAVE$INVERTG(NGL,PSI(1,IDIM,IB),PSI1(1,IDIM))
+        ENDDO
+        DO IDIM=1,NDIM
+          DO IG=1,NGL
+            DMAT(IG)=DMAT(IG) &
+     &                +FM*REAL(CONJG(PSI(IG,IDIM,IB))*PSI1(IG,IDIM),KIND=8)
+          ENDDO
+        ENDDO
+      ENDDO
+      END IF
+      DEALLOCATE(PSI1)
+!
+!     ==================================================================
+!     ==  CALCULATE KINETIC ENERGY AND STRESS                         ==
+!     ==================================================================
+      IF(TSTRESS) THEN
+        ALLOCATE(GVEC(3,NGL))
+        CALL PLANEWAVE$GETR8A('GVEC',3*NGL,GVEC)
+!       == KINETIC ENERGY AND KINETIC STRESS ===========================
+        STRESS(:,:)=0.D0
+        DO IG=1,NGL
+          STRESS(1,1)=STRESS(1,1)+GVEC(1,IG)*GVEC(1,IG)*DMAT(IG)
+          STRESS(1,2)=STRESS(1,2)+GVEC(1,IG)*GVEC(2,IG)*DMAT(IG)
+          STRESS(1,3)=STRESS(1,3)+GVEC(1,IG)*GVEC(3,IG)*DMAT(IG)
+          STRESS(2,2)=STRESS(2,2)+GVEC(2,IG)*GVEC(2,IG)*DMAT(IG)
+          STRESS(2,3)=STRESS(2,3)+GVEC(2,IG)*GVEC(3,IG)*DMAT(IG)
+          STRESS(3,3)=STRESS(3,3)+GVEC(3,IG)*GVEC(3,IG)*DMAT(IG)
+        ENDDO
+        EKIN=0.5D0*(STRESS(1,1)+STRESS(2,2)+STRESS(3,3))
+        STRESS=-STRESS
+!       == ENERGY AND STRESS DUE TO THE BUCKET POTENTIAL ===============
+        IF(TBUCKET) THEN
+          EBUCKET=0.D0
+          DO IG=1,NGL
+            IF(BUCKET(IG).EQ.0.D0) CYCLE
+            EBUCKET=EBUCKET+BUCKET(IG)*DMAT(IG)
+            SVAR=DMAT(IG)*DBUCKET(IG)
+            STRESS(1,1)=STRESS(1,1)-GVEC(1,IG)*GVEC(1,IG)*SVAR
+            STRESS(1,2)=STRESS(1,2)-GVEC(1,IG)*GVEC(2,IG)*SVAR
+            STRESS(1,3)=STRESS(1,3)-GVEC(1,IG)*GVEC(3,IG)*SVAR
+            STRESS(2,2)=STRESS(2,2)-GVEC(2,IG)*GVEC(2,IG)*SVAR
+            STRESS(2,3)=STRESS(2,3)-GVEC(2,IG)*GVEC(3,IG)*SVAR
+            STRESS(3,3)=STRESS(3,3)-GVEC(3,IG)*GVEC(3,IG)*SVAR
+          ENDDO
+          EKIN=EKIN+EBUCKET
+        END IF
+!       == PARALLELIZE AND CLOSE DOWN ==================================
+        STRESS(2,1)=STRESS(1,2)
+        STRESS(3,1)=STRESS(1,3)
+        STRESS(3,2)=STRESS(2,3)
+        EKIN=EKIN*GWEIGHT
+        STRESS=STRESS*GWEIGHT
+        DEALLOCATE(GVEC)
+        DEALLOCATE(DMAT)
+      ELSE
+        ALLOCATE(G2(NGL))
+        CALL PLANEWAVE$GETR8A('G2',NGL,G2)
+!       == KINETIC ENERGY ==============================================
+        EKIN=0.D0
+        DO IG=1,NGL
+          EKIN=EKIN+G2(IG)*DMAT(IG)
+        ENDDO
+        EKIN=0.5D0*EKIN
+!       == BUCKET POTENTIAL ============================================
+        IF(TBUCKET) THEN
+          EBUCKET=0.D0
+          DO IG=1,NGL
+            EBUCKET=EBUCKET+BUCKET(IG)*DMAT(IG)
+          ENDDO
+          EKIN=EKIN+EBUCKET
+        END IF
+!       ==  WEIGHT RESULT AND CLOSE DOWN ===============================
+        EKIN=EKIN*GWEIGHT
+        DEALLOCATE(DMAT)
+        DEALLOCATE(G2)
+        STRESS(:,:)=0.D0
+      END IF
+!
+      RETURN
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WAVES$DENMAT(LMNXX,NDIMD_,NAT,DENMAT,EDENMAT)
+!     **************************************************************************
+!     **                                                                      **
+!     **  EVALUATES ONE-CENTER DENSITY MATRIX FROM THE ACTUAL                 **
+!     **  PROJECTIONS <PRO|PSI> IN THE WAVES OBJECT                           **
+!     **                                                                      **
+!     **  ONE-CENTER DENSITY MATRICES                                         **
+!     **  SPIN RESTRICTED NSPIN=1;NDIM=1: (TOTAL)                             **
+!     **  SPIN POLARIZED  NSPIN=2;NDIM=1: (TOTAL,SPIN_Z)                      **
+!     **  NONCOLLINEAR    NSPIN=1;NDIM=2: (TOTAL,SPIN_X,SPIN_Y,SPIN_Z)        **
+!     **                                                                      **
+!     ************P.E. BLOECHL, TU-CLAUSTHAL (2005)*****************************
+      USE MPE_MODULE
+      USE WAVES_MODULE
+      IMPLICIT NONE
+      INTEGER(4),INTENT(IN)  :: LMNXX
+      INTEGER(4),INTENT(IN)  :: NDIMD_
+      INTEGER(4),INTENT(IN)  :: NAT    
+      COMPLEX(8),INTENT(OUT) :: DENMAT(LMNXX,LMNXX,NDIMD,NAT)
+      COMPLEX(8),INTENT(OUT) :: EDENMAT(LMNXX,LMNXX,NDIMD,NAT)
+      INTEGER(4)             :: NBH   !#(SUPER WAVE FUNCTIONS)
+      INTEGER(4)             :: NB    !#(WAVE FUNCTIONS)
+      INTEGER(4)             :: IPRO  ! PROJECTOR INDEX
+      INTEGER(4)             :: ISP   ! SPECIES INDEX
+      INTEGER(4)             :: LMNX  ! 
+      INTEGER(4)             :: NBX   ! 
+      INTEGER(4)             :: IAT,ISPIN,IKPT,LMN1,LMN2,IDIM
+      COMPLEX(8),ALLOCATABLE :: PROJ(:,:,:) !(NDIM,NBH,LMNX) <PRO|PSPSI>
+      COMPLEX(8),ALLOCATABLE :: DENMAT1(:,:,:)
+      COMPLEX(8),ALLOCATABLE :: EDENMAT1(:,:,:)
+      REAL(8)   ,ALLOCATABLE :: OCC(:,:,:)
+      COMPLEX(8)             :: CSVAR1,CSVAR2
+      INTEGER(4)             :: NTASKS,THISTASK
+      LOGICAL(4),PARAMETER   :: TPRINT=.FALSE.
+      REAL(8)   ,ALLOCATABLE :: XK(:,:)
+      LOGICAL(4)             :: TINV
+      INTEGER(4)             :: IB
+!     == SCAN0R DAV+ANDERSON INSTABILITY DIAGNOSTIC, RAW PROJ/OCC AT IAT=8      ==
+!     == (2026-09-10, SAME SESSION AS THE PREMIX DENMAT CHECK) -- THE PREMIX    ==
+!     == DENMAT SPIKE (346X BASELINE AT IAT=8) IS BILINEAR IN PROJ AND LINEAR   ==
+!     == IN OCC (WAVES_DENMAT, DENMAT1=PROJ*FUNC WHERE FUNC~OCC*CONJG(PROJ)):   ==
+!     == PRINTING BOTH SEPARATELY FOR IAT=8 SPLITS WHETHER THE RAW PROJECTOR    ==
+!     == OVERLAP ITSELF IS CORRUPTED (DAVIDSON/WAVEFUNCTION SIDE) OR THE        ==
+!     == OCCUPATION NUMBER IS (DYNOCC SIDE) -- SAME OPT-IN ENV VAR.             ==
+      LOGICAL(4),SAVE        :: TIAT8DIAGCHECKED=.FALSE.
+      LOGICAL(4),SAVE        :: TIAT8DIAG=.FALSE.
+      CHARACTER(16)          :: CENVIAT8DIAG
+      REAL(8)                :: MAXPROJIAT8,MAXOCCIAT8
+!     **************************************************************************
+      IF(.NOT.TIAT8DIAGCHECKED) THEN
+        CALL GET_ENVIRONMENT_VARIABLE('VESPAW_SCAN0R_SWAP_DIAG',CENVIAT8DIAG)
+        TIAT8DIAG=(LEN_TRIM(CENVIAT8DIAG).GT.0)
+        TIAT8DIAGCHECKED=.TRUE.
+        IF(TIAT8DIAG) THEN
+          PRINT*,'VESPAW_SCAN0R_SWAP_DIAG SET -- ALSO TRACKING RAW PROJ/OCC' &
+     &          ,' AT IAT=8, SPLIT BY K-POINT/SPIN'
+        END IF
+      END IF
+                              CALL TRACE$PUSH('WAVES$DENMAT')
+                              CALL TIMING$CLOCKON('W:DENMAT')
+      IF(NDIMD_.NE.NDIMD.OR.NAT.NE.MAP%NAT) THEN 
+        CALL ERROR$MSG('ARRAY SIZE INCONSISTENT')
+        CALL ERROR$STOP('WAVES$DENMAT')
+      END IF
+!
+!     ==========================================================================
+!     ==  GET OCCUPATIONS FROM DYNOCC OBJECT                                  ==
+!     ==========================================================================
+      CALL DYNOCC$GETI4('NB',NBX)
+      ALLOCATE(OCC(NBX,NKPTL,NSPIN))
+      CALL WAVES_DYNOCCGETR8A('OCC',NBX*NKPTL*NSPIN,OCC)
+!
+!     ==========================================================================
+!     ==                                                                      ==
+!     ==========================================================================
+      CALL MPE$QUERY('K',NTASKS,THISTASK)
+      DENMAT(:,:,:,:)=(0.D0,0.D0)
+      EDENMAT(:,:,:,:)=(0.D0,0.D0)
+      DO IKPT=1,NKPTL
+        DO ISPIN=1,NSPIN
+          CALL WAVES_SELECTWV(IKPT,ISPIN)
+          CALL PLANEWAVE$SELECT(GSET%ID)
+          NBH=THIS%NBH
+          NB=THIS%NB
+          IPRO=1
+          DO IAT=1,NAT
+            ISP=MAP%ISP(IAT)
+            LMNX=MAP%LMNX(ISP)
+            IF(MOD(IAT-1,NTASKS)+1.NE.THISTASK) THEN  
+!             -- PARALLELIZATION. MAY NOT BE MOST EFFICIENT, 
+!             -- BUT ALLOWS COMBINE OVER K-POINTS AND "G-GROUP"
+              IPRO=IPRO+LMNX
+              CYCLE
+            END IF
+            ALLOCATE(PROJ(NDIM,NBH,LMNX))
+            PROJ(:,:,:)=THIS%PROJ(:,:,IPRO:IPRO-1+LMNX)
+            IF(TIAT8DIAG.AND.IAT.EQ.8) THEN
+              MAXPROJIAT8=MAXVAL(ABS(PROJ))
+              MAXOCCIAT8=MAXVAL(ABS(OCC(1:NB,IKPT,ISPIN)))
+              PRINT*,'VESPAW_SCAN0R_SWAP_DIAG IAT8 IKPT=',IKPT,' ISPIN=',ISPIN &
+     &              ,' MAX|PROJ|=',MAXPROJIAT8,' MAX|OCC|=',MAXOCCIAT8
+            END IF
+            ALLOCATE(DENMAT1(LMNX,LMNX,NDIMD))
+            ALLOCATE(EDENMAT1(LMNX,LMNX,NDIMD))
+            CALL WAVES_DENMAT(NDIM,NBH,NB,LMNX,OCC(1,IKPT,ISPIN),THIS%RLAM0 &
+     &                       ,PROJ,DENMAT1,EDENMAT1)
+            IF(NDIM.EQ.1) THEN
+              DENMAT(1:LMNX,1:LMNX,ISPIN,IAT) &
+     &                   =DENMAT(1:LMNX,1:LMNX,ISPIN,IAT)+DENMAT1(:,:,1)
+              EDENMAT(1:LMNX,1:LMNX,ISPIN,IAT) &
+     &                   =EDENMAT(1:LMNX,1:LMNX,ISPIN,IAT)+EDENMAT1(:,:,1)
+            ELSE
+              DENMAT(1:LMNX,1:LMNX,:,IAT) &
+     &                       =DENMAT(1:LMNX,1:LMNX,:,IAT)+DENMAT1(:,:,:)
+              EDENMAT(1:LMNX,1:LMNX,:,IAT) &
+     &                       =EDENMAT(1:LMNX,1:LMNX,:,IAT)+EDENMAT1(:,:,:)
+            ENDIF
+            DEALLOCATE(DENMAT1)
+            DEALLOCATE(EDENMAT1)
+            DEALLOCATE(PROJ)
+            IPRO=IPRO+LMNX
+          ENDDO
+        ENDDO
+      ENDDO
+!     == THE PROJECTIONS ARE IDENTICAL AND COMPLETE FOR EACH K-GROUP
+!     == EACH K-GROUP HOLDS ONLY THE WAVE FUNCTIONS BELONGING TO IT.
+!     == EACH PROCESSOR OF EACH K-GROUP ONLY ADDS UP A FRACTION OF THE PROJECTIONS
+!     == THEREFORE THERE IS NO DOUBLE COUNTING BY SUMMING OVER THE MONOMER
+      CALL MPE$COMBINE('MONOMER','+',DENMAT)
+      CALL MPE$COMBINE('MONOMER','+',EDENMAT)
+!
+!     ==========================================================================
+!     ==  CONVERT SPIN-UP AND SPIN-DOWN DENSITY MATRIX INTO                   ==
+!     ==  TOTAL AND SPIN DENSITY MATRICES                                     ==
+!     ==========================================================================
+      IF(NSPIN.EQ.2) THEN
+        DO IAT=1,NAT
+          ISP=MAP%ISP(IAT)
+          LMNX=MAP%LMNX(ISP)
+          DO LMN1=1,LMNX
+             DO LMN2=1,LMNX
+              CSVAR1=DENMAT(LMN1,LMN2,1,IAT)
+              CSVAR2=DENMAT(LMN1,LMN2,2,IAT)
+              DENMAT(LMN1,LMN2,1,IAT)=CSVAR1+CSVAR2   ! TOTAL 
+              DENMAT(LMN1,LMN2,2,IAT)=CSVAR1-CSVAR2   ! SPIN
+!
+              CSVAR1=EDENMAT(LMN1,LMN2,1,IAT)
+              CSVAR2=EDENMAT(LMN1,LMN2,2,IAT)
+              EDENMAT(LMN1,LMN2,1,IAT)=CSVAR1+CSVAR2   ! TOTAL 
+              EDENMAT(LMN1,LMN2,2,IAT)=CSVAR1-CSVAR2   ! SPIN
+            ENDDO
+          ENDDO
+        ENDDO
+      END IF
+!
+!     ==========================================================================
+!     ==  PRINT FOR TEST                                                      ==
+!     ==========================================================================
+      IF(TPRINT) THEN
+        WRITE(*,FMT='("TEST PRINT FROM WAVES$DENMAT")')
+        DO IAT=1,NAT
+          ISP=MAP%ISP(IAT)
+          LMNX=MAP%LMNX(ISP)
+          DO IDIM=1,NDIMD
+            WRITE(*,FMT='("DENMAT FOR ATOM ",I3," AND SPIN ",I3)')IAT,IDIM
+            DO LMN1=1,LMNX
+              WRITE(*,FMT='("R",I3,100F10.5)')LMN1,REAL(DENMAT(LMN1,:LMNX,IDIM,IAT))
+              WRITE(*,FMT='("I",I3,100F10.5)')LMN1,AIMAG(DENMAT(LMN1,:LMNX,IDIM,IAT))
+            ENDDO
+          ENDDO
+        ENDDO
+      END IF
+!!$!
+!!$!     =======================================================================
+!!$!     ==  NOW CALCULATE OFF-SITE DENSITY MATRIX                            ==
+!!$!     =======================================================================
+!!$      CALL LOCALIZE$SWITCHCHIDENMAT(.TRUE.)
+!!$      ALLOCATE(XK(3,NKPTL))
+!!$      CALL WAVES_DYNOCCGETR8A('XK',3*NKPTL,XK)
+!!$      DO IKPT=1,NKPTL
+!!$        DO ISPIN=1,NSPIN
+!!$          CALL WAVES_SELECTWV(IKPT,ISPIN)
+!!$          CALL PLANEWAVE$SELECT(GSET%ID)
+!!$          NBH=THIS%NBH
+!!$          NB=THIS%NB
+!!$          TINV=GSET%TINV
+!!$          CALL LOCALIZE$CHIDENMAT(XK(:,IKPT),TINV,NB,OCC(1,IKPT,ISPIN),NDIM,NBH,MAP%NPRO,THIS%PROJ)
+!!$        ENDDO
+!!$      ENDDO
+!!$      DEALLOCATE(XK)
+!!$      CALL LOCALIZE$REPORTCHIDENMAT(6)
+!!$      CALL LOCALIZE$NLEXCHANGE()
+!!$STOP 'FORCED STOP IN WAVES$DENMAT'
+!
+      DEALLOCATE(OCC)
+                              CALL TIMING$CLOCKOFF('W:DENMAT')
+                              CALL TRACE$POP
+      RETURN
+      END SUBROUTINE WAVES$DENMAT
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WAVES$TONTBO()
+!     **************************************************************************
+!     **                                                                      **
+!     **  EVALUATES ONE-CENTER DENSITY MATRIX FROM THE ACTUAL                 **
+!     **  PROJECTIONS <PRO|PSI> IN THE WAVES OBJECT                           **
+!     **                                                                      **
+!     **  ONE-CENTER DENSITY MATRICES                                         **
+!     **  SPIN RESTRICTED NSPIN=1;NDIM=1: (TOTAL)                             **
+!     **  SPIN POLARIZED  NSPIN=2;NDIM=1: (TOTAL,SPIN_Z)                      **
+!     **  NONCOLLINEAR    NSPIN=1;NDIM=2: (TOTAL,SPIN_X,SPIN_Y,SPIN_Z)        **
+!     **                                                                      **
+!     ************P.E. BLOECHL, TU-CLAUSTHAL (2005)*****************************
+      USE MPE_MODULE
+      USE WAVES_MODULE
+      IMPLICIT NONE
+      LOGICAL(4),PARAMETER   :: TPRINT=.FALSE.
+      INTEGER(4)             :: NBH    !#(SUPER WAVE FUNCTIONS)
+      INTEGER(4)             :: NPRO   !#(PROJECTOR FUNCTIONS)
+      REAL(8)   ,ALLOCATABLE :: XK(:,:)
+      INTEGER(4)             :: ISPIN,IKPT,IB
+      LOGICAL(4)             :: TON
+      INTEGER(4)             :: NTASKS,THISTASK,COUNT
+      INTEGER(4)             :: NORB
+!     **************************************************************************
+      CALL LMTO$GETL4('ON',TON)
+      IF(.NOT.TON) RETURN
+                              CALL TRACE$PUSH('WAVES$TONTBO')
+                              CALL TIMING$CLOCKON('W:TONTBO')
+!
+!     ==========================================================================
+!     ==  GET K-POINTS IN RELATIVE COORDINATES                                ==
+!     ==========================================================================
+      ALLOCATE(XK(3,NKPTL))
+      CALL WAVES_DYNOCCGETR8A('XK',3*NKPTL,XK)
+      NPRO=MAP%NPRO
+!
+!     ==========================================================================
+!     ==                                                                      ==
+!     ==========================================================================
+      CALL LMTO$GETI4('NLOCORB',NORB)
+      DO IKPT=1,NKPTL
+        DO ISPIN=1,NSPIN
+          CALL WAVES_SELECTWV(IKPT,ISPIN)
+          NBH=THIS%NBH
+          IF(.NOT.ASSOCIATED(THIS%TBC_NEW))ALLOCATE(THIS%TBC_NEW(NDIM,NBH,NORB))
+          CALL LMTO$PROJTONTBO_NEW('FWRD',XK(:,IKPT),NDIM,NBH,NPRO,THIS%PROJ &
+     &                                                       ,NORB,THIS%TBC_NEW)
+        ENDDO
+      ENDDO
+!
+!     ==========================================================================
+!     ==  PRINT FOR TESTING                                                   ==
+!     ==========================================================================
+      IF(TPRINT) THEN
+        WRITE(*,FMT='(82("="),T20," TIGHT-BINDING ORBITAL COEFFICIENTS ")')
+        DO IKPT=1,NKPTL
+          DO ISPIN=1,NSPIN
+            CALL WAVES_SELECTWV(IKPT,ISPIN)
+            NBH=THIS%NBH
+            WRITE(*,FMT='(82("="),T20,"  IKPT ",I5,"ISPIN=",I2,"  ")')IKPT,ISPIN
+            DO IB=1,NBH
+              WRITE(*,FMT='("PROJ",I5,100F10.5)')2*IB-1,REAL(THIS%PROJ(1,IB,:))
+              WRITE(*,FMT='("PROJ",I5,100F10.5)')2*IB,AIMAG(THIS%PROJ(1,IB,:))
+            ENDDO
+            DO IB=1,NBH
+              WRITE(*,FMT='("TBC ",I5,100F10.5)')2*IB-1,REAL(THIS%TBC_NEW(1,IB,:))
+              WRITE(*,FMT='("TBC ",I5,100F10.5)')2*IB,AIMAG(THIS%TBC_NEW(1,IB,:))
+            ENDDO
+          ENDDO
+        ENDDO
+        CALL ERROR$MSG('REGULAR TERMINATION AFTER PRINTOUT')
+        CALL ERROR$MSG('UNDO BY SETTING TPRINT=.FALSE.')
+        CALL ERROR$STOP('WAVES$TONTBO')
+      END IF
+                              CALL TIMING$CLOCKOFF('W:TONTBO')
+                              CALL TRACE$POP
+      RETURN
+      END SUBROUTINE WAVES$TONTBO
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WAVES$FROMNTBO()
+!     **************************************************************************
+!     **                                                                      **
+!     **  EVALUATES ONE-CENTER DENSITY MATRIX FROM THE ACTUAL                 **
+!     **  PROJECTIONS <PRO|PSI> IN THE WAVES OBJECT                           **
+!     **                                                                      **
+!     **  ONE-CENTER DENSITY MATRICES                                         **
+!     **  SPIN RESTRICTED NSPIN=1;NDIM=1: (TOTAL)                             **
+!     **  SPIN POLARIZED  NSPIN=2;NDIM=1: (TOTAL,SPIN_Z)                      **
+!     **  NONCOLLINEAR    NSPIN=1;NDIM=2: (TOTAL,SPIN_X,SPIN_Y,SPIN_Z)        **
+!     **                                                                      **
+!     ************P.E. BLOECHL, TU-CLAUSTHAL (2005)*****************************
+      USE MPE_MODULE
+      USE WAVES_MODULE
+      IMPLICIT NONE
+      LOGICAL(4),PARAMETER   :: TOLD=.FALSE.
+      LOGICAL(4),PARAMETER   :: TPRINT=.FALSE.
+      INTEGER(4)             :: NBH   !#(SUPER WAVE FUNCTIONS)
+      INTEGER(4)             :: NPRO   !#(PROJECTOR FUNCTIONS)
+      INTEGER(4)             :: NORB  
+      REAL(8)   ,ALLOCATABLE :: XK(:,:)
+      COMPLEX(8),ALLOCATABLE :: HPROJ(:,:,:)
+      INTEGER(4)             :: ISPIN,IKPT,IB
+      LOGICAL(4)             :: TON
+!     **************************************************************************
+      CALL LMTO$GETL4('ON',TON)
+      IF(.NOT.TON) RETURN
+      CALL LMTO$GETL4('THTBC',TON) !HTBC HAS NOT BEEN CALCULATED
+      IF(.NOT.TON) RETURN
+                              CALL TRACE$PUSH('WAVES$FROMNTBO')
+                              CALL TIMING$CLOCKON('W:FROMNTBO')
+!
+!     ==========================================================================
+!     ==  GET K-POINTS IN RELATIVE COORDINATES                                ==
+!     ==========================================================================
+      ALLOCATE(XK(3,NKPTL))
+      CALL WAVES_DYNOCCGETR8A('XK',3*NKPTL,XK)
+      NPRO=MAP%NPRO
+!
+!     ==========================================================================
+!     ==  TRANSFORM THIS$HTBC FROM NTBOS TO PAW PARTIAL WAVES                 ==
+!     ==========================================================================
+!!!! PARALLELIZE LOOP WITH RESPECT TO STATES.
+      CALL LMTO$GETI4('NLOCORB',NORB)
+      DO IKPT=1,NKPTL
+        DO ISPIN=1,NSPIN
+          CALL WAVES_SELECTWV(IKPT,ISPIN)
+          NBH=THIS%NBH
+          ALLOCATE(HPROJ(NDIM,NBH,NPRO))
+          IF(.NOT.ASSOCIATED(THIS%HTBC_NEW)) THEN
+!         == THIS%HTBC IS EVALUATED IN LMTO_NTBODENMATDER_NEW
+            CALL ERROR$MSG('INTERNAL ERROR:')
+            CALL ERROR$MSG('LMTO$PROJTONTBO USES NON-ASSOCIATED POINTER')
+            CALL ERROR$MSG('CHECK CALL IN PAW_WAVES1.F90')
+            CALL ERROR$STOP('WAVES$FROMNTBO')
+          END IF
+          CALL LMTO$PROJTONTBO_NEW('BACK',XK(:,IKPT),NDIM,NBH,NPRO,HPROJ &
+     &                                                      ,NORB,THIS%HTBC_NEW)
+          DEALLOCATE(THIS%HTBC_NEW)
+          ALLOCATE(THIS%HTBC_NEW(NDIM,NBH,NPRO))
+          THIS%HTBC_NEW=HPROJ
+          DEALLOCATE(HPROJ)
+        ENDDO
+      ENDDO
+!
+!     ==========================================================================
+!     ==  PRINT FOR TESTING                                                   ==
+!     ==========================================================================
+      IF(TPRINT) THEN
+        WRITE(*,FMT='(82("="),T20," TIGHT-BINDING ORBITAL POTENTIALS ")')
+        DO IKPT=1,NKPTL
+          DO ISPIN=1,NSPIN
+            CALL WAVES_SELECTWV(IKPT,ISPIN)
+            NBH=THIS%NBH
+            WRITE(*,FMT='(80("="),T20," IKPT=",I5," ISPIN=",I2," ")')IKPT,ISPIN
+            DO IB=1,NBH
+              WRITE(*,FMT='(80("-"),T20,"  IB=",I5,"  ")')IB
+              WRITE(*,FMT='("RE(HTBC) ",100F10.5)')REAL(THIS%HTBC_NEW(1,IB,:))
+              WRITE(*,FMT='("IM(HTBC) ",100F10.5)')AIMAG(THIS%HTBC_NEW(1,IB,:))
+            ENDDO
+          ENDDO
+        ENDDO
+        WRITE(*,*)'FORCED STOP IN WAVES$FROMNTBO'
+        STOP 'FORCED STOP IN WAVES$FROMNTBO'
+      END IF
+                              CALL TIMING$CLOCKOFF('W:FROMNTBO')
+                              CALL TRACE$POP
+      RETURN
+      END SUBROUTINE WAVES$FROMNTBO
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WAVES_DEDFFROMNTBO(NB,NKPTL,NSPIN,EIG)
+!     **************************************************************************
+!     ** ADDS TERMS TO DEDF, WHICH ARE NOT TAKEN CARE OF WITH <PSI|HPSI>      **
+!     **************************************************************************
+      IMPLICIT NONE
+      INTEGER(4),INTENT(IN)    :: NB
+      INTEGER(4),INTENT(IN)    :: NKPTL
+      INTEGER(4),INTENT(IN)    :: NSPIN
+      REAL(8)   ,INTENT(INOUT) :: EIG(NB,NKPTL,NSPIN)
+      REAL(8)                  :: DEIG(NB,NKPTL,NSPIN)
+      LOGICAL(4)               :: TON
+!     **************************************************************************
+      CALL LMTO$GETL4('ON',TON)
+      IF(.NOT.TON) RETURN
+      CALL LMTO$GETL4('THTBC',TON) !HTBC HAS NOT BEEN CALCULATED
+      IF(.NOT.TON) RETURN
+!
+      CALL LMTO$DEDF(NB,NKPTL,NSPIN,DEIG)
+      EIG=EIG+DEIG
+      RETURN
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WAVES_DENMAT(NDIM,NBH,NB,LMNX,OCC,LAMBDA,PROPSI &
+     &                       ,DENMAT,EDENMAT)
+!     **************************************************************************
+!     **                                                                      **
+!     **  EVALUATE ONE-CENTER DENSITY MATRIX                                  **
+!     **             <P_I|PSI_N>F_N<PSI_N|P_J>                                **
+!     **  FROM PROJECTIONS <P|PSI> AND THE OCCUPATIONS                        **
+!     **                                                                      **
+!     **  FOR NDIM=2,NDIMD=4:  SPINOR WAVE FUNCTIONS                          **
+!     **  THE DENSITY MATRIX ON RETURN CONTAINS THE TOTAL DENSITY             **
+!     **  AND THE X,Y,Z SPIN DENSITY                                          **
+!     **                                                                      **
+!     **                                                                      **
+!     **  SUPERWAVE FUNCTIONS ARE DEFINED AS: PSI=PSI1+I*PSI2                 **
+!     **                                                                      **
+!     *******************************************P.E. BLOECHL, (1999)***********
+      IMPLICIT NONE
+      INTEGER(4),INTENT(IN) :: NDIM   ! #(SPINOR COMPONENTS)
+      INTEGER(4),INTENT(IN) :: NBH    ! #(WAVE FUNCTIONS
+      INTEGER(4),INTENT(IN) :: NB     ! #(STATES)
+      INTEGER(4),INTENT(IN) :: LMNX   ! #(PROJECTORS ON THIS SITE)
+      REAL(8)   ,INTENT(IN) :: OCC(NB)! OCCUPATIONS
+      COMPLEX(8),INTENT(IN) :: LAMBDA(NB,NB)   !LAGRANGE/F
+      COMPLEX(8),INTENT(IN) :: PROPSI(NDIM,NBH,LMNX) !<PRO|PSI>
+      COMPLEX(8),INTENT(OUT):: DENMAT(LMNX,LMNX,NDIM**2)
+      COMPLEX(8),INTENT(OUT):: EDENMAT(LMNX,LMNX,NDIM**2)
+      COMPLEX(8)            :: DENMAT1(LMNX,LMNX,NDIM,NDIM)
+      COMPLEX(8)            :: EDENMAT1(LMNX,LMNX,NDIM,NDIM)
+      COMPLEX(8)            :: FUNC(LMNX,NDIM)
+      COMPLEX(8)            :: LAGR(NB,NB)
+      LOGICAL(4)            :: TINV
+      LOGICAL(4)            :: TSUPER
+      INTEGER(4)            :: LMN1,LMN2,IDIM1,IDIM2,IB,IB1,IB2
+      REAL(8)               :: SVAR1,SVAR2
+      COMPLEX(8)            :: CSVAR,CFACR,CFACI,CFAC1,CFAC2
+      INTEGER(4)            :: IDIM,NDIMD
+      INTEGER(4)            :: NFILO
+      LOGICAL(4),PARAMETER  :: TPR=.FALSE.
+      COMPLEX(8),PARAMETER   :: CI=(0.D0,1.D0)
+!     **************************************************************************
+      NDIMD=NDIM**2
+      DENMAT(:,:,:)=(0.D0,0.D0)
+      EDENMAT(:,:,:)=(0.D0,0.D0)
+!
+!     ==========================================================================
+!     ==  CHECK IF SUPERWAVEFUNCTIONS ARE USED AND IF #(BANDS) CORRECT        ==
+!     ==========================================================================
+      CALL PLANEWAVE$GETL4('TINV',TINV)
+      CALL PLANEWAVE$GETL4('SUPER',TSUPER)
+      IF(TSUPER) THEN
+        IF(NBH.NE.NB) THEN
+          CALL ERROR$MSG('INCONSISTENT NUMBER OF BANDS')
+          CALL ERROR$STOP('WAVES_DENMAT')
+        END IF
+      ELSE IF(TINV) THEN
+        IF(NBH.NE.(NB+1)/2) THEN
+          CALL ERROR$MSG('INCONSISTENT NUMBER OF BANDS')
+          CALL ERROR$STOP('WAVES_DENMAT')
+        END IF
+      ELSE
+        IF(NBH.NE.NB) THEN
+          CALL ERROR$MSG('INCONSISTENT NUMBER OF BANDS')
+          CALL ERROR$STOP('WAVES_DENMAT')
+        END IF
+      END IF
+!
+!     ==========================================================================
+!     ==  SUM UP THE DENSITY MATRIX                                           ==
+!     ==========================================================================
+!     == SUPER WAVE FUNCTIONS FOR TINV=TRUE
+!     ==   <P|PSI1+I*PSI2>(F1+F2)/2<PSI1-I*PSI2|P>
+!     == + <P|PSI1+I*PSI2>(F1-F2)/2<PSI1+I*PSI2|P>
+!     == = <P|PSI1>F1<PSI1|P>+<P|PSI2>F2<PSI2|P>
+!     == + I[<P|PSI2>F1<PSI1|P>-<P|PSI1>F2<PSI2|P>]
+!     == IMAGINARY PART IS DROPPED
+!     == UNDER TSUPER (NBH=NB, NO PAIRING -- SEE LGAMMASUPER), PROPSI(:,IB,:)
+!     == IS ALREADY <P|ORBITAL_IB> FOR ONE INDEPENDENT ORBITAL (WAVES_PROJECTIONS
+!     == IS GENERIC IN NGL/NB, NO PACKING INVOLVED), SO THE TINV.AND.NBH.NE.NB
+!     == GATING BELOW ROUTES IT THROUGH THE SAME "GENERAL" MATH AS A PLAIN
+!     == (NON-TINV) K-POINT -- NO NEW BRANCH NEEDED, UNLIKE WAVES_EKIN/
+!     == WAVES_DENSITY WHICH OPERATE ON RAW HALF-SPHERE G-DATA DIRECTLY.
+      DENMAT1(:,:,:,:)=(0.D0,0.D0)
+      DO IB=1,NBH
+!       == FIND OCCUPATION OF THE STATE ========================================
+        IF(TINV.AND.NBH.NE.NB) THEN
+          SVAR1=0.5D0*(OCC(2*IB-1)+OCC(2*IB))
+          SVAR2=0.5D0*(OCC(2*IB-1)-OCC(2*IB))
+        ELSE
+          SVAR1=OCC(IB)
+        END IF
+        DO LMN1=1,LMNX
+          DO IDIM1=1,NDIM
+            IF(TINV.AND.NBH.NE.NB) THEN
+!             == FUNC=(F1+F2)/2<PSI1-I*PSI2|P>+(F1-F2)/2<PSI1+I*PSI2|P>
+              FUNC(LMN1,IDIM1)=SVAR1*CONJG(PROPSI(IDIM1,IB,LMN1)) &
+     &                        +SVAR2*PROPSI(IDIM1,IB,LMN1)
+            ELSE 
+              FUNC(LMN1,IDIM1)=SVAR1*CONJG(PROPSI(IDIM1,IB,LMN1))
+            END IF
+          ENDDO
+        ENDDO
+        DO LMN1=1,LMNX
+          DO LMN2=1,LMNX
+            DO IDIM1=1,NDIM
+              DO IDIM2=1,NDIM
+                DENMAT1(LMN1,LMN2,IDIM1,IDIM2)=DENMAT1(LMN1,LMN2,IDIM1,IDIM2) &
+     &                      +PROPSI(IDIM1,IB,LMN1)*FUNC(LMN2,IDIM2)
+              ENDDO
+            ENDDO
+          ENDDO
+        ENDDO
+      ENDDO
+!     == DENSITY MATRIX FOR REAL WAVE FUNCTIONS IS REAL. IMAGINARY PART
+!     == CONTAINS CRAP DUE TO SUPER WAVE FUNCTIONS
+      IF(TINV) THEN
+        DENMAT1(:,:,:,:)=REAL(DENMAT1(:,:,:,:),KIND=8)
+      END IF
+!
+!     ==========================================================================
+!     == NOW SUM UP EDENMAT  <P|PSITILDE>*LAMBDA*<PSITILDE|P>                 ==
+!     ==========================================================================
+      DO IB2=1,NB
+        LAGR(:,IB2)=LAMBDA(:,IB2)*OCC(IB2)
+      ENDDO
+      EDENMAT1(:,:,:,:)=(0.D0,0.D0)
+      IF(TINV.AND.NBH.NE.NB) THEN
+        DO IB1=1,NBH
+          FUNC(:,:)=(0.D0,0.D0)
+          DO IB2=1,NBH
+            CFACR=LAGR(2*IB1-1,2*IB2-1)+CI*LAGR(2*IB1,2*IB2-1)
+            CFACI=LAGR(2*IB1-1,2*IB2)+CI*LAGR(2*IB1,2*IB2)
+            CFAC1=0.5D0*(CFACR-CI*CFACI)
+            CFAC2=0.5D0*(CFACR+CI*CFACI)
+            DO IDIM=1,NDIM
+              FUNC(:,IDIM)=FUNC(:,IDIM)+CFAC1*PROPSI(IDIM,IB2,:) &
+     &                                 +CFAC2*CONJG(PROPSI(IDIM,IB2,:))
+            ENDDO
+          ENDDO
+          DO IDIM2=1,NDIM
+            DO IDIM1=1,NDIM
+              DO LMN2=1,LMNX
+                DO LMN1=1,LMNX
+                  EDENMAT1(LMN1,LMN2,IDIM1,IDIM2)=EDENMAT1(LMN1,LMN2,IDIM1,IDIM2) &
+     &                              +CONJG(PROPSI(IDIM1,IB1,LMN1))*FUNC(LMN2,IDIM2)
+                ENDDO
+              ENDDO
+            ENDDO
+          ENDDO
+        ENDDO
+      ELSE
+        DO IB1=1,NBH
+          DO IB2=1,NBH
+            DO IDIM=1,NDIM
+              FUNC(:,IDIM)=FUNC(:,IDIM)+LAGR(IB1,IB2)*CONJG(PROPSI(IDIM,IB2,:))
+            ENDDO
+          ENDDO
+          DO IDIM2=1,NDIM
+            DO IDIM1=1,NDIM
+              DO LMN2=1,LMNX
+                DO LMN1=1,LMNX
+                  EDENMAT1(LMN1,LMN2,IDIM1,IDIM2)=EDENMAT1(LMN1,LMN2,IDIM1,IDIM2) &
+     &                                 +PROPSI(IDIM1,IB1,LMN1)*FUNC(LMN2,IDIM2)
+                ENDDO
+              ENDDO
+            ENDDO
+          ENDDO
+        ENDDO
+      END IF
+!     == DENSITY MATRIX FOR REAL WAVE FUNCTIONS IS REAL AT A TINV K-POINT     ==
+!     == REGARDLESS OF WHETHER NBH-PACKING OR TSUPER IS IN USE (SAME PHYSICAL==
+!     == ARGUMENT AS DENMAT1 ABOVE) -- SO THIS IS GATED ON RAW TINV, NOT ON   ==
+!     == TINV.AND.NBH.NE.NB.                                                 ==
+      IF(TINV) THEN
+        EDENMAT1(:,:,:,:)=REAL(EDENMAT1(:,:,:,:),KIND=8)
+      END IF
+!
+!     ==========================================================================
+!     == MAP DENSITY MATRIX ONTO TOTAL AND SPIN DENSITY                       ==
+!     ==========================================================================
+      IF(NDIM.EQ.1) THEN  !== TOTAL DENSITY ====================================
+        DO LMN1=1,LMNX
+          DO LMN2=1,LMNX
+            DENMAT(LMN1,LMN2,1)=DENMAT1(LMN1,LMN2,1,1)
+            EDENMAT(LMN1,LMN2,1)=EDENMAT1(LMN1,LMN2,1,1)
+          ENDDO
+        ENDDO
+      ELSE IF(NDIM.EQ.2) THEN  !== TOTAL DENSITY, X,Y,Z SPIN DENSITY ===========
+        DO LMN1=1,LMNX
+          DO LMN2=1,LMNX
+            CSVAR=DENMAT1(LMN1,LMN2,1,1)+DENMAT1(LMN1,LMN2,2,2)
+            DENMAT(LMN1,LMN2,1) =CSVAR
+            CSVAR=DENMAT1(LMN1,LMN2,1,2)+DENMAT1(LMN1,LMN2,2,1)
+            DENMAT(LMN1,LMN2,2) =CSVAR
+!           == DENMAT=TR[SIGMA*DENMAT1]=SUM_{I,J} SIGMA_{I,J}*DENMAT{J,I}
+!           == HENCE THE MINUS SIGN FOR THE ANTISYMMETRIC SIGMA
+            CSVAR=CI*(DENMAT1(LMN1,LMN2,1,2)-DENMAT1(LMN1,LMN2,2,1))
+            DENMAT(LMN1,LMN2,3) =CSVAR
+            CSVAR=DENMAT1(LMN1,LMN2,1,1)-DENMAT1(LMN1,LMN2,2,2)
+            DENMAT(LMN1,LMN2,4) =CSVAR
+!
+            CSVAR=EDENMAT1(LMN1,LMN2,1,1)+EDENMAT1(LMN1,LMN2,2,2)
+            EDENMAT(LMN1,LMN2,1) =CSVAR
+            CSVAR=EDENMAT1(LMN1,LMN2,1,2)+EDENMAT1(LMN1,LMN2,2,1)
+            EDENMAT(LMN1,LMN2,2) =CSVAR
+            CSVAR=CI*(EDENMAT1(LMN1,LMN2,1,2)-EDENMAT1(LMN1,LMN2,2,1))
+            EDENMAT(LMN1,LMN2,3) =CSVAR
+            CSVAR=EDENMAT1(LMN1,LMN2,1,1)-EDENMAT1(LMN1,LMN2,2,2)
+            EDENMAT(LMN1,LMN2,4) =CSVAR
+          ENDDO
+        ENDDO
+      END IF
+!
+!     ==========================================================================
+!     == SYMMETRIZE DENSITY MATRIX (DENSITY MATRIX MUST BE HERMITEAN)         ==
+!     ==========================================================================
+      DO IDIM=1,NDIMD
+        DO LMN1=1,LMNX
+          DO LMN2=LMN1+1,LMNX
+            CSVAR=0.5D0*(DENMAT(LMN1,LMN2,IDIM)+CONJG(DENMAT(LMN2,LMN1,IDIM)))
+            DENMAT(LMN1,LMN2,IDIM)=CSVAR
+            DENMAT(LMN2,LMN1,IDIM)=CONJG(CSVAR)
+!
+            CSVAR=0.5D0*(EDENMAT(LMN1,LMN2,IDIM)+CONJG(EDENMAT(LMN2,LMN1,IDIM)))
+            EDENMAT(LMN1,LMN2,IDIM)=CSVAR
+            EDENMAT(LMN2,LMN1,IDIM)=CONJG(CSVAR)
+          ENDDO
+        ENDDO
+      ENDDO
+!
+!     ==========================================================================
+!     == SYMMETRIZE DENSITY MATRIX WITH RESPECT TO TIME INVERSION             ==
+!     == FOR COLLINEAR CALCULATIONS PSI(K)=CONJG(PSI(-K)). THEREFORE THE      ==                     
+!     == DENSITY MATRIX IS REAL AFTER SUMMING OVER K-POINTS. THIS IS NOT TRUE ==
+!     == FOR TRANSPORT CALCULATIONS. THIS SYMMETRY FAILS FRO SPIN-ORBIT       ==
+!     == AND NON-COLLINEAR CALCULATIONS WHERE AN EXPLICIT MAGNETIC FIELD      ==
+!     == IS PRESENT.
+!     ==========================================================================
+      IF(NDIM.EQ.1) THEN
+        DENMAT(:,:,1)=REAL(DENMAT(:,:,1),KIND=8)
+        EDENMAT(:,:,1)=REAL(EDENMAT(:,:,1),KIND=8)
+      END IF
+!
+!     ==========================================================================
+!     == PRINTOUT FOR TEST                                                    ==
+!     ==========================================================================
+      IF(TPR) THEN
+        CALL FILEHANDLER$UNIT('PROT',NFILO)
+        DO IDIM=1,NDIMD
+          WRITE(NFILO,FMT='("WAVES_DENMAT: DENMAT FOR IDIM= ",I2)') IDIM
+          DO LMN1=1,LMNX
+            WRITE(NFILO,FMT='(9F10.6)')REAL(DENMAT(LMN1,:LMNX,IDIM),KIND=8)
+          ENDDO
+        ENDDO
+        DO IB=1,NBH
+          WRITE(NFILO,FMT='("PROPSI",I5,50F10.6)')IB,PROPSI(1,IB,:LMNX)
+        ENDDO
+      END IF
+      RETURN
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WAVES$RHO(NRL,NDIMD_,RHO)
+!     **************************************************************************
+!     **  EVALUATES PSEUDO-DENSITY FROM THE ACTUAL PSEUDO WAVE                **
+!     **  FUNCTIONS                                                           **
+!     **                                                                      **
+!     **  RHO1 IS MADE ALLOCATABLE, BECAUSE IT IS TOO LARGE FOR THE STACK     **
+!     **                                                                      **
+!     ************P.E. BLOECHL, TU-CLAUSTHAL (2005)*****************************
+      USE MPE_MODULE
+      USE WAVES_MODULE
+      IMPLICIT NONE
+      INTEGER(4),INTENT(IN)  :: NRL
+      INTEGER(4),INTENT(IN)  :: NDIMD_
+      REAL(8)   ,INTENT(OUT) :: RHO(NRL,NDIMD_)
+      REAL(8)   ,ALLOCATABLE :: RHO1(:,:)    ! (NRL,NDIM**2)
+      INTEGER(4)             :: IKPT,ISPIN,IR
+      INTEGER(4)             :: NBX        
+      REAL(8)  ,ALLOCATABLE  :: OCC(:,:,:) 
+      REAL(8)                :: SVAR1,SVAR2
+!     **************************************************************************
+                              CALL TRACE$PUSH('WAVES$RHO')
+                              CALL TIMING$CLOCKON('W:RHO')
+      IF(NDIMD_.NE.NDIMD.OR.NRL.NE.MAP%NRL) THEN
+        CALL ERROR$MSG('ARRAY SIZE INCONSISTEN')
+        CALL ERROR$STOP('WAVES$RHO')
+      END IF
+!
+!     ==================================================================
+!     ==  GET OCCUPATIONS FROM DYNOCC OBJECT                          ==
+!     ==================================================================
+      CALL DYNOCC$GETI4('NB',NBX)
+      ALLOCATE(OCC(NBX,NKPTL,NSPIN))
+      CALL WAVES_DYNOCCGETR8A('OCC',NBX*NKPTL*NSPIN,OCC)
+!
+!     ==================================================================
+!     ==  CALCULATE DENSITY                                           ==
+!     ==================================================================
+      ALLOCATE(RHO1(NRL,NDIM**2))
+      RHO(:,:)=0.D0
+      DO IKPT=1,NKPTL
+        DO ISPIN=1,NSPIN
+          CALL WAVES_SELECTWV(IKPT,ISPIN)
+          CALL PLANEWAVE$SELECT(GSET%ID)
+          CALL WAVES_DENSITY(GSET%NGL,MAP%NRL,NDIM,THIS%NB,THIS%NBH &
+     &             ,OCC(1,IKPT,ISPIN),THIS%PSI0,RHO1)
+          IF(NDIM.EQ.1) THEN
+            RHO(:,ISPIN)=RHO(:,ISPIN)+RHO1(:,1)
+          ELSE
+            RHO=RHO+RHO1
+          END IF
+        ENDDO
+      ENDDO
+      DEALLOCATE(RHO1)
+!
+!     ===================================================================
+!     == CONVERT INTO TOTAL AND SPIN DENSITY                           ==
+!     ===================================================================
+      IF(NSPIN.EQ.2) THEN
+        DO IR=1,NRL
+          SVAR1=RHO(IR,1)
+          SVAR2=RHO(IR,2)
+          RHO(IR,1)=SVAR1+SVAR2   ! TOTAL DENSITY
+          RHO(IR,2)=SVAR1-SVAR2   ! SPIN DENSITY
+        ENDDO
+      END IF
+                              CALL TIMING$CLOCKOFF('W:RHO')
+                              CALL TRACE$POP
+      RETURN
+      END SUBROUTINE WAVES$RHO
+!
+!     ..................................................................
+      SUBROUTINE WAVES$TAU(NRL,NDIMD_,TAU)
+!     **************************************************************************
+!     **  SCAN0R: INTERSTITIAL KINETIC-ENERGY DENSITY, REAL (ORBITAL-TAU-      **
+!     **  BASED) SCAN-IN-PAW. LINE-FOR-LINE MIRROR OF WAVES$RHO ABOVE          **
+!     **  (READ FIRST), SUBSTITUTING WAVES_KINETICDENSITY                     **
+!     **  (paw_scankinden.f90) FOR WAVES_DENSITY. NOT YET CALLED FROM         **
+!     **  ANYWHERE -- SEE SCAN0r notes            **
+!     **                                                                      **
+!     **  SCOPE CUT, INHERITED FROM WAVES_KINETICDENSITY: NDIM=1 ONLY (NO     **
+!     **  NONCOLLINEAR SUPPORT), NO TINV (GAMMA-POINT REAL-WAVEFUNCTION       **
+!     **  TRICK) -- BOTH ALREADY GUARDED INSIDE WAVES_KINETICDENSITY ITSELF,  **
+!     **  SO NO REDUNDANT GUARD IS ADDED HERE.                                **
+!     **************************************************************************
+      USE MPE_MODULE
+      USE WAVES_MODULE
+      IMPLICIT NONE
+      INTEGER(4),INTENT(IN)  :: NRL
+      INTEGER(4),INTENT(IN)  :: NDIMD_
+      REAL(8)   ,INTENT(OUT) :: TAU(NRL,NDIMD_)
+      REAL(8)   ,ALLOCATABLE :: TAU1(:,:)    ! (NRL,NDIM**2)
+      INTEGER(4)             :: IKPT,ISPIN,IR
+      INTEGER(4)             :: NBX
+      REAL(8)  ,ALLOCATABLE  :: OCC(:,:,:)
+      REAL(8)                :: SVAR1,SVAR2
+!     **************************************************************************
+                              CALL TRACE$PUSH('WAVES$TAU')
+                              CALL TIMING$CLOCKON('W:TAU')
+      IF(NDIMD_.NE.NDIMD.OR.NRL.NE.MAP%NRL) THEN
+        CALL ERROR$MSG('ARRAY SIZE INCONSISTEN')
+        CALL ERROR$STOP('WAVES$TAU')
+      END IF
+!
+!     ==================================================================
+!     ==  GET OCCUPATIONS FROM DYNOCC OBJECT                          ==
+!     ==================================================================
+      CALL DYNOCC$GETI4('NB',NBX)
+      ALLOCATE(OCC(NBX,NKPTL,NSPIN))
+      CALL WAVES_DYNOCCGETR8A('OCC',NBX*NKPTL*NSPIN,OCC)
+!
+!     ==================================================================
+!     ==  CALCULATE KINETIC-ENERGY DENSITY                            ==
+!     ==================================================================
+      ALLOCATE(TAU1(NRL,NDIM**2))
+      TAU(:,:)=0.D0
+      DO IKPT=1,NKPTL
+        DO ISPIN=1,NSPIN
+          CALL WAVES_SELECTWV(IKPT,ISPIN)
+          CALL PLANEWAVE$SELECT(GSET%ID)
+          CALL WAVES_KINETICDENSITY(GSET%NGL,MAP%NRL,NDIM,THIS%NB,THIS%NBH &
+     &             ,OCC(1,IKPT,ISPIN),THIS%PSI0,TAU1)
+          IF(NDIM.EQ.1) THEN
+            TAU(:,ISPIN)=TAU(:,ISPIN)+TAU1(:,1)
+          ELSE
+            TAU=TAU+TAU1
+          END IF
+        ENDDO
+      ENDDO
+      DEALLOCATE(TAU1)
+!
+!     ===================================================================
+!     == CONVERT INTO TOTAL AND SPIN KINETIC-ENERGY DENSITY (SAME (T,Z) ==
+!     == CONVENTION AS RHO ABOVE, AND AS THE ONSITE TAU_ALL/TAU_T/TAU_Z ==
+!     ===================================================================
+      IF(NSPIN.EQ.2) THEN
+        DO IR=1,NRL
+          SVAR1=TAU(IR,1)
+          SVAR2=TAU(IR,2)
+          TAU(IR,1)=SVAR1+SVAR2   ! TOTAL TAU
+          TAU(IR,2)=SVAR1-SVAR2   ! SPIN TAU
+        ENDDO
+      END IF
+                              CALL TIMING$CLOCKOFF('W:TAU')
+                              CALL TRACE$POP
+      RETURN
+      END SUBROUTINE WAVES$TAU
+!
+!     ..................................................................
+      SUBROUTINE WAVES$MOMENTS(NAT,LMRXX,NDIMD_,LMNXX,DENMAT,QLM)
+!     ******************************************************************
+!     **                                                              **
+!     **  EVALUATES MULTIPOLE MOMENTS OF THE ONE-CENTER DENSITY       **
+!     **                                                              **
+!     ************P.E. BLOECHL, TU-CLAUSTHAL (2005)*********************
+      USE MPE_MODULE
+      USE WAVES_MODULE
+      IMPLICIT NONE
+      INTEGER(4),INTENT(IN)  :: LMRXX
+      INTEGER(4),INTENT(IN)  :: NAT
+      INTEGER(4),INTENT(IN)  :: LMNXX
+      INTEGER(4),INTENT(IN)  :: NDIMD_
+      COMPLEX(8),INTENT(IN)  :: DENMAT(LMNXX,LMNXX,NDIMD,NAT)
+      REAL(8)   ,INTENT(OUT) :: QLM(LMRXX,NAT)
+      INTEGER(4)             :: ISP
+      INTEGER(4)             :: IAT
+      INTEGER(4)             :: LMNX
+      INTEGER(4)             :: LMRX
+      INTEGER(4)             :: NTASKS,THISTASK
+      COMPLEX(8),ALLOCATABLE :: DENMAT1(:,:)
+!     ******************************************************************
+                              CALL TRACE$PUSH('WAVES$MOMENTS')
+                              CALL TIMING$CLOCKON('W:MOMENTS')
+      IF(NDIMD_.NE.NDIMD.OR.NAT.NE.MAP%NAT) THEN
+        CALL ERROR$MSG('ARRAY SIZE INCONSISTEN')
+        CALL ERROR$STOP('WAVES$RHO')
+      END IF
+!
+!     ==================================================================
+!     ==                                                              ==
+!     ==================================================================
+!     == DENMAT IS IDENTICAL AND COMPLETE ON EACH PROCESS OF A MONOMER
+      CALL MPE$QUERY('MONOMER',NTASKS,THISTASK)
+      QLM(:,:)=0.D0
+      DO IAT=THISTASK,NAT,NTASKS   ! DISTRIBUTE WORK ACCROSS TASKS
+        ISP=MAP%ISP(IAT)
+        CALL SETUP$ISELECT(ISP)
+        LMNX=MAP%LMNX(ISP)
+        CALL SETUP$GETI4('LMRX',LMRX) !FORMER CALL SETUP$LMRX(ISP,LMRX)
+        CALL SETUP$ISELECT(0)
+        ALLOCATE(DENMAT1(LMNX,LMNX))
+        DENMAT1(:,:)=DENMAT(1:LMNX,1:LMNX,1,IAT)
+!       ==  SETUP MUST BE UNSELECTED BEFORE CALLING AUGMENTATION$MOMENTS
+        CALL AUGMENTATION$MOMENTS(ISP,LMNX,DENMAT1,LMRX,QLM(1,IAT))
+        DEALLOCATE(DENMAT1)
+      ENDDO
+      CALL MPE$COMBINE('MONOMER','+',QLM)
+                              CALL TIMING$CLOCKOFF('W:MOMENTS')
+                              CALL TRACE$POP
+      RETURN
+      END SUBROUTINE WAVES$MOMENTS
+
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WAVES$SPINS(NRL,NDIMD,RHO,NAT,LMNXX,DENMAT)
+!      USE WAVES_MODULE, ONLY : MAP 
+      USE MPE_MODULE
+      USE PERIODICTABLE_MODULE
+      IMPLICIT NONE
+      INTEGER(4),INTENT(IN) :: NRL
+      INTEGER(4),INTENT(IN) :: NDIMD
+      INTEGER(4),INTENT(IN) :: NAT
+      INTEGER(4),INTENT(IN) :: LMNXX
+      REAL(8)   ,INTENT(IN) :: RHO(NRL,NDIMD)      
+      COMPLEX(8),INTENT(IN) :: DENMAT(LMNXX,LMNXX,NDIMD,NAT)
+      INTEGER(4)            :: NTASKS,THISTASK
+      REAL(8)               :: PSSPIN(3)
+      REAL(8)               :: AUGSPIN(3)
+      REAL(8)               :: TOTSPIN(3)
+      INTEGER(4)            :: GID     ! GRID ID FOR RADIAL GRID
+      INTEGER(4)            :: NR      ! #(RADIAL GRID POINTS)
+      REAL(8)   ,ALLOCATABLE:: R(:)    ! RADIAL GRID
+      REAL(8)               :: RBAS(3,3),GBAS(3,3),CELLVOL
+      INTEGER(4)            :: IAT
+      REAL(8)               :: AEZ     ! ATOMIC NUMBER
+      INTEGER(4)            :: ISP
+      INTEGER(4)            :: LNX
+      INTEGER(4),ALLOCATABLE:: LOX(:)
+      REAL(8)   ,ALLOCATABLE:: DOVER(:,:)
+      INTEGER(4)            :: L1,L2,LN1,LN2,LMN1,LMN2,M,IDIMD
+      REAL(8)               :: CM(NDIMD,NAT)
+      REAL(8)               :: CM1(NDIMD)   ! CHARGE AND MOMENT
+      REAL(8)   ,ALLOCATABLE:: WORK(:), WORK1(:)
+      REAL(8)   ,ALLOCATABLE:: AEPHI(:,:)
+      REAL(8)               :: RAD  !APPROXIMATE ASA RADIUS OF THE ATOM
+      INTEGER(4)            :: NFILO
+!     **************************************************************************
+                            CALL TRACE$PUSH('WAVES$SPINS')
+      CALL MPE$QUERY('MONOMER',NTASKS,THISTASK)
+!
+!     ==========================================================================
+!     ==  DETERMINE SPINS ON THE INDIVIDUAL ATOMS                             ==
+!     ==========================================================================
+      CM(:,:)=0.D0
+      DO IAT=1,NAT
+        IF(MOD(IAT-1,NTASKS)+1.NE.THISTASK)  CYCLE
+        CALL ATOMLIST$GETI4('ISPECIES',IAT,ISP)
+        CALL SETUP$ISELECT(ISP)
+        CALL SETUP$GETI4('LNX',LNX) !FORMER CALL SETUP$LNX(ISP,LNX)
+        ALLOCATE(LOX(LNX))
+        CALL SETUP$GETI4A('LOX',LNX,LOX) !FORMER CALL SETUP$LOFLN(ISP,LNX,LOX)
+        CALL SETUP$GETR8('AEZ',AEZ)
+        CALL PERIODICTABLE$GET(AEZ,'R(ASA)',RAD)
+!
+!       ========================================================================
+!       ==  DETERMINE OVERLAP OF PARTIALWAVES WITHIN ASA SPHERE               ==
+!       ========================================================================
+        CALL SETUP$GETI4('GID',GID)
+        CALL RADIAL$GETI4(GID,'NR',NR)
+        ALLOCATE(R(NR))
+        CALL RADIAL$R(GID,NR,R)
+        ALLOCATE(AEPHI(NR,LNX))
+        CALL SETUP$GETR8A('AEPHI',NR*LNX,AEPHI)
+                             !FORMER CALL SETUP$AEPARTIALWAVES(ISP,NR,LNX,AEPHI)
+        ALLOCATE(DOVER(LNX,LNX))
+        ALLOCATE(WORK(NR))
+        ALLOCATE(WORK1(NR))
+        DOVER(:,:)=0.D0
+        DO LN1=1,LNX
+          DO LN2=LN1,LNX
+            IF(LOX(LN1).NE.LOX(LN2)) CYCLE
+            WORK(:)=AEPHI(:,LN1)*AEPHI(:,LN2)*R(:)**2
+            CALL RADIAL$INTEGRATE(GID,NR,WORK,WORK1)
+            CALL RADIAL$VALUE(GID,NR,WORK1,RAD,DOVER(LN1,LN2))
+            DOVER(LN2,LN1)=DOVER(LN1,LN2)
+          ENDDO
+        ENDDO
+        DEALLOCATE(WORK1)
+        DEALLOCATE(WORK)
+        DEALLOCATE(AEPHI)
+        DEALLOCATE(R)
+!
+!       ========================================================================
+!       ==  DETERMINE CHARGE AND SPIN PROJECTIONS                             ==
+!       ========================================================================
+        CM1(:)=0.D0
+        LMN1=0
+        DO LN1=1,LNX
+          L1=LOX(LN1)
+          LMN2=0
+          DO LN2=1,LNX
+            L2=LOX(LN2)
+            IF(L1.EQ.L2) THEN
+              DO M=1,2*L1+1
+                CM1(:)=CM1(:)+REAL(DENMAT(LMN1+M,LMN2+M,:,IAT))*DOVER(LN1,LN2)
+              ENDDO
+            END IF
+            LMN2=LMN2+2*L2+1
+          ENDDO
+          LMN1=LMN1+2*L1+1
+        ENDDO
+        CM(:,IAT)=CM(:,IAT)+CM1(:)
+        DEALLOCATE(LOX)
+        DEALLOCATE(DOVER)
+        CALL SETUP$ISELECT(0)
+      ENDDO
+      CALL MPE$COMBINE('MONOMER','+',CM)
+      CALL ATOMLIST$SETR8A('CHARGEANDMOMENTS',0,4*NAT,CM)
+                                   CALL TRACE$POP()
+RETURN
+
+!
+!     ==========================================================================
+!     ==  DETERMINE TOTAL MAGNETIZATION AS INTEGRATED MOMENT DENSITY          ==
+!     ==========================================================================
+      PSSPIN(:)=0.D0
+      IF(NDIMD.EQ.2) THEN
+        PSSPIN(3)=SUM(RHO(:,2))
+      ELSE IF(NDIMD.EQ.4) THEN
+        PSSPIN(1)=SUM(RHO(:,2))
+        PSSPIN(2)=SUM(RHO(:,3))
+        PSSPIN(3)=SUM(RHO(:,4))
+      END IF
+      CALL MPE$COMBINE('MONOMER','+',PSSPIN)
+      NR=NRL
+      CALL MPE$COMBINE('MONOMER','+',NR)
+      CALL CELL$GETR8A('T0',9,RBAS)
+      CALL GBASS(RBAS,GBAS,CELLVOL)
+      PSSPIN(:)=PSSPIN(:)*CELLVOL/REAL(NR,KIND=8)
+!
+!     ==========================================================================
+!     ==  DETERMINE AUGMENTATION PART OF THE SPIN DENSITY                     ==
+!     ==========================================================================
+      AUGSPIN(:)=0.D0
+      DO IAT=1,NAT
+        IF(MOD(IAT-1,NTASKS)+1.NE.THISTASK)  CYCLE
+        CALL ATOMLIST$GETI4('ISPECIES',IAT,ISP)
+        CALL SETUP$ISELECT(ISP)
+        CALL SETUP$GETI4('LNX',LNX) !FORMER CALL SETUP$LNX(ISP,LNX)
+        ALLOCATE(LOX(LNX))
+        CALL SETUP$GETI4A('LOX',LNX,LOX) !FORMER CALL SETUP$LOFLN(ISP,LNX,LOX)
+        ALLOCATE(DOVER(LNX,LNX))
+        CALL SETUP$GETR8A('DO',LNX*LNX,DOVER)
+                                     !FORMER CALL SETUP$1COVERLAP(ISP,LNX,DOVER)
+        LMN1=0
+        DO LN1=1,LNX
+          L1=LOX(LN1)
+          LMN2=0
+          DO LN2=1,LNX
+            L2=LOX(LN2)
+            IF(L1.EQ.L2) THEN
+              DO M=1,2*L1+1
+                IF(NDIMD.EQ.2) THEN
+                  AUGSPIN(3)=AUGSPIN(3)+REAL(DENMAT(LMN1+M,LMN2+M,2,IAT))*DOVER(LN1,LN2)
+                ELSE IF(NDIMD.EQ.4) THEN
+                  AUGSPIN(1)=AUGSPIN(1)+REAL(DENMAT(LMN1+M,LMN2+M,2,IAT))*DOVER(LN1,LN2)
+                  AUGSPIN(2)=AUGSPIN(2)+REAL(DENMAT(LMN1+M,LMN2+M,3,IAT))*DOVER(LN1,LN2)
+                  AUGSPIN(3)=AUGSPIN(3)+REAL(DENMAT(LMN1+M,LMN2+M,4,IAT))*DOVER(LN1,LN2)
+                END IF
+              ENDDO
+            END IF
+            LMN2=LMN2+2*L2+1
+          ENDDO
+          LMN1=LMN1+2*L1+1
+        ENDDO
+        DEALLOCATE(LOX)
+        DEALLOCATE(DOVER)
+      ENDDO
+      CALL SETUP$ISELECT(0)
+      CALL MPE$COMBINE('MONOMER','+',AUGSPIN)
+!
+!     ==========================================================================
+!     ==  REPORT TOTAL SPIN                                                   ==
+!     ==========================================================================
+      TOTSPIN=PSSPIN+AUGSPIN
+      CALL FILEHANDLER$UNIT('PROT',NFILO)
+      WRITE(NFILO,FMT='("ABS.VALUE OF INTEGRATED SPIN MOMENT DENSITY",F10.5)') &
+     &                 SQRT(SUM(TOTSPIN(:)**2))
+      WRITE(NFILO,FMT='("DIRECTION OF INTEGRATED SPIN MOMENT DENSITY",3F10.5)')&
+     &                 TOTSPIN/SQRT(SUM(TOTSPIN(:)**2))
+                                   CALL TRACE$POP()
+      RETURN
+      END
+
+!
+!     ..................................................................
+      SUBROUTINE WAVES$SPHERE(LMNXX,NDIMD_,NAT,LMRXX,RHOB,DENMAT,EDENMAT &
+     &                       ,VQLM,DH,DO,POTB)
+!     ******************************************************************
+!     **                                                              **
+!     **  EVALUATES ONE-CENTER HAMILTONIAN AN OVERLAPMATRIX           **
+!     **                                                              **
+!     **  ONE-CENTER DENSITY MATRICES                                 **
+!     **  SPIN RESTRICTED NSPIN=1;NDIM=1: (TOTAL)                     **
+!     **  SPIN POLARIZED  NSPIN=2;NDIM=1: (TOTAL,SPIN_Z)              **
+!     **  NONCOLLINEAR    NSPIN=1;NDIM=2: (TOTAL,SPIN_X,SPIN_Y,SPIN_Z)**
+!     **                                                              **
+!     **  ON RETURN, POTB IS MINUS THE AVERAGED ELECTROSTATIC         **
+!     **  POTENTIAL FROM THE AUGMENTATION,                            **
+!     **  I.E. -(AEPOTHARTREE-(PSPOTHARTREE-VADD))                    **
+!     **                                                              **
+!     ************P.E. BLOECHL, TU-CLAUSTHAL (2005)*********************
+      USE MPE_MODULE
+      USE WAVES_MODULE
+      IMPLICIT NONE
+      INTEGER(4),INTENT(IN)  :: LMNXX
+      INTEGER(4),INTENT(IN)  :: NDIMD_
+      INTEGER(4),INTENT(IN)  :: NAT    
+      INTEGER(4),INTENT(IN)  :: LMRXX
+      REAL(8)   ,INTENT(IN)  :: RHOB
+      COMPLEX(8),INTENT(IN)  :: DENMAT(LMNXX,LMNXX,NDIMD_,NAT)
+      COMPLEX(8),INTENT(IN)  :: EDENMAT(LMNXX,LMNXX,NDIMD,NAT)
+      REAL(8)   ,INTENT(INOUT):: VQLM(LMRXX,NAT)
+      COMPLEX(8),INTENT(OUT) :: DH(LMNXX,LMNXX,NDIMD_,NAT)
+      REAL(8)   ,INTENT(OUT) :: DO(LMNXX,LMNXX,NDIMD_,NAT)
+      REAL(8)   ,INTENT(OUT) :: POTB 
+      REAL(8)                :: POTB1
+      INTEGER(4)             :: ISP   ! SPECIES INDEX
+      INTEGER(4)             :: IAT   ! 
+      INTEGER(4)             :: LMNX  ! 
+      INTEGER(4)             :: LMRX  ! 
+      INTEGER(4)             :: NTASKS,THISTASK
+      COMPLEX(8),ALLOCATABLE :: DENMAT1(:,:,:)
+      COMPLEX(8),ALLOCATABLE :: EDENMAT1(:,:,:)
+      COMPLEX(8),ALLOCATABLE :: DH1(:,:,:)  !(LMNX,LMNX,NDIMD)
+      REAL(8)   ,ALLOCATABLE :: DOV1(:,:,:) !(LMNX,LMNX,NDIMD)
+      REAL(8)                :: RBAS(3,3)
+      REAL(8)                :: GBAS(3,3)
+      REAL(8)                :: SVAR
+!     == SCAN0R DAV+ANDERSON INSTABILITY DIAGNOSTIC, WAVES$SPHERE SIDE          ==
+!     == (2026-09-10): SAME OPT-IN ENV VAR AS THE LMTO$ETOT-SIDE MAX-ABS        ==
+!     == DIAGNOSTIC (VESPAW_SCAN0R_SWAP_DIAG, SRC/VESPAW_LMTO.F90) -- TRACKS    ==
+!     == THE MAX-ABS ELEMENT (AND WHICH ATOM) OF THIS ROUTINE'S OWN, SEPARATE   ==
+!     == CONTRIBUTION TO DH (DH=DH(WAVES$SPHERE)+DH1(LMTO$ETOT)), SINCE ONLY    ==
+!     == THE LMTO$ETOT SIDE HAS BEEN TRACED SO FAR AND IT IS THE SMALLER OF     ==
+!     == THE TWO TERMS. LOCAL-TASK-ONLY (NOT MPE-COMBINED): CORRECT FOR THE     ==
+!     == SINGLE-MPI-TASK/OPENMP-ONLY TEST HARNESS THIS IS BUILT AGAINST.        ==
+      LOGICAL(4),SAVE        :: TSPHEREDIAGCHECKED=.FALSE.
+      LOGICAL(4),SAVE        :: TSPHEREDIAG=.FALSE.
+      CHARACTER(16)          :: CENVSPHEREDIAG
+      REAL(8)                :: DHNORM,MAXDH1,SVARMAX1
+      INTEGER(4)             :: IATMAXDH1
+      REAL(8)                :: MAXDENMAT1,SVARMAX2
+      INTEGER(4)             :: IATMAXDENMAT1
+!     ******************************************************************
+      IF(.NOT.TSPHEREDIAGCHECKED) THEN
+        CALL GET_ENVIRONMENT_VARIABLE('VESPAW_SCAN0R_SWAP_DIAG',CENVSPHEREDIAG)
+        TSPHEREDIAG=(LEN_TRIM(CENVSPHEREDIAG).GT.0)
+        TSPHEREDIAGCHECKED=.TRUE.
+        IF(TSPHEREDIAG) THEN
+          PRINT*,'VESPAW_SCAN0R_SWAP_DIAG SET -- ALSO TRACKING WAVES$SPHERE''S' &
+     &          ,' OWN DH CONTRIBUTION (MAX-ABS ELEMENT PER ATOM)'
+        END IF
+      END IF
+      DHNORM=0.D0
+      MAXDH1=0.D0
+      IATMAXDH1=0
+      MAXDENMAT1=0.D0
+      IATMAXDENMAT1=0
+                              CALL TRACE$PUSH('WAVES$SPHERE')
+                              CALL TIMING$CLOCKON('W:SPHERE')
+      IF(NDIMD_.NE.NDIMD.OR.NAT.NE.MAP%NAT) THEN
+        CALL ERROR$MSG('ARRAY SIZE INCONSISTENT')
+        CALL ERROR$STOP('WAVES$DENMAT')
+      END IF
+!
+!     ===================================================================
+!     ==  EVALUATE ONE-CENTER HAMILTONIAN                              ==
+!     ===================================================================
+      DH(:,:,:,:)=(0.D0,0.D0)
+      DO(:,:,:,:)=0.D0
+      CALL MPE$QUERY('MONOMER',NTASKS,THISTASK)
+      POTB=0
+      DO IAT=THISTASK,NAT,NTASKS   ! DISTRIBUTE WORK ACCROSS TASKS
+        ISP=MAP%ISP(IAT)
+        LMNX=MAP%LMNX(ISP)
+        CALL SETUP$ISELECT(ISP)
+        CALL SETUP$GETI4('LMRX',LMRX) !FORMER CALL SETUP$LMRX(ISP,LMRX)
+        CALL SETUP$UNSELECT()
+        ALLOCATE(DENMAT1(LMNX,LMNX,NDIMD))
+        ALLOCATE(EDENMAT1(LMNX,LMNX,NDIMD))
+        DENMAT1(:,:,:)=DENMAT(1:LMNX,1:LMNX,:,IAT)
+        EDENMAT1(:,:,:)=EDENMAT(1:LMNX,1:LMNX,:,IAT)
+        IF(TSPHEREDIAG) THEN
+          SVARMAX2=MAXVAL(ABS(DENMAT1))
+          IF(SVARMAX2.GT.MAXDENMAT1) THEN
+            MAXDENMAT1=SVARMAX2
+            IATMAXDENMAT1=IAT
+          END IF
+        END IF
+        ALLOCATE(DH1(LMNX,LMNX,NDIMD))
+        ALLOCATE(DOV1(LMNX,LMNX,NDIMD))
+        CALL AUGMENTATION$SPHERE(ISP,IAT,LMNX,NDIMD,DENMAT1,EDENMAT1 &
+     &               ,LMRX,VQLM(1,IAT),RHOB,POTB1,DH1,DOV1)
+        POTB=POTB+POTB1
+        DH(1:LMNX,1:LMNX,:,IAT)=DH1(:,:,:)
+        DO(1:LMNX,1:LMNX,:,IAT)=DOV1(:,:,:)
+        IF(TSPHEREDIAG) THEN
+          DHNORM=DHNORM+SUM(ABS(DH1)**2)
+          SVARMAX1=MAXVAL(ABS(DH1))
+          IF(SVARMAX1.GT.MAXDH1) THEN
+            MAXDH1=SVARMAX1
+            IATMAXDH1=IAT
+          END IF
+        END IF
+        DEALLOCATE(DH1)
+        DEALLOCATE(DOV1)
+        DEALLOCATE(DENMAT1)
+        DEALLOCATE(EDENMAT1)
+      END DO
+      IF(TSPHEREDIAG) THEN
+        PRINT*,'SCAN0R SWAP DIAG WAVES$SPHERE: ||DH_SPHERE||=',SQRT(DHNORM) &
+     &        ,' MAX|DH_SPHERE|=',MAXDH1,' AT IAT=',IATMAXDH1
+        PRINT*,'SCAN0R SWAP DIAG DENMAT1: MAX|DENMAT1|=',MAXDENMAT1 &
+     &        ,' AT IAT=',IATMAXDENMAT1
+      END IF
+      CALL MPE$COMBINE('MONOMER','+',DH)
+      CALL MPE$COMBINE('MONOMER','+',DO)
+      CALL MPE$COMBINE('MONOMER','+',POTB)
+!
+!     ===================================================================
+!     ==                                                               ==
+!     ===================================================================
+      CALL CELL$GETR8A('T0',9,RBAS)
+      CALL GBASS(RBAS,GBAS,SVAR)
+      POTB=POTB/SVAR
+      CALL AUGMENTATION$SYNC
+                              CALL TIMING$CLOCKOFF('W:SPHERE')
+                              CALL TRACE$POP
+      RETURN
+      END SUBROUTINE WAVES$SPHERE
+!
+!     ..................................................................
+      SUBROUTINE WAVES$ADDCONSTANTPOT(NRL,LMNXX,NDIMD_,NAT,POTB,RHO,DH,DO)
+!     ******************************************************************
+!     **                                                              **
+!     **  ADDS A CONSTANT POTENTIAL TO ENSURE THAT THE AVERAGED       **
+!     **  ELECTROSTATIC POTENTIAL IS ZERO.                            **
+!     **                                                              **
+!     **  POTB IS MINUS THE INTEGRATED ELECTROSTATIC POTENTIAL FROM   **
+!     **  THE AUGMENTATION AVERAGED OVER THE UNIT CELL                **
+!     **                                                              **
+!     ************P.E. BLOECHL, TU-CLAUSTHAL (2005)*********************
+      USE MPE_MODULE
+      USE WAVES_MODULE
+      IMPLICIT NONE
+      INTEGER(4),INTENT(IN)   :: NRL
+      REAL(8)   ,INTENT(IN)   :: POTB
+      INTEGER(4),INTENT(IN)   :: LMNXX
+      INTEGER(4),INTENT(IN)   :: NDIMD_
+      INTEGER(4),INTENT(IN)   :: NAT
+      REAL(8)   ,INTENT(IN)   :: DO(LMNXX,LMNXX,NDIMD_,NAT)
+      COMPLEX(8),INTENT(INOUT):: DH(LMNXX,LMNXX,NDIMD_,NAT)
+      REAL(8)   ,INTENT(INOUT):: RHO(NRL,NDIMD_)
+      INTEGER(4)              :: ISP
+      INTEGER(4)              :: IAT
+      INTEGER(4)              :: LMN1,LMN2
+      INTEGER(4)              :: LN1,LN2
+      INTEGER(4)              :: L1,L2,M
+!     ******************************************************************
+                              CALL TRACE$PUSH('WAVES$ADDCONSTANTPOT')
+                              CALL TIMING$CLOCKON('W:ADDCONSTANTPOT')
+      RHO(:,1)=RHO(:,1)+POTB
+      DO IAT=1,NAT
+        ISP=MAP%ISP(IAT)
+        LMN1=0
+        DO LN1=1,MAP%LNX(ISP)
+          L1=MAP%LOX(LN1,ISP)
+          LMN2=0
+          DO LN2=1,MAP%LNX(ISP)
+            L2=MAP%LOX(LN2,ISP)
+            IF(L2.EQ.L1) THEN
+              DO M=1,2*L1+1
+                DH(LMN1+M,LMN2+M,1,IAT)=DH(LMN1+M,LMN2+M,1,IAT) &
+     &                               +CMPLX(POTB*DO(LMN1+M,LMN2+M,1,IAT),KIND=8)
+              ENDDO
+            END IF
+            LMN2=LMN2+2*L2+1
+          ENDDO
+          LMN1=LMN1+2*L1+1
+        ENDDO
+      ENDDO
+                              CALL TIMING$CLOCKOFF('W:ADDCONSTANTPOT')
+                              CALL TRACE$POP
+      RETURN
+      END SUBROUTINE WAVES$ADDCONSTANTPOT
+!
+!     ...................................................................
+      SUBROUTINE WAVES$FORCE(NAT,LMNXX,NDIMD_,DH,FORCE,STRESS)
+!     ******************************************************************
+!     **                                                              **
+!     **  EVALUATES FORCES FROM THE AUGMENTATION PART                 **
+!     **                                                              **
+!     ************P.E. BLOECHL, TU-CLAUSTHAL (2005)*********************
+      USE MPE_MODULE
+      USE WAVES_MODULE
+      IMPLICIT NONE
+      INTEGER(4),INTENT(IN)  :: NAT
+      INTEGER(4),INTENT(IN)  :: LMNXX
+      INTEGER(4),INTENT(IN)  :: NDIMD_
+      COMPLEX(8),INTENT(IN)  :: DH(LMNXX,LMNXX,NDIMD,NAT)
+      REAL(8)   ,INTENT(OUT) :: FORCE(3,NAT)
+      REAL(8)   ,INTENT(OUT) :: STRESS(3,3)
+      INTEGER(4)             :: IKPT,ISPIN
+      LOGICAL(4)             :: TSTRESS     ! CALCLUATE STRESSES OR NOT
+      INTEGER(4)             :: NBX
+      REAL(8)                :: GWEIGHT    
+      REAL(8)   ,ALLOCATABLE :: OCC(:,:,:)  ! (NBX,NKPTL,NSPIN)    
+      LOGICAL(4)             :: TINV        ! SUPER WAVE FUNCTIONS OR NOT
+      INTEGER(4)             :: NB          ! #(WAVE FUNCTIONS)
+      INTEGER(4)             :: NBH         ! #(SUPER WAVE FUNCTIONS)
+      INTEGER(4)             :: NGL         ! LOCAL #(G-VECTORS) 
+      INTEGER(4)             :: IJ,I,J,IPRO,ISP,IAT,IBPRO,LMNX,LNX,IG
+      REAL(8)   ,ALLOCATABLE :: GVEC(:,:)   ! (3,NGL)    
+      REAL(8)   ,ALLOCATABLE :: GIJ(:,:)    ! (6,NGL)    
+      REAL(8)   ,ALLOCATABLE :: DO1(:,:)    ! (LNX,LNX)    
+      COMPLEX(8),ALLOCATABLE :: DH1(:,:,:)  ! (LMNX,LMNX,NDIM**2)    
+      COMPLEX(8),ALLOCATABLE :: DEDPROJ(:,:,:) ! (NDIM,NBH,LMNX)
+      COMPLEX(8),ALLOCATABLE :: DEDPRO(:,:) ! (NGL,LMNX)
+      COMPLEX(8),ALLOCATABLE :: EIGR(:)     ! (NGL)
+      REAL(8)                :: FORCE1(3)
+      REAL(8)                :: STRESS1(3,3)
+      REAL(8)                :: SVAR
+      REAL(8)                :: R(3,NAT)
+      REAL(8)   ,PARAMETER   :: RSMALL=1.D-20
+!     ******************************************************************
+                              CALL TRACE$PUSH('WAVES$FORCE')
+                              CALL TIMING$CLOCKON('W:FORCE')
+      IF(NDIMD_.NE.NDIMD.OR.NAT.NE.MAP%NAT) THEN
+        CALL ERROR$MSG('ARRAY SIZE INCONSISTENT')
+        CALL ERROR$STOP('WAVES$FORCE')
+      END IF
+      IF(NDIMD.NE.NSPIN*NDIM**2) THEN
+        CALL ERROR$MSG('VALUE OF NDIMD INCONSISTENT WITH ITS DEFINITION')
+        CALL ERROR$STOP('WAVES$FORCE')
+      END IF
+!
+!     ==================================================================
+!     ==  GET OCCUPATIONS FROM DYNOCC OBJECT                          ==
+!     ==================================================================
+      CALL CELL$GETL4('MOVE',TSTRESS)
+      TSTRESS=TSTRESS.OR.TSTRESSX   ! STRESS=T: STRESS ALSO FOR A FIXED CELL
+      CALL DYNOCC$GETI4('NB',NBX)
+      ALLOCATE(OCC(NBX,NKPTL,NSPIN))
+      CALL WAVES_DYNOCCGETR8A('OCC',NBX*NKPTL*NSPIN,OCC)
+      CALL ATOMLIST$GETR8A('R(0)',0,3*NAT,R)
+!
+!     ===================================================================
+!     ==                                                               ==
+!     ===================================================================
+      FORCE(:,:)=0.D0
+      STRESS(:,:)=0.D0
+      DO IKPT=1,NKPTL
+        DO ISPIN=1,NSPIN
+          CALL WAVES_SELECTWV(IKPT,ISPIN)
+          CALL PLANEWAVE$SELECT(GSET%ID)
+          CALL PLANEWAVE$GETL4('TINV',TINV)
+          CALL PLANEWAVE$GETR8('GWEIGHT',GWEIGHT)
+          NB=THIS%NB
+          NBH=THIS%NBH
+          NGL=GSET%NGL
+!
+!         ===============================================================
+!         ==                                                           ==
+!         ===============================================================
+          ALLOCATE(GVEC(3,NGL))
+          CALL PLANEWAVE$GETR8A('GVEC',3*NGL,GVEC)
+          ALLOCATE(GIJ(6,NGL))
+          IF(TSTRESS) THEN
+            DO IG=1,NGL
+              SVAR=GVEC(1,IG)**2+GVEC(2,IG)**2+GVEC(3,IG)**2
+              SVAR=1.D0/(SVAR+RSMALL)
+              IJ=0
+              DO I=1,3
+                DO J=I,3
+                  IJ=IJ+1
+                  GIJ(IJ,IG)=GVEC(I,IG)*GVEC(J,IG)*SVAR
+                ENDDO
+              ENDDO
+            ENDDO
+          ELSE
+            GIJ(:,:)=0.D0
+          END IF
+!
+!         ======================================================================
+!         ==                                                                  ==
+!         ======================================================================
+          IPRO=1
+          DO IAT=1,NAT
+            ISP=MAP%ISP(IAT)
+            CALL SETUP$ISELECT(ISP)
+            IBPRO=1+SUM(MAP%LNX(1:ISP-1))
+            LMNX=MAP%LMNX(ISP)
+            LNX=MAP%LNX(ISP)
+!           == DEDPROJ= (DH-LAMBDA*DO)<P|PSPSI> ================================
+            ALLOCATE(DO1(LNX,LNX))
+            CALL SETUP$GETR8A('DO',LNX*LNX,DO1)
+                                       !FORMER CALL SETUP$1COVERLAP(ISP,LNX,DO1)
+            ALLOCATE(DEDPROJ(NDIM,NBH,LMNX))
+            ALLOCATE(DH1(LMNX,LMNX,NDIM**2))
+            IF(NDIM.EQ.1) THEN
+              DH1(:,:,1)=DH(1:LMNX,1:LMNX,ISPIN,IAT)
+            ELSE 
+              DH1(:,:,:)=DH(1:LMNX,1:LMNX,:,IAT)
+            END IF
+!           ==  DEDPROJ=DE/D<PSPSI|PRO>=DH*<PRO|PSPSI>
+            CALL WAVES_DEDPROJ(NDIM,NBH,NB,LNX,MAP%LOX(1:LNX,ISP),LMNX &
+     &                        ,OCC(:,IKPT,ISPIN) &
+     &                        ,THIS%PROJ(:,:,IPRO:IPRO+LMNX-1),DH1,DO1 &
+     &                        ,THIS%RLAM0,DEDPROJ)
+            DEALLOCATE(DH1)
+            DEALLOCATE(DO1)
+!
+!           == ADD CONTRIBUTION FROM NTBOS  ====================================
+            IF(ASSOCIATED(THIS%HTBC_NEW)) THEN
+              CALL WAVES_FORCE_ADDHTBC(NDIM,NBH,NB,LMNX,OCC(:,IKPT,ISPIN) &
+     &                                ,THIS%HTBC_NEW(:,:,IPRO:IPRO+LMNX-1),DEDPROJ)
+            END IF
+
+!           == |DE/DPRO>=|PSPSI>DEDPROJ ========================================
+            ALLOCATE(DEDPRO(NGL,LMNX))
+            CALL WAVES_DEDPRO(GSET%TINV,NGL,NDIM,NBH,THIS%PSI0,LMNX &
+     &                       ,DEDPROJ,DEDPRO)
+            DEALLOCATE(DEDPROJ)
+!           == DE= <DPRO|DEDPRO> ===============================================
+            ALLOCATE(EIGR(NGL))
+            CALL PLANEWAVE$STRUCTUREFACTOR(R(1,IAT),NGL,EIGR)
+!           == F=2*RE[ <PSI|DPRO/DR>*DH*<PRO|PSI> ]
+            CALL WAVES_PROFORCE(LNX,LMNX,MAP%LOX(1:LNX,ISP),NGL,GWEIGHT,GVEC &
+     &           ,GIJ &
+     &           ,GSET%PRO(:,IBPRO:IBPRO+LNX-1),GSET%DPRO(:,IBPRO:IBPRO+LNX-1) &
+     &                 ,MAP%LMX,GSET%YLM,GSET%SYLM &
+     &                 ,EIGR,DEDPRO,FORCE1,TSTRESS,STRESS1)
+            DEALLOCATE(EIGR)
+            DEALLOCATE(DEDPRO)
+            FORCE(:,IAT)=FORCE(:,IAT)+FORCE1(:)
+            STRESS(:,:) =STRESS(:,:) +STRESS1(:,:)
+            IPRO=IPRO+LMNX
+            CALL SETUP$UNSELECT()
+          ENDDO ! END OF LOOP OVER IAT
+          DEALLOCATE(GIJ)
+          DEALLOCATE(GVEC)
+        ENDDO  ! END OF LOOP OVER ISPIN
+      ENDDO    ! END OF LOOP OVER IKPT
+      DEALLOCATE(OCC)
+!     == EACH PROCESSOR CALCULATES THE CONTRIBUTION TO THE FORCE FROM THE 
+!     == LOCAL WAVE FUNCTION COMPONENTS
+      CALL MPE$COMBINE('MONOMER','+',FORCE)
+      IF(TSTRESS)CALL MPE$COMBINE('MONOMER','+',STRESS)
+!
+                              CALL TIMING$CLOCKOFF('W:FORCE')
+                              CALL TRACE$POP
+      RETURN
+      END SUBROUTINE WAVES$FORCE
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WAVES_FORCE_ADDHTBC(NDIM,NBH,NB,LMNX,OCC,HTBC,DEDPROJ)
+!     **************************************************************************
+!     ** ADDS THE CONTRIBUTION FROM THE NTB-ORBITALS TO DE/DPROJ              **
+!     ** THE OCCUPATIONS ARE INCLUDED AT THIS POINT AND NOT BEFORE            **
+!     **************************************************************************
+      IMPLICIT NONE
+      INTEGER(4),INTENT(IN)    :: NDIM
+      INTEGER(4),INTENT(IN)    :: NBH
+      INTEGER(4),INTENT(IN)    :: NB
+      INTEGER(4),INTENT(IN)    :: LMNX
+      REAL(8)   ,INTENT(IN)    :: OCC(NB)
+      COMPLEX(8),INTENT(IN)    :: HTBC(NDIM,NBH,LMNX)
+      COMPLEX(8),INTENT(INOUT) :: DEDPROJ(NDIM,NBH,LMNX)
+      INTEGER(4)               :: IB,IB1,IB2,LMN,IDIM
+      LOGICAL(4)               :: TINV
+      REAL(8)                  :: F1,F2
+      COMPLEX(8)               :: CSVAR
+!     **************************************************************************
+      CALL PLANEWAVE$GETL4('TINV',TINV)
+!
+!     ==================================================================
+!     ==  HPROJ = DH<P|PSI>*F                                         ==
+!     ==================================================================
+      IF(TINV) THEN
+        DO IB=1,NBH
+          IB1=2*IB-1       
+          IB2=IB1+1
+          F1=0.5D0*(OCC(IB1)+OCC(IB2))
+          F2=0.5D0*(OCC(IB1)-OCC(IB2))
+          DO LMN=1,LMNX
+            DO IDIM=1,NDIM
+              CSVAR=HTBC(IDIM,IB,LMN)
+              DEDPROJ(IDIM,IB,LMN)=DEDPROJ(IDIM,IB,LMN)+F1*CSVAR+F2*CONJG(CSVAR)
+            ENDDO
+          ENDDO
+        ENDDO
+      ELSE
+        DO IB=1,NB
+          F1=OCC(IB)
+          DO LMN=1,LMNX
+            DO IDIM=1,NDIM
+              CSVAR=HTBC(IDIM,IB,LMN)
+              DEDPROJ(IDIM,IB,LMN)=DEDPROJ(IDIM,IB,LMN)+F1*CSVAR
+            ENDDO
+          ENDDO
+        ENDDO
+      END IF
+      RETURN
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WAVES$HPSI(NRL,NDIMD_,NAT,LMNXX,RHO,DH)
+!     **************************************************************************
+!     **                                                                      **
+!     **  EVALUATES FORCES FROM THE AUGMENTATION PART                         **
+!     **                                                                      **
+!     ********************P.E. BLOECHL, TU-CLAUSTHAL (2005)*********************
+      USE MPE_MODULE
+      USE WAVES_MODULE, ONLY : OPTIMIZERTYPE
+      USE WAVES_MODULE, ONLY : NDIMD,NDIM,NKPTL,NSPIN,MAP,GSET,THIS &
+     &                        ,WAVES_SELECTWV,VTAU_W
+      IMPLICIT NONE
+      INTEGER(4),INTENT(IN) :: NRL
+      INTEGER(4),INTENT(IN) :: NDIMD_
+      INTEGER(4),INTENT(IN) :: LMNXX
+      INTEGER(4),INTENT(IN) :: NAT
+      REAL(8)   ,INTENT(IN) :: RHO(NRL,NDIMD_) ! PS-POTENTIAL
+      COMPLEX(8),INTENT(IN) :: DH(LMNXX,LMNXX,NDIMD_,NAT)!ONE-CENTER HAMILTONIAN
+      INTEGER(4)            :: IKPT,ISPIN
+      INTEGER(4)            :: NGL
+      INTEGER(4)            :: NBH
+      REAL(8)               :: R(3,NAT)
+!     --------------------------------------------------------------------------
+      INTEGER(4)             :: IPRO
+      INTEGER(4)             :: ISP
+      INTEGER(4)             :: IAT
+      INTEGER(4)             :: LMNX
+      COMPLEX(8),ALLOCATABLE :: DH1(:,:,:)      ! 1CENTER HAMILTONIAN
+      COMPLEX(8),ALLOCATABLE :: HPROJ(:,:,:)    ! DH*PROJ
+      INTEGER(4)             :: IB,NGAMMAHPSI
+      REAL(8)   ,ALLOCATABLE :: XKHYB(:,:)
+      COMPLEX(8),ALLOCATABLE :: HPROJHYB(:,:,:)
+!     **************************************************************************
+                              CALL TRACE$PUSH('WAVES$HPSI')
+                              CALL TIMING$CLOCKON('W:HPSI')
+      IF(NDIMD_.NE.NDIMD.OR.NRL.NE.MAP%NRL.OR.NAT.NE.MAP%NAT) THEN
+        CALL ERROR$MSG('ARRAY SIZE INCONSISTENT')
+        CALL ERROR$I4VAL('NDIMD_',NDIMD_)
+        CALL ERROR$I4VAL('NDIMD',NDIMD)
+        CALL ERROR$I4VAL('NRL',NRL)
+        CALL ERROR$I4VAL('MAP%NRL',MAP%NRL)
+        CALL ERROR$I4VAL('NAT',NAT)
+        CALL ERROR$I4VAL('MAP%NAT',MAP%NAT)
+        CALL ERROR$STOP('WAVES$HPSI')
+      END IF
+      CALL ATOMLIST$GETR8A('R(0)',0,3*NAT,R)
+
+      DO IKPT=1,NKPTL
+        DO ISPIN=1,NSPIN
+          CALL WAVES_SELECTWV(IKPT,ISPIN)
+          CALL PLANEWAVE$SELECT(GSET%ID)      
+!         ======================================================================
+!         ==  MULTIPLY WAVE FUNCTION WITH LOCAL POTENTIAL AND                 ==
+!         ==  ADD KINETIC ENERGY                                              ==
+!         ======================================================================
+          NGL=GSET%NGL
+          NBH=THIS%NBH
+          IF(.NOT.ASSOCIATED(THIS%HPSI))ALLOCATE(THIS%HPSI(NGL,NDIM,NBH))
+!         == NOTE: THE ARRAY RHO CONTAINS THE POTENTIAL ========================
+CALL TIMING$CLOCKON('W:HPSI.VPSI')
+!===============================================================================
+IF(1.EQ.1)THEN !OLD VERSION CHANGE WAS REQUIRED FOR KAESTNERS CONJUGATE GRADIENT
+!===============================================================================
+         CALL WAVES_VPSI(GSET,NGL,NDIM,NBH,NRL,THIS%PSI0,RHO(1,ISPIN) &
+     &                   ,VTAU_W(1,ISPIN),THIS%HPSI)
+CALL TIMING$CLOCKOFF('W:HPSI.VPSI')
+!
+!         ==============================================================
+!         ==  EVALUATE  DH<P|PSI>                                     ==
+!         ==============================================================
+CALL TIMING$CLOCKON('W:HPSI.HPROJ')
+          ALLOCATE(HPROJ(NDIM,NBH,MAP%NPRO))
+          HPROJ(:,:,:)=(0.D0,0.D0)
+          IPRO=1
+          DO IAT=1,NAT
+            ISP=MAP%ISP(IAT)
+            LMNX=MAP%LMNX(ISP)
+            ALLOCATE(DH1(LMNX,LMNX,NDIM**2))
+            IF(NDIM.EQ.1) THEN
+              DH1(:,:,1)=DH(1:LMNX,1:LMNX,ISPIN,IAT)
+            ELSE 
+              DH1(:,:,:)=DH(1:LMNX,1:LMNX,:,IAT)
+            END IF
+            CALL WAVES_HPROJ(NDIM,NBH,LMNX &
+     &         ,DH1,THIS%PROJ(:,:,IPRO:IPRO+LMNX-1),HPROJ(:,:,IPRO:IPRO+LMNX-1))
+            DEALLOCATE(DH1)
+            IPRO=IPRO+LMNX
+          ENDDO
+CALL TIMING$CLOCKOFF('W:HPSI.HPROJ')
+!
+!         ==============================================================
+!         ==  ADD POTENTIAL FROM LMTO INTERFACE                      ==
+!         ==============================================================
+!         == HTBC CONTAINS ALREADY HPROJ IN TERMS OF PARTIAL WAVE 
+!         == PROJECTOR FUNCTIONS.
+!         == HTBC WAS COMPUTED (LMTO$ETOT) FOR THE ORBITALS AS THEY WERE     ==
+!         == BEFORE THE CG/DAV/RMM/EDFT OPTIMIZER UPDATED THEM IN PLACE, SO   ==
+!         == FOR THOSE OPTIMIZERS IT IS STALE HERE; APPLY THE HYBRID AS AN    ==
+!         == OPERATOR TO THE CURRENT PROJECTIONS INSTEAD. OTHERWISE THE       ==
+!         == EIGENVALUES (GAPS, AND WITH SMEARING THE OCCUPATIONS) OF HYBRID  ==
+!         == RUNS COME OUT WRONG. FOR MD, PSI IS STILL THE ONE HTBC BELONGS TO.==
+          IF(ASSOCIATED(THIS%HTBC_NEW)) THEN
+            IF(OPTIMIZERTYPE.EQ.'CG'.OR.OPTIMIZERTYPE.EQ.'DAV' &
+     &        .OR.OPTIMIZERTYPE.EQ.'RMM'.OR.OPTIMIZERTYPE.EQ.'EDFT') THEN
+              IF(.NOT.ALLOCATED(XKHYB)) THEN
+                ALLOCATE(XKHYB(3,NKPTL))
+                CALL WAVES_DYNOCCGETR8A('XK',3*NKPTL,XKHYB)
+              END IF
+              ALLOCATE(HPROJHYB(NDIM,NBH,MAP%NPRO))
+              CALL LMTO$APPLYHAMILOP(XKHYB(:,IKPT),ISPIN,NDIM,NBH,MAP%NPRO &
+     &                              ,THIS%PROJ,HPROJHYB)
+              HPROJ(:,:,:)=HPROJ(:,:,:)+HPROJHYB(:,:,:)
+              DEALLOCATE(HPROJHYB)
+            ELSE
+              HPROJ(:,:,:)=HPROJ(:,:,:)+THIS%HTBC_NEW(:,:,:)
+            END IF
+            DEALLOCATE(THIS%HTBC_NEW)
+            NULLIFY(THIS%HTBC_NEW)
+          END IF
+!
+!         ==============================================================
+!         ==  ADD  |P>DH<P|PSI>                                       ==
+!         ==============================================================
+CALL TIMING$CLOCKON('W:HPSI.ADDPROJ')
+          CALL WAVES_ADDPRO(MAP,GSET,NAT,R,NGL,NDIM,NBH,MAP%NPRO &
+     &                     ,THIS%HPSI,HPROJ)
+CALL TIMING$CLOCKOFF('W:HPSI.ADDPROJ')
+          DEALLOCATE(HPROJ)
+!         == TSUPER: |P>DH<P|PSI> ADDS A GENERALLY-COMPLEX-WEIGHTED REAL      ==
+!         == PROJECTOR FUNCTION P(G) TO HPSI. P(GAMMA) IS FORCED REAL BY THE  ==
+!         == (-I)**L PROJECTOR-PHASE CONVENTION, BUT A COMPLEX WEIGHT         ==
+!         == DH<P|PSI> STILL INTRODUCES A SPURIOUS IM(HPSI(GAMMA)) THAT THE   ==
+!         == LEGACY NBH-PACKED PATH NEVER HAD TO WORRY ABOUT (ITS OWN G/-G    ==
+!         == SYMMETRIZATION ELSEWHERE IMPLICITLY CLEANED IT UP). LEFT         ==
+!         == UNCORRECTED THIS SEEDS A GROWING IM(PSI(GAMMA)) THROUGH THE      ==
+!         == DYNAMICS -- SEE WAVES$ORTHOGONALIZE'S OWN COMMENT (2026-09-22).  ==
+          IF(GSET%TSUPER) THEN
+            CALL PLANEWAVE$GETI4('NGAMMA',NGAMMAHPSI)
+            WRITE(*,*) 'DEBUG-HPSI-GAMMA NGAMMAHPSI=',NGAMMAHPSI &
+     &                ,'AIMAG(HPSI(GAMMA,1))=' &
+     &                ,MERGE(AIMAG(THIS%HPSI(MAX(NGAMMAHPSI,1),1,1)),0.D0 &
+     &                       ,NGAMMAHPSI.NE.0)
+            IF(NGAMMAHPSI.NE.0) THEN
+              DO IB=1,NBH
+                THIS%HPSI(NGAMMAHPSI,1,IB)=CMPLX(REAL(THIS%HPSI(NGAMMAHPSI,1,IB) &
+     &                                    ,KIND=8),0.D0,KIND=8)
+              ENDDO
+            END IF
+          END IF
+!======================================================================== 
+ELSE
+!======================================================================== 
+         CALL WAVES_HPSI(MAP,GSET,ISPIN,NGL,NDIM,NDIMD,NBH,MAP%NPRO,LMNXX,NAT,NRL&
+     &                  ,THIS%PSI0,RHO(1,ISPIN),R,THIS%PROJ,DH,THIS%HPSI)
+!!LMTO INTERFACE MISSING!!!
+!======================================================================== 
+END IF
+!======================================================================== 
+        ENDDO
+      ENDDO
+                              CALL TIMING$CLOCKOFF('W:HPSI')
+                              CALL TRACE$POP
+      RETURN
+      END SUBROUTINE WAVES$HPSI
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WAVES_HPROJ(NDIM,NB,LMNX,DH,PROJ,HPROJ)
+!     **************************************************************************
+!     **                                                                      **
+!     *******************************************P.E. BLOECHL, (1991)***********
+      USE WAVES_MODULE, ONLY : MAP_TYPE
+      IMPLICIT NONE
+      INTEGER(4),INTENT(IN)  :: NDIM
+      INTEGER(4),INTENT(IN)  :: NB
+      INTEGER(4),INTENT(IN)  :: LMNX
+      COMPLEX(8),INTENT(IN)  :: DH(LMNX,LMNX,NDIM**2)
+      COMPLEX(8),INTENT(IN)  :: PROJ(NDIM,NB,LMNX)
+      COMPLEX(8),INTENT(OUT) :: HPROJ(NDIM,NB,LMNX)
+      INTEGER(4)             :: IB
+      INTEGER(4)             :: LMN1,LMN2
+      COMPLEX(8)             :: DHUPUP,DHDNDN
+      COMPLEX(8)             :: DHUPDN,DHDNUP
+      COMPLEX(8),PARAMETER   :: CI=(0.D0,1.D0)
+!     **************************************************************************
+      HPROJ(:,:,:)=(0.D0,0.D0)
+!
+!     ==========================================================================
+!     ==  EVALUATE  DH<P|PSI>                                                 ==
+!     ==========================================================================
+      IF(NDIM.EQ.1) THEN
+        DO LMN1=1,LMNX
+          DO LMN2=1,LMNX
+            DHUPUP=DH(LMN1,LMN2,1)
+            DO IB=1,NB
+              HPROJ(1,IB,LMN1)=HPROJ(1,IB,LMN1)+DHUPUP*PROJ(1,IB,LMN2)
+            ENDDO
+          ENDDO
+        ENDDO
+      ELSE 
+        DO LMN1=1,LMNX
+          DO LMN2=1,LMNX
+            DHUPUP=DH(LMN1,LMN2,1)+DH(LMN1,LMN2,4)
+            DHDNDN=DH(LMN1,LMN2,1)-DH(LMN1,LMN2,4)
+!           == HERE, DH=DH/DD AND NOT CONJG(DE/DD) !! 
+!JSC+PEB    DHUPDN=CMPLX(DH(LMN1,LMN2,2),DH(LMN1,LMN2,3),KIND=8)
+!            DHUPDN=CMPLX(DH(LMN1,LMN2,2),-DH(LMN1,LMN2,3),KIND=8)
+            DHUPDN=DH(LMN1,LMN2,2)-CI*DH(LMN1,LMN2,3)
+!           == DH_DN,UP=DH_X+I*DH_Y. CONJG(DHUPDN) IS EQUIVALENT ONLY FOR  ==
+!           == REAL DH_X,DH_Y; SPIN-ORBIT COUPLING MAKES THEM IMAGINARY,    ==
+!           == AND THE CONJUGATE TURNED THE SPIN-FLIP PART ANTI-HERMITIAN.  ==
+            DHDNUP=DH(LMN1,LMN2,2)+CI*DH(LMN1,LMN2,3)
+            DO IB=1,NB
+              HPROJ(1,IB,LMN1)=HPROJ(1,IB,LMN1)+DHUPUP*PROJ(1,IB,LMN2) &
+     &                                         +DHUPDN*PROJ(2,IB,LMN2)
+              HPROJ(2,IB,LMN1)=HPROJ(2,IB,LMN1)+DHDNUP*PROJ(1,IB,LMN2) &
+     &                                         +DHDNDN*PROJ(2,IB,LMN2)
+            ENDDO
+          ENDDO
+        ENDDO
+      END IF
+      RETURN
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WAVES_HPSI(MAP,GSET,ISPIN,NGL,NDIM,NDIMD,NBH,NPRO,LMNXX,NAT &
+     &                     ,NRL,PSI,POT,R,PROJ,DH,HPSI)
+!     **************************************************************************
+!     **                                                                      **
+!     *******************************************P.E. BLOECHL, (1991)***********
+      USE WAVES_MODULE, ONLY: MAP_TYPE,GSET_TYPE,LTSCANDELOC,VTAU_W &
+     &                       ,NKPTL,IKPTSELECTED
+      IMPLICIT NONE
+      INTEGER(4)     ,INTENT(IN) :: ISPIN
+      TYPE(MAP_TYPE) ,INTENT(IN) :: MAP  !NAT,NSP,NBAREPRO,NRL,NPRO 
+                                         !,LMX,LNXX,LNX,LMNX,LOX,ISP
+      TYPE(GSET_TYPE),INTENT(IN) :: GSET
+      INTEGER(4)     ,INTENT(IN) :: NGL
+      INTEGER(4)     ,INTENT(IN) :: NDIM
+      INTEGER(4)     ,INTENT(IN) :: NDIMD
+      INTEGER(4)     ,INTENT(IN) :: NBH
+      INTEGER(4)     ,INTENT(IN) :: NRL
+      INTEGER(4)     ,INTENT(IN) :: NPRO
+      INTEGER(4)     ,INTENT(IN) :: LMNXX
+      INTEGER(4)     ,INTENT(IN) :: NAT
+      COMPLEX(8)     ,INTENT(IN) :: PSI(NGL,NDIM,NBH)
+      REAL(8)        ,INTENT(IN) :: POT(NRL,NDIM**2) !RHO(1,ISPIN)
+      REAL(8)        ,INTENT(IN) :: R(3,NAT)
+      COMPLEX(8)     ,INTENT(IN) :: PROJ(NDIM,NBH,NPRO)!(NDIM,NBH,NPRO)<PSPSI|P>
+      COMPLEX(8)     ,INTENT(IN) :: DH(LMNXX,LMNXX,NDIMD,NAT)
+      COMPLEX(8)     ,INTENT(OUT):: HPSI(NGL,NDIM,NBH)
+      COMPLEX(8)     ,ALLOCATABLE:: HPROJ(:,:,:)
+      COMPLEX(8)     ,ALLOCATABLE:: DH1(:,:,:)
+      INTEGER(4)                 :: IPRO,IAT,ISP,LMNX
+      INTEGER(4)                 :: IB,NGAMMAHPSI
+      REAL(8)                    :: VTAUDUMMY(NRL)
+      LOGICAL(4)                 :: THYBRID
+      REAL(8)   ,ALLOCATABLE     :: XK(:,:)
+      COMPLEX(8),ALLOCATABLE     :: HPROJHYB(:,:,:)
+!     **************************************************************************
+CALL TIMING$CLOCKON('W:HPSI.VPSI')
+!     == THIS IS THE H|PSI> OF THE CG/DAV/RMM/EDFT OPTIMIZERS (VESPAW_CG.F90). ==
+!     == IT ONCE WAS DEAD CODE AND PASSED A ZERO TAU-POTENTIAL; WITH         ==
+!     == TSCANDELOC THAT SILENTLY DROPPED THE META-GGA KINETIC-ENERGY-DENSITY ==
+!     == POTENTIAL FROM THE HAMILTONIAN THOSE OPTIMIZERS DIAGONALIZE. USE THE ==
+!     == SAME VTAU_W AS WAVES$HPSI (SAME (UP,DOWN) LAYOUT AS POT).            ==
+      IF(LTSCANDELOC.AND.ALLOCATED(VTAU_W)) THEN
+        CALL WAVES_VPSI(GSET,NGL,NDIM,NBH,NRL,PSI,POT,VTAU_W(1,ISPIN),HPSI)
+      ELSE
+        VTAUDUMMY(:)=0.D0
+        CALL WAVES_VPSI(GSET,NGL,NDIM,NBH,NRL,PSI,POT,VTAUDUMMY,HPSI)
+      END IF
+CALL TIMING$CLOCKOFF('W:HPSI.VPSI')
+!
+!     ==========================================================================
+!     ==  EVALUATE  DH<P|PSI>                                                 ==
+!     ==========================================================================
+CALL TIMING$CLOCKON('W:HPSI.HPROJ')
+      ALLOCATE(HPROJ(NDIM,NBH,NPRO))
+      HPROJ(:,:,:)=(0.D0,0.D0)
+      IPRO=1
+      DO IAT=1,NAT
+        ISP=MAP%ISP(IAT)
+        LMNX=MAP%LMNX(ISP)
+        ALLOCATE(DH1(LMNX,LMNX,NDIM**2))
+        IF(NDIM.EQ.1) THEN
+          DH1(:,:,1)=DH(1:LMNX,1:LMNX,ISPIN,IAT)
+        ELSE 
+          DH1(:,:,:)=DH(1:LMNX,1:LMNX,:,IAT)
+        END IF
+        CALL WAVES_HPROJ(NDIM,NBH,LMNX,DH1 &
+       &       ,PROJ(:,:,IPRO:IPRO+LMNX-1),HPROJ(:,:,IPRO:IPRO+LMNX-1))
+        DEALLOCATE(DH1)
+        IPRO=IPRO+LMNX
+      ENDDO
+CALL TIMING$CLOCKOFF('W:HPSI.HPROJ')
+!
+!     ==========================================================================
+!     ==  NTBO HYBRID (LMTO MODUS='HYBRID') AS AN OPERATOR: <P|H_HYB|PSI>.   ==
+!     ==  WAVES$HPSI (MD) ADDS THE SAME TERM FOR THE CURRENT BANDS ONLY, AS  ==
+!     ==  HTBC; THE CG/DAV/RMM/EDFT OPTIMIZERS APPLY H TO TRIAL VECTORS, SO  ==
+!     ==  THEY NEED THE OPERATOR ITSELF (LMTO$APPLYHAMILOP). WITHOUT IT THEY  ==
+!     ==  DIAGONALIZED A HAMILTONIAN MISSING MOST OF THE HYBRID: ON PBE0R NIO==
+!     ==  DAV+PULAY CONVERGED 165 MH TOO HIGH WITH A NEGATIVE GAP.           ==
+!     ==========================================================================
+      CALL LMTO$GETL4('ON',THYBRID)
+      IF(THYBRID.AND.IKPTSELECTED.GT.0) THEN
+        ALLOCATE(XK(3,NKPTL))
+        CALL WAVES_DYNOCCGETR8A('XK',3*NKPTL,XK)
+        ALLOCATE(HPROJHYB(NDIM,NBH,NPRO))
+        CALL LMTO$APPLYHAMILOP(XK(:,IKPTSELECTED),ISPIN,NDIM,NBH,NPRO,PROJ &
+     &                        ,HPROJHYB)
+        HPROJ=HPROJ+HPROJHYB
+        DEALLOCATE(HPROJHYB)
+        DEALLOCATE(XK)
+      END IF
+!
+!     ==========================================================================
+!     ==  ADD  |P>DH<P|PSI>                                                   ==
+!     ==========================================================================
+CALL TIMING$CLOCKON('W:HPSI.ADDPRO')
+      CALL WAVES_ADDPRO(MAP,GSET,NAT,R,NGL,NDIM,NBH,NPRO,HPSI,HPROJ)
+CALL TIMING$CLOCKOFF('W:HPSI.ADDPRO')
+      DEALLOCATE(HPROJ)
+!     == TSUPER: |P>DH<P|PSI> ADDS A GENERALLY-COMPLEX-WEIGHTED REAL         ==
+!     == PROJECTOR FUNCTION P(G) TO HPSI. P(GAMMA) IS FORCED REAL BY THE     ==
+!     == (-I)**L PROJECTOR-PHASE CONVENTION (SAME SYMMETRY THAT MAKES        ==
+!     == INDIVIDUAL ORBITALS REAL AT GAMMA), BUT A COMPLEX WEIGHT DH<P|PSI>  ==
+!     == STILL INTRODUCES A SPURIOUS IM(HPSI(GAMMA)) THAT THE LEGACY NBH-    ==
+!     == PACKED PATH NEVER HAD TO WORRY ABOUT (ITS OWN G/-G SYMMETRIZATION   ==
+!     == ELSEWHERE IMPLICITLY CLEANED IT UP). LEFT UNCORRECTED, THIS SEEDS   ==
+!     == A GROWING IM(PSI(GAMMA)) THROUGH THE DYNAMICS (FOUND 2026-09-22 --  ==
+!     == SEE THE WAVES$ORTHOGONALIZE FIX'S OWN COMMENT FOR THE FULL CHAIN).  ==
+      IF(GSET%TSUPER) THEN
+        CALL PLANEWAVE$GETI4('NGAMMA',NGAMMAHPSI)
+        IF(NGAMMAHPSI.NE.0) THEN
+          DO IB=1,NBH
+            HPSI(NGAMMAHPSI,1,IB)=CMPLX(REAL(HPSI(NGAMMAHPSI,1,IB),KIND=8) &
+     &                                  ,0.D0,KIND=8)
+          ENDDO
+        END IF
+      END IF
+      RETURN
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WAVES_OPSI(NB,NBH,NPRO,NAT,NGL,R0,PROJ,OPSI)
+!     **************************************************************************
+!     **                                                                      **
+!     **  |PSI>+|P>DO<P|PSI>                                                  **
+!     **                                                                      **
+!     *********************************JOHANNES KAESTNER 2004*******************
+      USE WAVES_MODULE
+      IMPLICIT NONE
+      INTEGER(4) ,INTENT(IN)   :: NB
+      INTEGER(4) ,INTENT(IN)   :: NBH
+      INTEGER(4) ,INTENT(IN)   :: NPRO
+      INTEGER(4) ,INTENT(IN)   :: NAT
+      INTEGER(4) ,INTENT(IN)   :: NGL
+      REAL(8)    ,INTENT(IN)   :: R0(3,NAT)
+      COMPLEX(8) ,INTENT(IN)   :: PROJ(NDIM,NBH,NPRO)
+      COMPLEX(8) ,INTENT(INOUT):: OPSI(NGL,NDIM,NBH) !PSI ON ETRY, OPSI ON EXIT
+      INTEGER(4)               :: IPRO,IAT,ISP,LNX,LMNX
+      COMPLEX(8) ,ALLOCATABLE  :: OPROJ(:,:,:)
+      REAL(8)    ,ALLOCATABLE  :: DO(:,:)      ! 1-CENTER OVERLAP
+!     *****************************************************************
+!
+!     ==============================================================
+!     ==  EVALUATE  DO<P|PSI>  ASSUMING <PRO|PSI> IS STILL VALID  ==
+!     ==============================================================
+      ALLOCATE(OPROJ(NDIM,NBH,NPRO))
+      OPROJ(:,:,:)=(0.D0,0.D0)
+      IPRO=1
+      DO IAT=1,NAT
+         ISP=MAP%ISP(IAT)
+         LNX=MAP%LNX(ISP)
+         LMNX=MAP%LMNX(ISP)
+         ALLOCATE(DO(LNX,LNX))
+         CALL SETUP$ISELECT(ISP)
+         CALL SETUP$GETR8A('DO',LNX*LNX,DO)
+                                    !FORMER CALL SETUP$1COVERLAP(ISP,LNX,DO)
+         CALL WAVES_OPROJ(LNX,MAP%LOX(1:LNX,ISP),DO,NDIM,LMNX,NBH &
+     &                  ,PROJ(:,:,IPRO:IPRO+LMNX-1),OPROJ(:,:,IPRO:IPRO+LMNX-1))
+!        == SCAN0R: UNSELECT MUST HAPPEN PER ATOM, INSIDE THE LOOP.        ==
+!        == THE ORIGINAL CODE ONLY UNSELECTED ONCE AFTER THE LOOP, SO THE ==
+!        == SECOND (AND LATER) ATOMS' ISELECT HIT SETUP$ISELECT'S "ANOTHER==
+!        == SETUP IS ALREADY SELECTED" SAFEGUARD -- A REAL, PREVIOUSLY   ==
+!        == UNDIAGNOSED BUG IN THIS CG-ONLY CODE PATH (WAVES_OPSI IS NOT ==
+!        == CALLED BY THE DYNAMICS PATH, SO IT WAS NEVER EXERCISED).     ==
+         CALL SETUP$ISELECT(0)
+         DEALLOCATE(DO)
+         IPRO=IPRO+LMNX
+      ENDDO
+!
+!     ==============================================================
+!     ==  ADD  |PSI>+|P>DO<P|PSI>                                 ==
+!     ==============================================================
+      !ALLOCATE(THIS%OPSI(NGL,NDIM,NBH))
+      !THIS%OPSI(:,:,:)=THIS%PSI0(:,:,:)
+      CALL WAVES_ADDPRO(MAP,GSET,NAT,R0,NGL,NDIM,NBH,NPRO,OPSI,OPROJ)
+      DEALLOCATE(OPROJ)
+      ! THIS THIS%OPSI IS MY O|PSI> FOR CG
+      RETURN
+      END 
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WAVES_VPSI(GSET,NGL,NDIM,NBH,NRL,PSI,V,VTAU,HPSI)
+!     **************************************************************************
+!     **                                                                      **
+!     **  EVALUATES H*PSI WITHOUT THE AUGMENTATION PART                       **
+!     **  |HPSI>=(-0.5*NABLA**2+PS-V)|PSPSI(0)>                               **
+!     **                                                                      **
+!     **  SCAN0R: OPTIONALLY ADDS THE REAL (ORBITAL-TAU-BASED) DELOCALIZED    **
+!     **  TSCAN HAMILTONIAN TERM H_TAU|PSI>=-0.5*DIV(VTAU*GRAD(PSI))          **
+!     **  (WAVES_TAUHPSI, paw_scankinden.f90), GATED BEHIND LTSCANDELOC       **
+!     **  (WAVES_MODULE) SO EVERY EXISTING CALLER PAYS NOTHING WHEN THE       **
+!     **  FEATURE IS UNUSED (DEFAULT). VTAU IS SEQUENCE-ASSOCIATED THE SAME   **
+!     **  WAY AS V (E.G. VTAU_W(1,ISPIN) AT THE CALL SITE) -- SEE             **
+!     **  SCAN0r notes                             **
+!     **                                                                      **
+!     *******************************************P.E. BLOECHL, (1991)***********
+      USE WAVES_MODULE, ONLY : GSET_TYPE,TBUCKET,LTSCANDELOC
+      IMPLICIT NONE
+      TYPE(GSET_TYPE),INTENT(IN) :: GSET
+      INTEGER(4),INTENT(IN)  :: NGL         ! #(G-VECTORS)
+      INTEGER(4),INTENT(IN)  :: NDIM        ! #(BANDS)
+      INTEGER(4),INTENT(IN)  :: NBH         ! #(BANDS)
+      INTEGER(4),INTENT(IN)  :: NRL         ! #(R-SPACE POINTS)
+      COMPLEX(8),INTENT(IN)  :: PSI(NGL,NDIM,NBH)  ! PSPSI(0)
+      REAL(8)   ,INTENT(IN)  :: V(NRL,NDIM**2) ! PSPOT
+      REAL(8)   ,INTENT(IN)  :: VTAU(NRL)    ! SCAN0R: D(EXC)/D(TAU), THIS SPIN
+      COMPLEX(8),INTENT(OUT) :: HPSI(NGL,NDIM,NBH)     ! PSH|PSPSI>
+      REAL(8)   ,ALLOCATABLE :: G2(:)          ! G**2
+      INTEGER(4)             :: IB,IR,IG,IDIM
+      REAL(8)   ,ALLOCATABLE :: VUPUP(:),VDNDN(:)
+      COMPLEX(8),ALLOCATABLE :: VUPDN(:)
+      COMPLEX(8),ALLOCATABLE :: PSIOFR(:,:)
+      REAL(8)   ,ALLOCATABLE :: PSIOFRR(:,:)  ! REAL R-SPACE FIELD, TSUPER PATH
+      INTEGER(4),PARAMETER   :: NFFTBLK=32   ! MAX #(BANDS) PER BATCHED FFT
+      INTEGER(4)             :: IB0,NBLK
+      COMPLEX(8)             :: PSIUP,PSIDN
+      COMPLEX(8),ALLOCATABLE :: HTAUPSI(:,:,:)
+!     **************************************************************************
+!
+!     ==========================================================================
+!     ==  MULTIPLY WAVE FUNCTIONS WITH THE POTENTIAL                          ==
+!     ==                                                                      ==
+!     ==  2026-09-04: THE NDIM=1 (COLLINEAR/SPIN-UNPOLARIZED) BRANCH NOW      ==
+!     ==  BATCHES THE FFT ACROSS ALL NBH BANDS IN ONE PLANEWAVE$FFT CALL      ==
+!     ==  INSTEAD OF LOOPING PER BAND -- THIS IS THE ACTUAL CALLER THAT       ==
+!     ==  MAKES PLANEWAVE$FFT'S OWN BATCHING (PLANEWAVE_FFTGTOR_MU/RTOG_MU,   ==
+!     ==  SRC/VESPAW_FFT.F90) WORTH ANYTHING AT ALL: PLANEWAVE$FFT WAS        ==
+!     ==  ALREADY BATCHED-CAPABLE, BUT THIS SUBROUTINE NEVER ACTUALLY PASSED  ==
+!     ==  NFFT>1 BEFORE NOW, SO THAT BATCHING WAS UNREACHABLE IN PRACTICE.    ==
+!     ==  ORIGINAL COMMENT (STILL TRUE FOR THE NDIM=2 NONCOLLINEAR BRANCH,    ==
+!     ==  DELIBERATELY LEFT UNCHANGED BELOW -- SMALLER, RISKIER, LESS-USED    ==
+!     ==  CODE PATH, OUT OF SCOPE FOR THIS PASS):                             ==
+!     ==  "THE FFTS ARE DONE FOR EACH WAVE FUNCTION INDIVIDUALLY TO AVOID     ==
+!     ==  A MEMORY SPIKE. THERE MAY BE A LOSS OF SPEED BECAUSE DOING THE      ==
+!     ==  FFTS AND THE MULTIPLICATION IN ONE SHOT WOULD BE MORE EFFICIENT.    ==
+!     ==  IN THE PREVIOUS IMPLEMENTATION THIS HAD NOT BEEN EXPLOITED ANYWAY." ==
+!     ==  THE MEMORY-SPIKE TRADEOFF THAT COMMENT WARNS ABOUT IS REAL BUT      ==
+!     ==  SMALL ON ANY MODERN MACHINE FOR REALISTIC NRL*NBH (VERIFIED ON A    ==
+!     ==  REAL RUN, NOT ASSUMED) -- SEE THE DEV NOTES, PHASE 1.           ==
+!     ==========================================================================
+      IF(NDIM.EQ.1) THEN
+        IF(GSET%TSUPER) THEN
+!         == TSUPER: NBH=NB HERE (NO BAND PAIRING -- SEE LGAMMASUPER), AND  ==
+!         == PSI(:,1,IB) IS ONE ORBITAL'S OWN HALF-SPHERE COEFFICIENTS, SO  ==
+!         == THIS IS EXACTLY PLANEWAVE$SUPFFT'S NFFT=NBH CALLING CONVENTION==
+!         == ALREADY USED FOR THE DENSITY OBJECT (SRC/VESPAW_POTENTIAL.F90,==
+!         == SRC/VESPAW_MIXER.F90) -- REAL R-SPACE FIELD PER ORBITAL, NO   ==
+!         == G/-G RECONSTRUCTION NEEDED SINCE THE LOCAL POTENTIAL IS A     ==
+!         == REAL DIAGONAL R-SPACE MULTIPLICATION.                        ==
+!         == BATCHES OF AT MOST NFFTBLK BANDS (2026-09-27): ONE BATCH OVER ==
+!         == ALL BANDS NEEDED NRL*NBH COMPLEX NUMBERS (1.3 GB FOR 216-ATOM ==
+!         == SI) AND MADE LARGE RUNS SWAP.                                 ==
+          ALLOCATE(PSIOFRR(NRL,MIN(NBH,NFFTBLK)))
+          DO IB0=1,NBH,NFFTBLK
+            NBLK=MIN(NFFTBLK,NBH-IB0+1)
+            CALL PLANEWAVE$SUPFFT('GTOR',NBLK,NGL,PSI(:,:,IB0:IB0+NBLK-1),NRL &
+     &                           ,PSIOFRR(:,1:NBLK))
+            DO IB=1,NBLK
+              DO IR=1,NRL
+                PSIOFRR(IR,IB)=V(IR,1)*PSIOFRR(IR,IB)
+              ENDDO
+            ENDDO
+            CALL PLANEWAVE$SUPFFT('RTOG',NBLK,NGL,HPSI(:,:,IB0:IB0+NBLK-1),NRL &
+     &                           ,PSIOFRR(:,1:NBLK))
+          ENDDO
+          DEALLOCATE(PSIOFRR)
+        ELSE
+!         == BATCHES OF AT MOST NFFTBLK BANDS, SEE ABOVE ===================
+          ALLOCATE(PSIOFR(NRL,MIN(NBH,NFFTBLK)))
+          DO IB0=1,NBH,NFFTBLK
+            NBLK=MIN(NFFTBLK,NBH-IB0+1)
+            CALL PLANEWAVE$FFT('GTOR',NBLK,NGL,PSI(:,:,IB0:IB0+NBLK-1),NRL &
+     &                        ,PSIOFR(:,1:NBLK))
+            DO IB=1,NBLK
+              DO IR=1,NRL
+                PSIOFR(IR,IB)=V(IR,1)*PSIOFR(IR,IB)
+              ENDDO
+            ENDDO
+            CALL PLANEWAVE$FFT('RTOG',NBLK,NGL,HPSI(:,:,IB0:IB0+NBLK-1),NRL &
+     &                        ,PSIOFR(:,1:NBLK))
+          ENDDO
+          DEALLOCATE(PSIOFR)
+        END IF
+      ELSE
+        IF(GSET%TSUPER) THEN
+          CALL ERROR$MSG('NONCOLLINEAR (NDIM=2) WAVE FUNCTIONS ARE NOT')
+          CALL ERROR$MSG('COMPATIBLE WITH GAMMA-POINT SUPER WAVE FUNCTIONS')
+          CALL ERROR$STOP('WAVES_VPSI')
+        END IF
+        ALLOCATE(PSIOFR(NRL,NDIM))
+        ALLOCATE(VUPUP(NRL))
+        ALLOCATE(VDNDN(NRL))
+        ALLOCATE(VUPDN(NRL))
+        DO IR=1,NRL
+          VUPUP(IR)=V(IR,1)+V(IR,4)
+          VDNDN(IR)=V(IR,1)-V(IR,4)
+          VUPDN(IR)=CMPLX(V(IR,2),-V(IR,3),KIND=8)
+        ENDDO
+        DO IB=1,NBH
+          CALL PLANEWAVE$FFT('GTOR',NDIM,NGL,PSI(:,:,IB),NRL,PSIOFR)
+          DO IR=1,NRL
+            PSIUP=PSIOFR(IR,1)
+            PSIDN=PSIOFR(IR,2)
+            PSIOFR(IR,1)=VUPUP(IR)*PSIUP+      VUPDN(IR) *PSIDN
+            PSIOFR(IR,2)=VDNDN(IR)*PSIDN+CONJG(VUPDN(IR))*PSIUP
+          ENDDO
+          CALL PLANEWAVE$FFT('RTOG',NDIM,NGL,HPSI(:,:,IB),NRL,PSIOFR)
+        ENDDO
+        DEALLOCATE(VUPUP)
+        DEALLOCATE(VUPDN)
+        DEALLOCATE(VDNDN)
+        DEALLOCATE(PSIOFR)
+      END IF
+!
+!     ==========================================================================
+!     ==  ADD KINETIC ENERGY CONTRIBUTION                                     ==
+!     ==========================================================================
+      ALLOCATE(G2(NGL))
+      CALL PLANEWAVE$GETR8A('G2',NGL,G2)
+      DO IB=1,NBH
+        DO IDIM=1,NDIM
+          DO IG=1,NGL
+            HPSI(IG,IDIM,IB)=HPSI(IG,IDIM,IB)+0.5D0*G2(IG)*PSI(IG,IDIM,IB)
+          ENDDO
+        ENDDO
+      ENDDO
+!
+!     ==========================================================================
+!     ==  ADD BUCKET POTENTIAL                                                ==
+!     ==========================================================================
+      IF(TBUCKET) THEN
+        DO IB=1,NBH
+          DO IDIM=1,NDIM
+            DO IG=1,NGL
+              HPSI(IG,IDIM,IB)=HPSI(IG,IDIM,IB) &
+     &                        +GSET%BUCKET(IG)*PSI(IG,IDIM,IB)
+            ENDDO
+          ENDDO
+        ENDDO
+      END IF
+      DEALLOCATE(G2)
+!
+!     ==========================================================================
+!     ==  SCAN0R: ADD THE REAL DELOCALIZED TSCAN HAMILTONIAN TERM             ==
+!     ==  H_TAU|PSI>=-0.5*DIV(VTAU*GRAD(PSI)). INERT UNLESS LTSCANDELOC IS    ==
+!     ==  TRUE (DEFAULT FALSE) -- NDIM=1 ONLY, ENFORCED INSIDE               ==
+!     ==  WAVES_TAUHPSI ITSELF (SAME SCOPE CUT AS WAVES_KINETICDENSITY).     ==
+!     ==========================================================================
+      IF(LTSCANDELOC) THEN
+        ALLOCATE(HTAUPSI(NGL,NDIM,NBH))
+        CALL WAVES_TAUHPSI(NGL,NRL,NDIM,NBH,VTAU,PSI,HTAUPSI)
+        HPSI(:,:,:)=HPSI(:,:,:)+HTAUPSI(:,:,:)
+        DEALLOCATE(HTAUPSI)
+      END IF
+      RETURN
+      END
+!
+!     ..................................................................
+      SUBROUTINE WAVES_EKIN_OLD(NGL,NDIM,NBH,NB,F,GWEIGHT,PSI,EKIN &
+     &                         ,TSTRESS,STRESS,TBUCKET,BUCKET,DBUCKET)
+!     ******************************************************************
+!     **                                                              **
+!     **  EVALUATE PS KINETIC ENERGY IN G-SPACE                       **
+!     **  EVALUATE NUMBER OF ELECTRONS IN G-SPACE                     **
+!     **                                                              **
+!     **  REMARKS:                                                    **
+!     **    REQUIRES PLANEWAVE OBJECT TO BE SET PROPERLY              **
+!     **                                                              **
+!     *******************************************P.E. BLOECHL, (1999)***
+      USE MPE_MODULE
+      IMPLICIT NONE
+      INTEGER(4),INTENT(IN) :: NB         ! #(STATES)
+      INTEGER(4),INTENT(IN) :: NBH        ! #(WAVE FUNCTIONS)
+      INTEGER(4),INTENT(IN) :: NDIM       ! #(SPINOR COMPONENTS)
+      INTEGER(4),INTENT(IN) :: NGL        ! #(PLANE WAVES)
+      REAL(8)   ,INTENT(IN) :: F(NB)      ! OCCUPATION
+      REAL(8)   ,INTENT(IN) :: GWEIGHT
+      COMPLEX(8),INTENT(IN) :: PSI(NGL,NDIM,NBH) ! PS-WAVE FUNCTION
+      REAL(8)   ,INTENT(OUT):: EKIN       ! KINETIC ENERGY
+      LOGICAL(4),INTENT(IN) :: TSTRESS    ! SWITCH STRESS ON/OFF
+      REAL(8)   ,INTENT(OUT):: STRESS(3,3)! STRESS
+      LOGICAL(4),INTENT(IN) :: TBUCKET    ! BUCKET POTENTIAL PRESENT
+      REAL(8)   ,INTENT(IN) :: BUCKET(NGL) ! BUCKET POTENTIAL
+      REAL(8)   ,INTENT(IN) :: DBUCKET(NGL) ! 1/G *DBUCKET/DG
+      REAL(8)   ,ALLOCATABLE:: G2(:)      ! G**2
+      REAL(8)   ,ALLOCATABLE:: GVEC(:,:)  ! G   
+      COMPLEX(8),ALLOCATABLE:: PSI1(:,:)
+      REAL(8)   ,ALLOCATABLE:: DMAT(:)
+      LOGICAL(4)            :: TINV
+      INTEGER(4)            :: IB,IG,IDIM1,IDIM2
+      REAL(8)               :: FP,FM
+      REAL(8)   ,PARAMETER  :: DSMALL=1.D-12
+      REAL(8)               :: EBUCKET
+      REAL(8)               :: SVAR
+!     ******************************************************************
+      CALL ERROR$MSG('ROUTINE MARKED FOR DELETION. CONTAINS ERRORS!')
+      CALL ERROR$STOP('WAVES_EKIN_OLD')
+!
+!     ==================================================================
+!     ==  CHECK IF SUPERWAVEFUNCTIONS ARE USED AND IF #(BANDS) CORRECT==
+!     ==================================================================
+      CALL PLANEWAVE$GETL4('TINV',TINV)
+      IF(TINV) THEN
+        IF(NBH.NE.(NB+1)/2) THEN
+          CALL ERROR$MSG('INCONSISTENT NUMBER OF BANDS')
+          CALL ERROR$STOP('WAVES_EKIN')
+        END IF
+      ELSE 
+        IF(NBH.NE.NB) THEN
+          CALL ERROR$MSG('INCONSISTENT NUMBER OF BANDS')
+          CALL ERROR$STOP('WAVES_EKIN')
+        END IF
+      END IF
+!
+!     ==================================================================
+!     ==  CALCULATE DMAT(G)=F(IB)*PSI^*(G,IB)*PSI(G,IB)               ==
+!     ==================================================================
+      ALLOCATE(DMAT(NGL))
+      ALLOCATE(PSI1(NGL,NDIM))
+      DMAT(:)=0.D0
+      DO IB=1,NBH
+!       == DETERMINE OCCUPATIONS =======================================
+        IF(TINV) THEN
+          FP=0.5D0*(F(2*IB-1)+F(2*IB))
+          FM=0.5D0*(F(2*IB-1)-F(2*IB))
+        ELSE
+          FP=F(IB)
+          FM=0.D0
+        END IF
+!
+!       ================================================================
+!       == GENERAL WAVE FUNCTION / FIRST PART OF SUPER WAVE FUNCTIONS ==
+!       == <PSI_+|G^2|PSI_+> FOR SUPER WAVE FUNCTIONS                 ==
+!       ================================================================
+        IF(FP.EQ.0.D0.AND.FM.EQ.0.D0) CYCLE
+        DO IDIM1=1,NDIM
+          DO IDIM2=IDIM1,NDIM
+            SVAR=FP
+            IF(IDIM1.NE.IDIM2)SVAR=2.D0*SVAR
+            DO IG=1,NGL
+              DMAT(IG)=DMAT(IG) &
+    &              +SVAR*REAL(CONJG(PSI(IG,IDIM1,IB))*PSI(IG,IDIM2,IB),KIND=8)
+            ENDDO
+          ENDDO
+        ENDDO
+!
+!       ================================================================
+!       ==  <PSI_+|G^2|PSI_->                                         ==
+!       ================================================================
+        IF(.NOT.TINV.OR.ABS(FM).LT.DSMALL) CYCLE
+        DO IDIM1=1,NDIM
+          CALL PLANEWAVE$INVERTG(NGL,PSI(1,IDIM1,IB),PSI1(1,IDIM1))
+        ENDDO
+        DO IDIM1=1,NDIM
+          DO IDIM2=IDIM1,NDIM
+            SVAR=FM
+            IF(IDIM1.NE.IDIM2)SVAR=2.D0*SVAR
+            DO IG=1,NGL
+              DMAT(IG)=DMAT(IG) &
+     &           +SVAR*REAL(CONJG(PSI(IG,IDIM1,IB))*PSI1(IG,IDIM2),KIND=8)
+            ENDDO
+          ENDDO
+        ENDDO
+      ENDDO
+      DEALLOCATE(PSI1)
+!
+!     ==================================================================
+!     ==  CALCULATE KINETIC ENERGY AND STRESS                         ==
+!     ==================================================================
+      IF(TSTRESS) THEN
+        ALLOCATE(GVEC(3,NGL))
+        CALL PLANEWAVE$GETR8A('GVEC',3*NGL,GVEC)
+!       == KINETIC ENERGY AND KINETIC STRESS ===========================
+        STRESS(:,:)=0.D0
+        DO IG=1,NGL
+          STRESS(1,1)=STRESS(1,1)+GVEC(1,IG)*GVEC(1,IG)*DMAT(IG)
+          STRESS(1,2)=STRESS(1,2)+GVEC(1,IG)*GVEC(2,IG)*DMAT(IG)
+          STRESS(1,3)=STRESS(1,3)+GVEC(1,IG)*GVEC(3,IG)*DMAT(IG)
+          STRESS(2,2)=STRESS(2,2)+GVEC(2,IG)*GVEC(2,IG)*DMAT(IG)
+          STRESS(2,3)=STRESS(2,3)+GVEC(2,IG)*GVEC(3,IG)*DMAT(IG)
+          STRESS(3,3)=STRESS(3,3)+GVEC(3,IG)*GVEC(3,IG)*DMAT(IG)
+        ENDDO
+        EKIN=0.5D0*(STRESS(1,1)+STRESS(2,2)+STRESS(3,3))
+        STRESS=-STRESS
+!       == ENERGY AND STRESS DUE TO THE BUCKET POTENTIAL ===============
+        IF(TBUCKET) THEN
+          EBUCKET=0.D0
+          DO IG=1,NGL
+            IF(BUCKET(IG).EQ.0.D0) CYCLE
+            EBUCKET=EBUCKET+BUCKET(IG)*DMAT(IG)
+            SVAR=DMAT(IG)*DBUCKET(IG)
+            STRESS(1,1)=STRESS(1,1)-GVEC(1,IG)*GVEC(1,IG)*SVAR
+            STRESS(1,2)=STRESS(1,2)-GVEC(1,IG)*GVEC(2,IG)*SVAR
+            STRESS(1,3)=STRESS(1,3)-GVEC(1,IG)*GVEC(3,IG)*SVAR
+            STRESS(2,2)=STRESS(2,2)-GVEC(2,IG)*GVEC(2,IG)*SVAR
+            STRESS(2,3)=STRESS(2,3)-GVEC(2,IG)*GVEC(3,IG)*SVAR
+            STRESS(3,3)=STRESS(3,3)-GVEC(3,IG)*GVEC(3,IG)*SVAR
+          ENDDO
+          EKIN=EKIN+EBUCKET
+        END IF
+!       == PARALLELIZE AND CLOSE DOWN ==================================
+        STRESS(2,1)=STRESS(1,2)
+        STRESS(3,1)=STRESS(1,3)
+        STRESS(3,2)=STRESS(2,3)
+        EKIN=EKIN*GWEIGHT
+        STRESS=STRESS*GWEIGHT
+!       == CID='~' (WORLD GROUP), NOT 'NONE' -- SEE THE HEADER COMMENT AT   ==
+!       == CG_SUBSPACEROTATE IN PAW_CG.F90 FOR WHY.                        ==
+        CALL MPE$COMBINE('~','+',EKIN)
+        CALL MPE$COMBINE('~','+',STRESS)
+        DEALLOCATE(GVEC)
+        DEALLOCATE(DMAT)
+      ELSE
+        ALLOCATE(G2(NGL))
+        CALL PLANEWAVE$GETR8A('G2',NGL,G2)
+!       == KINETIC ENERGY ==============================================
+        EKIN=0.D0
+        DO IG=1,NGL
+          EKIN=EKIN+G2(IG)*DMAT(IG)
+        ENDDO
+        EKIN=0.5D0*EKIN
+!       == BUCKET POTENTIAL ============================================
+        IF(TBUCKET) THEN
+          EBUCKET=0.D0
+          DO IG=1,NGL
+            EBUCKET=EBUCKET+BUCKET(IG)*DMAT(IG)
+          ENDDO
+          EKIN=EKIN+EBUCKET
+        END IF
+!       ==  PARALLELIZE AND CLOSE DOWN =================================
+        EKIN=EKIN*GWEIGHT
+        CALL MPE$COMBINE('~','+',EKIN)
+        DEALLOCATE(DMAT)
+        DEALLOCATE(G2)
+      END IF
+!
+      RETURN
+      END
+!
+!     .....................................................RHOOFR.......
+      SUBROUTINE WAVES_DENSITY(NGL,NRL,NDIM,NB,NBH,F,PSIOFG,RHO)
+!     ******************************************************************
+!     **                                                              **
+!     **  THE  ELECTRON DENSITY RHOE IN REAL SPACE                    **
+!     **                                                              **
+!     **                                                              **
+!     *******************************************P.E. BLOECHL, (1991)***
+      IMPLICIT NONE
+      INTEGER(4),PARAMETER  :: NFFTBLK=32   ! MAX #(BANDS) PER BATCHED FFT
+      INTEGER(4)            :: IB0,NBLK,K
+      INTEGER(4),INTENT(IN)  :: NGL         ! MAX # PLANE WAVES
+      INTEGER(4),INTENT(IN)  :: NRL         ! # R-SPACE POINTS
+      INTEGER(4),INTENT(IN)  :: NDIM        ! DIMENSION OF THE WAVE FUNCTION
+      INTEGER(4),INTENT(IN)  :: NB          ! # BANDS
+      INTEGER(4),INTENT(IN)  :: NBH
+      REAL(8)   ,INTENT(IN)  :: F(NB)       ! OCCUPATIONS
+      COMPLEX(8),INTENT(IN)  :: PSIOFG(NGL,NDIM,NBH)
+      REAL(8)   ,INTENT(OUT) :: RHO(NRL,NDIM**2) ! DENSITY IN R-SPACE
+      COMPLEX(8),ALLOCATABLE :: PSIOFR(:,:,:)
+      REAL(8)   ,ALLOCATABLE :: PSIOFRR(:,:)  ! REAL R-SPACE FIELD, TSUPER PATH
+      COMPLEX(8),ALLOCATABLE :: EI2KR(:)  !(NRL) SQUARED BLOCH PHASE FACTOR
+      COMPLEX(8),ALLOCATABLE :: PSI1(:)   !(NRL)
+      COMPLEX(8)             :: CSVAR
+      LOGICAL(4)             :: TINV
+      LOGICAL(4)             :: TSUPER
+      INTEGER(4)             :: IBH,IR
+      REAL(8)                :: F1,F2
+      REAL(8)                :: RE,IM
+      REAL(8)                :: SVAR1,SVAR2
+      REAL(8)                :: RWDBG
+      COMPLEX(8)             :: CVARDBG
+      COMPLEX(8),PARAMETER   :: CI=(0.D0,1.D0)
+!     ******************************************************************
+                               CALL TRACE$PUSH('WAVES_DENSITY')
+!RELEASED 8.OCT.99 
+!
+!     ==================================================================
+!     ==  CHECK IF SUPERWAVEFUNCTIONS ARE USED AND IF #(BANDS) CORRECT==
+!     ==================================================================
+      CALL PLANEWAVE$GETL4('TINV',TINV)
+      CALL PLANEWAVE$GETL4('SUPER',TSUPER)
+!
+!     ==================================================================
+!     ==  TSUPER: EACH ORBITAL STORED INDEPENDENTLY AT HALF RESOLUTION==
+!     ==  (NBH=NB, NO BAND PAIRING -- SEE LGAMMASUPER). USE            ==
+!     ==  PLANEWAVE$SUPFFT DIRECTLY, EXACTLY AS THE DENSITY OBJECT     ==
+!     ==  ALREADY DOES (SRC/VESPAW_POTENTIAL.F90). NO EI2KR PHASE      ==
+!     ==  DISAMBIGUATION IS NEEDED HERE (UNLIKE THE LEGACY TINV BRANCH ==
+!     ==  BELOW): THAT TRICK EXISTS ONLY TO SEPARATE TWO ORBITALS      ==
+!     ==  SHARING ONE PACKED SLOT, AND THERE IS NO PACKING HERE.       ==
+!     ==================================================================
+      IF(TSUPER) THEN
+        IF(NBH.NE.NB) THEN
+          CALL ERROR$MSG('INCONSISTENT NUMBER OF BANDS')
+          CALL ERROR$STOP('WAVES_DENSITY')
+        END IF
+        IF(NDIM.NE.1) THEN
+          CALL ERROR$MSG('SPINOR WAVE FUNCTIONS ARE NOT COMPATIBLE')
+          CALL ERROR$MSG('WITH GAMMA-POINT SUPER WAVE FUNCTIONS')
+          CALL ERROR$STOP('WAVES_DENSITY')
+        END IF
+        ALLOCATE(PSIOFRR(NRL,NBH))
+        CALL PLANEWAVE$SUPFFT('GTOR',NBH,NGL,PSIOFG,NRL,PSIOFRR)
+        CALL PLANEWAVE$GETR8('RWEIGHT',RWDBG)
+        DO IBH=1,NBH
+          CALL PLANEWAVE$SCALARPRODUCT(' ',NGL,1,1,PSIOFG(:,:,IBH),1 &
+     &                                 ,PSIOFG(:,:,IBH),CVARDBG)
+          WRITE(*,*) 'DEBUG-DENSITY-NORM IBH=',IBH,'F=',F(IBH) &
+     &              ,'RNORM=',SUM(PSIOFRR(:,IBH)**2)*RWDBG &
+     &              ,'GNORM=',REAL(CVARDBG,KIND=8)
+        ENDDO
+        RHO(:,:)=0.D0
+        DO IBH=1,NBH
+          F1=F(IBH)
+          IF(F1.EQ.0.D0) CYCLE
+          DO IR=1,NRL
+            RHO(IR,1)=RHO(IR,1)+F1*PSIOFRR(IR,IBH)**2
+          ENDDO
+        ENDDO
+        WRITE(*,*) 'DEBUG-DENSITY-TOTALQ=',SUM(RHO(:,1))*RWDBG
+        DEALLOCATE(PSIOFRR)
+                                 CALL TRACE$POP()
+        RETURN
+      END IF
+      IF(TINV) THEN
+        IF(NBH.NE.(NB+1)/2) THEN
+          CALL ERROR$MSG('INCONSISTENT NUMBER OF BANDS')
+          CALL ERROR$STOP('WAVES_DENSITY')
+        END IF
+      ELSE
+        IF(NBH.NE.NB) THEN
+          CALL ERROR$MSG('INCONSISTENT NUMBER OF BANDS')
+          CALL ERROR$STOP('WAVES_DENSITY')
+        END IF
+      END IF
+!
+!     ==================================================================
+!     ==  FFT                                                         ==
+!     ==================================================================
+!     == BANDS ARE TRANSFORMED IN BATCHES OF AT MOST NFFTBLK (2026-09-27):==
+!     == ONE BATCH OVER ALL BANDS NEEDED NRL*NDIM*NBH COMPLEX NUMBERS      ==
+!     == (1.3 GB FOR 216-ATOM SI). THE CONTRIBUTIONS OF THE BANDS TO RHO   ==
+!     == ARE INDEPENDENT, SO THE RESULT DOES NOT DEPEND ON THE BATCHING.   ==
+      IF(TINV.AND.NDIM.EQ.2) THEN
+        CALL ERROR$MSG('SPINOR WAVE FUNCTIONS ARE NOT COMPATIBLE')
+        CALL ERROR$MSG('WITH SUPER WAVE FUNCTIONS')
+        CALL ERROR$STOP('WAVES_DENSITY')
+      END IF
+      RHO(:,:)=0.D0
+      IF(TINV) THEN
+        ALLOCATE(EI2KR(NRL))
+        CALL PLANEWAVE$GETC8A('EIKR',NRL,EI2KR)
+        DO IR=1,NRL
+          EI2KR(IR)=EI2KR(IR)**2
+        ENDDO
+        ALLOCATE(PSI1(NRL))
+      END IF
+      ALLOCATE(PSIOFR(NRL,NDIM,MIN(NBH,NFFTBLK)))
+      DO IB0=1,NBH,NFFTBLK
+        NBLK=MIN(NFFTBLK,NBH-IB0+1)
+        CALL PLANEWAVE$FFT('GTOR',NBLK*NDIM,NGL,PSIOFG(:,:,IB0:IB0+NBLK-1) &
+     &                    ,NRL,PSIOFR(:,:,1:NBLK))
+        DO K=1,NBLK
+          IBH=IB0+K-1
+          IF(TINV) THEN
+            F1=F(2*IBH-1)
+            F2=0.D0
+            IF(2*IBH.LE.NB) F2=F(2*IBH)
+            SVAR1=0.5D0*(F1+F2)
+            SVAR2=0.5D0*(F1-F2)
+            IF(SVAR1.EQ.0.D0) THEN
+              IF(SVAR2.EQ.0) CYCLE
+            END IF
+            DO IR=1,NRL
+              PSI1(IR)=SVAR1*CONJG(PSIOFR(IR,1,K))
+            ENDDO
+            IF(SVAR2.NE.0.D0) THEN
+              DO IR=1,NRL
+                PSI1(IR)=PSI1(IR)+SVAR2*PSIOFR(IR,1,K)*EI2KR(IR)
+              ENDDO
+            END IF
+            DO IR=1,NRL
+              RHO(IR,1)=RHO(IR,1)+REAL(PSIOFR(IR,1,K)*PSI1(IR),KIND=8)
+            ENDDO
+          ELSE IF(NDIM.EQ.1) THEN
+            F1=F(IBH)
+            IF(F1.EQ.0.D0) CYCLE
+            DO IR=1,NRL
+              RE= REAL(PSIOFR(IR,1,K),KIND=8)
+              IM=AIMAG(PSIOFR(IR,1,K))
+              RHO(IR,1)=RHO(IR,1)+F1*(RE**2+IM**2)
+            ENDDO
+          ELSE
+            F1=F(IBH)
+            IF(F1.EQ.0.D0) CYCLE
+            DO IR=1,NRL
+              RHO(IR,1)=RHO(IR,1) &
+    &               +F1*REAL(PSIOFR(IR,1,K)*CONJG(PSIOFR(IR,1,K)),KIND=8)
+              RHO(IR,4)=RHO(IR,4) &
+    &               +F1*REAL(PSIOFR(IR,2,K)*CONJG(PSIOFR(IR,2,K)),KIND=8)
+              CSVAR=PSIOFR(IR,1,K)*CONJG(PSIOFR(IR,2,K))
+              RHO(IR,2)=RHO(IR,2)+F1*REAL(CSVAR,KIND=8)
+              RHO(IR,3)=RHO(IR,3)+F1*AIMAG(CSVAR)
+            ENDDO
+          END IF
+        ENDDO
+      ENDDO
+      IF(TINV) THEN
+        DEALLOCATE(PSI1)
+        DEALLOCATE(EI2KR)
+      ELSE IF(NDIM.EQ.2) THEN
+        DO IR=1,NRL
+          SVAR1=RHO(IR,1)
+          SVAR2=RHO(IR,4)
+          RHO(IR,1)=SVAR1+SVAR2
+          RHO(IR,4)=SVAR1-SVAR2
+          RHO(IR,2)= 2.D0*RHO(IR,2)
+          RHO(IR,3)=-2.D0*RHO(IR,3)
+        ENDDO
+      END IF
+      DEALLOCATE(PSIOFR)
+                               CALL TRACE$POP()
+      RETURN
+      END
+!
+!     .....................................................NLSMX........
+      SUBROUTINE WAVES_DEDPROJ(NDIM,NBH,NB,LNX,LOX,LMNX,OCC &
+     &                       ,PROJ,DH,DO,EPS,DEDPROJ)
+!     ******************************************************************
+!     **                                                              **
+!     **  CALCULATES THE DERIVATIVE OF THE ONE-CENTER                 **
+!     **  ENERGIES WITH RESPECT TO THE PROJECTOR FUNCTIONS            **
+!     **    DEDPROJ = DE/(DPROJ)                                      **
+!     **            = DH<P|PSITILDE>F-DO<P|PSITILDE>*LAMBDA           **
+!     **  LAMBDA IS CALCULATED FROM THIS%RLAM0 BY MULTIPLICATION WITH **
+!     **  0.5*(FI+FJ)                                                 **
+!     **                                                              **
+!     *******************************************P.E. BLOECHL, (1999)***
+      IMPLICIT NONE
+      INTEGER(4),INTENT(IN)   :: NDIM      ! #(SPINOR COMPONENTS)
+      INTEGER(4),INTENT(IN)   :: NB        ! #(BANDS)
+      INTEGER(4),INTENT(IN)   :: NBH       ! #(WAVE FUNCTIONS)
+      INTEGER(4),INTENT(IN)   :: LMNX      ! #(PROJECTORS ON THIS SITE)
+      REAL(8)   ,INTENT(IN)   :: OCC(NB)   ! OCCUPATIONS
+      COMPLEX(8),INTENT(IN)   :: PROJ(NDIM,NBH,LMNX) ! <P|PSI>
+      COMPLEX(8),INTENT(IN)   :: DH(LMNX,LMNX,NDIM**2) ! DE/DD
+      INTEGER(4),INTENT(IN)   :: LNX
+      INTEGER(4),INTENT(IN)   :: LOX(LNX)
+      REAL(8)   ,INTENT(IN)   :: DO(LNX,LNX) ! DO/DD
+      COMPLEX(8),INTENT(IN)   :: EPS(NB,NB)
+      COMPLEX(8),INTENT(OUT)  :: DEDPROJ(NDIM,NBH,LMNX)    ! DE/D<P|
+      LOGICAL(4)              :: TINV
+      LOGICAL(4)              :: TSUPER
+      COMPLEX(8),ALLOCATABLE  :: OPROJ(:,:,:)
+      COMPLEX(8),ALLOCATABLE  :: LAMBDA(:,:)
+      REAL(8)                 :: F1,F2
+      INTEGER(4)              :: IB,IB1,IB2,LMN,IDIM
+      COMPLEX(8)              :: CSVAR
+!     ******************************************************************
+                               CALL TRACE$PUSH('WAVES_DEDPROJ')
+!
+!     ==================================================================
+!     ==  CHECK IF SUPERWAVEFUNCTIONS ARE USED AND IF #(BANDS) CORRECT==
+!     ==================================================================
+      CALL PLANEWAVE$GETL4('TINV',TINV)
+      CALL PLANEWAVE$GETL4('SUPER',TSUPER)
+      IF(TSUPER) THEN
+        IF(NBH.NE.NB) THEN
+          CALL ERROR$MSG('INCONSISTENT NUMBER OF BANDS')
+          CALL ERROR$STOP('WAVES_DEDPROJ')
+        END IF
+      ELSE IF(TINV) THEN
+        IF(NBH.NE.(NB+1)/2) THEN
+          CALL ERROR$MSG('INCONSISTENT NUMBER OF BANDS')
+          CALL ERROR$STOP('WAVES_DEDPROJ')
+        END IF
+      ELSE
+        IF(NBH.NE.NB) THEN
+          CALL ERROR$MSG('INCONSISTENT NUMBER OF BANDS')
+          CALL ERROR$STOP('WAVES_DEDPROJ')
+        END IF
+      END IF
+!
+!     ==================================================================
+!     ==  HPROJ = DH<P|PSI>                                           ==
+!     ==================================================================
+      CALL WAVES_HPROJ(NDIM,NBH,LMNX,DH,PROJ,DEDPROJ)
+!
+!     ==================================================================
+!     ==  HPROJ = DH<P|PSI>*F                                         ==
+!     == PROJ/DEDPROJ ARE ALREADY-RESOLVED <P|PSI>-LIKE QUANTITIES (VIA   ==
+!     == WAVES_HPROJ, GENERIC IN NGL/NB) -- SO TSUPER (NBH=NB, NO         ==
+!     == PACKING) ROUTES THROUGH THE SAME GENERAL MATH AS A NON-TINV      ==
+!     == K-POINT, NO NEW BRANCH NEEDED (SAME REASONING AS WAVES_DENMAT).  ==
+      IF(TINV.AND.NBH.NE.NB) THEN
+        DO IB=1,NBH
+          IB1=2*IB-1       
+          IB2=IB1+1
+          F1=0.5D0*(OCC(IB1)+OCC(IB2))
+          F2=0.5D0*(OCC(IB1)-OCC(IB2))
+          DO LMN=1,LMNX
+            DO IDIM=1,NDIM
+              CSVAR=DEDPROJ(IDIM,IB,LMN)
+              DEDPROJ(IDIM,IB,LMN)=F1*CSVAR+F2*CONJG(CSVAR)
+            ENDDO
+          ENDDO
+        ENDDO
+      ELSE
+        DO IB=1,NB
+          F1=OCC(IB)
+          DO LMN=1,LMNX
+            DO IDIM=1,NDIM
+              DEDPROJ(IDIM,IB,LMN)=DEDPROJ(IDIM,IB,LMN)*F1
+            ENDDO
+          ENDDO
+        ENDDO
+      END IF
+!
+!     ==================================================================
+!     ==  ADD -DO<P|PSI>LAMBDA*(FI+FJ)/2                              ==
+!     ==================================================================
+      ALLOCATE(LAMBDA(NB,NB))
+      DO IB1=1,NB
+        F1=OCC(IB1)
+        DO IB2=1,NB
+          F2=OCC(IB2)
+          LAMBDA(IB1,IB2)=-EPS(IB1,IB2)*0.5D0*(F1+F2)
+        ENDDO
+      ENDDO
+      ALLOCATE(OPROJ(NDIM,NBH,LMNX))
+      CALL WAVES_OPROJ(LNX,LOX,DO,NDIM,LMNX,NBH,PROJ,OPROJ)
+      CALL WAVES_ADDOPROJ(LMNX,NDIM,NBH,NB,DEDPROJ,OPROJ,LAMBDA)
+      DEALLOCATE(LAMBDA)
+      DEALLOCATE(OPROJ)
+                               CALL TRACE$POP
+      RETURN
+      END
+!
+!     .....................................................NLSMX........
+      SUBROUTINE WAVES_DEDPRO(TINV,NGL,NDIM,NBH,PSI,LMNX,DEDPROJ,DEDPRO)
+!     ******************************************************************
+!     **                                                              **
+!     **  CALCULATES THE FUNCTION |DEDPRO_I>=DE/D<PRO_I|              **
+!     **  USED TO CALCULATE FORCES AND STRESSES AS                    **
+!     **    DE = SUM_I <DPRO_I|DEDPRO_I> + <DEDPRO_I|DPRO_I>          **
+!     **  WHERE                                                       **
+!     **    |DEDPRO_I>=|DEDPRO_II> + SUM_N |PSI_N> F_N <PSI_N|PRO_I>  **
+!     **                   +(DH-DO EPS)                               **
+!     **                                                              **
+!     **   REMARKS:                                                   **
+!     **    - CALL FOR EACH ATOM INDIVIDUALLY                         **
+!     **    - INITIALIZE DEDPRO=(0.D0,0.D0) BEFORE CALLING            **
+!     **    - FOR LSD INITIALIZE ONCE AND CALL FOR SPIN UP AND DOWN   **
+!     **    - DEDPRO SHOULD BE A REAL FUNCTION IN REAL SPACE          **
+!     **       BUT THAT THE SYMMETRY IS NOT ENFORCES YET              **
+!     **                                                              **
+!     *******************************************P.E. BLOECHL, (1999)***
+      IMPLICIT NONE
+      LOGICAL(4),INTENT(IN)   :: TINV
+      INTEGER(4),INTENT(IN)   :: NGL       ! (#(G-VECTORS)
+      INTEGER(4),INTENT(IN)   :: NDIM      ! #(SPINOR COMPONENTS)
+      INTEGER(4),INTENT(IN)   :: NBH       ! #(WAVE FUNCTIONS)
+      COMPLEX(8),INTENT(IN)   :: PSI(NGL,NDIM,NBH)   ! |PSI>
+      INTEGER(4),INTENT(IN)   :: LMNX      ! #(PROJECTORS ON THIS SITE)
+      COMPLEX(8),INTENT(IN)   :: DEDPROJ(NDIM,NBH,LMNX) ! <P|PSI>
+      COMPLEX(8),INTENT(OUT)  :: DEDPRO(NGL,LMNX)    ! DE/D<P|
+      INTEGER(4)              :: LMN,IG
+      COMPLEX(8),ALLOCATABLE  :: PSIM(:)
+      LOGICAL(4),PARAMETER    :: TESSL=.TRUE.
+      COMPLEX(8)              :: DEDPROJ1(NDIM,NBH,LMNX) ! CONJG(<P|PSI>)
+      LOGICAL(4)              :: TSUPER
+!     ******************************************************************
+!
+!     ==================================================================
+!     ==  SUPERPOSE WAVE FUNCTION TO OBTAIN DE/D<P|                   ==
+!     ==================================================================
+      DEDPROJ1=CONJG(DEDPROJ)   !TRANSPOSE ASSUMING A HERMITEAN MATRIX
+!     ==  DEPRO=DEPRO+PSI*CONJG(DEPROJ)
+      CALL PLANEWAVE$GETL4('SUPER',TSUPER)
+      IF(TSUPER) THEN
+!       == TSUPER: PSI(:,IB) IS ALREADY HERMITIAN-SYMMETRIC (ONE INDEPENDENT ==
+!       == REAL ORBITAL PER SLOT, NBH=NB -- SEE LGAMMASUPER), BUT THE       ==
+!       == PROJECTOR WEIGHT DEDPROJ1(IB,LMN) IS A GENERAL COMPLEX SCALAR,   ==
+!       == SO THE RAW WEIGHTED SUM ISN'T AUTOMATICALLY HERMITIAN. THE       ==
+!       == LEGACY BRANCH BELOW FIXES THIS BY RECONSTRUCTING DEDPRO(-G) VIA  ==
+!       == PLANEWAVE$INVERTG (UNAVAILABLE UNDER HALF-SPHERE STORAGE) AND    ==
+!       == AVERAGING; ALGEBRAICALLY, 0.5*(F(G)+CONJG(F_RAW(-G))) WITH       ==
+!       == F_RAW(-G)=SUM_IB CONJG(PSI(G,IB))*W_IB REDUCES TO                ==
+!       == SUM_IB PSI(G,IB)*REAL(W_IB) -- NO G/-G RECONSTRUCTION NEEDED,    ==
+!       == JUST DROP THE IMAGINARY PART OF THE WEIGHT BEFORE THE MATMUL.    ==
+        DEDPROJ1=CMPLX(REAL(DEDPROJ1,KIND=8),0.D0,KIND=8)
+        CALL LIB$MATMULC8(NGL,NDIM*NBH,LMNX,PSI,DEDPROJ1,DEDPRO)
+      ELSE
+        CALL LIB$MATMULC8(NGL,NDIM*NBH,LMNX,PSI,DEDPROJ1,DEDPRO)
+        IF(TINV) THEN
+          ALLOCATE(PSIM(NGL))
+          DO LMN=1,LMNX
+            CALL PLANEWAVE$INVERTG(NGL,DEDPRO(1,LMN),PSIM)
+            DO IG=1,NGL
+              DEDPRO(IG,LMN)=0.5D0*(DEDPRO(IG,LMN)+PSIM(IG))
+            ENDDO
+          ENDDO
+          DEALLOCATE(PSIM)
+        END IF
+      END IF
+      RETURN
+      END
+!
+!     ..................................................................
+      SUBROUTINE WAVES_FULLPRO(MAP,GSET,NAT,R,NGL,NPRO)
+!     ******************************************************************
+!     ** ENSURES THAT PROCACHEPRO (WAVES_MODULE) HOLDS THE FULL          **
+!     ** PROJECTOR ARRAY FOR THIS GSET AND THESE POSITIONS. CALLERS USE  **
+!     ** PROCACHEPRO DIRECTLY: AN EARLIER VERSION COPIED IT INTO A       **
+!     ** CALLER-ALLOCATED ARRAY OF THE SAME SIZE ON EVERY CALL, DOUBLING **
+!     ** THE PEAK MEMORY OF THE PROJECTORS (SI216: 2 X 2.8 GB) AND       **
+!     ** COPYING THEM ON EVERY H*PSI/O*PSI (2026-09-27).                 **
+!     **                                                                 **
+!     ** BUILDS THE FULL (STRUCTURE-FACTOR- AND SPHERICAL-HARMONIC-      **
+!     ** RESOLVED) RECIPROCAL-SPACE PROJECTOR ARRAY FOR ALL ATOMS AT     **
+!     ** ONCE. SINGLE-SLOT-CACHED IN WAVES_MODULE (PROCACHE*) SINCE THIS **
+!     ** DEPENDS ONLY ON THE CURRENT GSET/K-POINT AND ATOMIC POSITIONS   **
+!     ** -- NEITHER CHANGES DURING ELECTRONIC-STRUCTURE MINIMIZATION --  **
+!     ** BUT WAS PREVIOUSLY RECOMPUTED FROM SCRATCH ON EVERY SINGLE      **
+!     ** H*PSI/O*PSI APPLICATION VIA WAVES_ADDPRO/WAVES_PROJECTIONS. SEE **
+!     ** THE PROCACHE* DECLARATIONS ABOVE (WAVES_MODULE) FOR THE FULL    **
+!     ** RATIONALE AND THE DEV NOTES FOR THE PROFILING THAT FOUND    **
+!     ** THIS (63% OF TOTAL CPU ON A 64-ATOM SI TEST).                   **
+!     ******************************************************************
+      USE WAVES_MODULE, ONLY : MAP_TYPE,GSET_TYPE &
+     &                         ,PROCACHEID,PROCACHENAT,PROCACHENGL,PROCACHENPRO &
+     &                         ,PROCACHER,PROCACHEPRO
+      IMPLICIT NONE
+      TYPE(MAP_TYPE) ,INTENT(IN) :: MAP
+      TYPE(GSET_TYPE),INTENT(IN) :: GSET
+      INTEGER(4)     ,INTENT(IN) :: NAT
+      REAL(8)        ,INTENT(IN) :: R(3,NAT)
+      INTEGER(4)     ,INTENT(IN) :: NGL
+      INTEGER(4)     ,INTENT(IN) :: NPRO
+      LOGICAL(4)                 :: THIT
+      REAL(8)        ,ALLOCATABLE:: GVEC(:,:)  !(3,NGL)
+      COMPLEX(8)     ,ALLOCATABLE:: PRO(:,:)   !(NGL,LMNXX)
+      COMPLEX(8)     ,ALLOCATABLE:: EIGR(:)    !(NGL)
+      INTEGER(4)     ,ALLOCATABLE:: LOX(:)     !(LNXX)
+      INTEGER(4)                 :: IPRO,IBPRO,IAT,LMNXX,LNXX,LNX,LMNX,ISP
+!     == DIAGNOSTIC (2026-09-10, SAME INVESTIGATION AS VESPAW_SCAN0R_SWAP_DIAG)==
+!     == -- CHECKS WHETHER THE ATOM-8 PROJECTOR BLOCK OF PROFULL (P ITSELF,   ==
+!     == NOT <P|PSI>) CHANGES BETWEEN OUTER ITERATIONS, AND WHETHER THIS      ==
+!     == CALL WAS A CACHE HIT OR MISS -- SINGLE-SLOT PROCACHE* IS A REAL      ==
+!     == CANDIDATE IF SOMETHING TOUCHES GSET%PRO WITHOUT INVALIDATING IT.     ==
+      LOGICAL(4),SAVE            :: TFULLPRODIAGCHECKED=.FALSE.
+      LOGICAL(4),SAVE            :: TFULLPRODIAG=.FALSE.
+      CHARACTER(16)               :: CENVFULLPRODIAG
+      INTEGER(4)                  :: IPRO8A,IPRO8B,IATDIAG
+      REAL(8)                     :: NORM8
+!     ******************************************************************
+                                 CALL TIMING$CLOCKON('WAVES_FULLPRO')
+      IF(.NOT.TFULLPRODIAGCHECKED) THEN
+        CALL GET_ENVIRONMENT_VARIABLE('VESPAW_SCAN0R_SWAP_DIAG',CENVFULLPRODIAG)
+        TFULLPRODIAG=(LEN_TRIM(CENVFULLPRODIAG).GT.0)
+        TFULLPRODIAGCHECKED=.TRUE.
+        IF(TFULLPRODIAG) THEN
+          PRINT*,'VESPAW_SCAN0R_SWAP_DIAG SET -- ALSO TRACKING WAVES_FULLPRO' &
+     &          ,' CACHE HIT/MISS AND ATOM-8 PROJECTOR BLOCK NORM'
+        END IF
+      END IF
+      THIT=.FALSE.
+      IF(PROCACHEID.EQ.GSET%ID.AND.PROCACHENAT.EQ.NAT &
+     &  .AND.PROCACHENGL.EQ.NGL.AND.PROCACHENPRO.EQ.NPRO) THEN
+        IF(ALLOCATED(PROCACHER)) THIT=ALL(PROCACHER.EQ.R)
+      END IF
+      IF(THIT) THEN
+        IF(TFULLPRODIAG.AND.NAT.GE.8) THEN
+          IPRO8A=1
+          DO IATDIAG=1,7
+            IPRO8A=IPRO8A+MAP%LMNX(MAP%ISP(IATDIAG))
+          ENDDO
+          IPRO8B=IPRO8A+MAP%LMNX(MAP%ISP(8))-1
+          NORM8=MAXVAL(ABS(PROCACHEPRO(:,IPRO8A:IPRO8B)))
+          PRINT*,'VESPAW_SCAN0R_SWAP_DIAG FULLPRO HIT GSETID=',GSET%ID &
+     &          ,' MAX|P(IAT=8)|=',NORM8
+        END IF
+                                 CALL TIMING$CLOCKOFF('WAVES_FULLPRO')
+        RETURN
+      END IF
+!
+!     ==================================================================
+!     ==  CACHE MISS -- REBUILD FROM SCRATCH (ORIGINAL ALGORITHM)      ==
+!     ==  DIRECTLY INTO THE CACHE                                     ==
+!     ==================================================================
+      IF(ALLOCATED(PROCACHER)) DEALLOCATE(PROCACHER)
+      IF(ALLOCATED(PROCACHEPRO)) DEALLOCATE(PROCACHEPRO)
+      ALLOCATE(PROCACHER(3,NAT))
+      ALLOCATE(PROCACHEPRO(NGL,NPRO))
+      ALLOCATE(GVEC(3,NGL))
+      CALL PLANEWAVE$GETR8A('GVEC',3*GSET%NGL,GVEC)
+      LMNXX=MAXVAL(MAP%LMNX)
+      LNXX=MAXVAL(MAP%LNX)
+      ALLOCATE(PRO(NGL,LMNXX))
+      ALLOCATE(EIGR(NGL))
+      ALLOCATE(LOX(LNXX))
+      IPRO=1
+      DO IAT=1,MAP%NAT
+        ISP=MAP%ISP(IAT)
+        LNX=MAP%LNX(ISP)
+        LMNX=MAP%LMNX(ISP)
+        LOX=MAP%LOX(:,ISP)
+        IBPRO=1+SUM(MAP%LNX(1:ISP-1))
+        CALL PLANEWAVE$STRUCTUREFACTOR(R(1,IAT),NGL,EIGR)
+        CALL WAVES_EXPANDPRO(LNX,LOX,LMNX,NGL,GVEC &
+     &                      ,GSET%PRO(:,IBPRO:IBPRO+LNX-1),MAP%LMX,GSET%YLM,EIGR &
+     &                      ,PRO(:,1:LMNX))
+        PROCACHEPRO(:,IPRO:IPRO+LMNX-1)=PRO(:,1:LMNX)
+        IF(TFULLPRODIAG.AND.IAT.EQ.8) THEN
+          PRINT*,'VESPAW_SCAN0R_SWAP_DIAG FULLPRO MISS GSETID=',GSET%ID &
+     &          ,' IAT=8 ISP=',ISP,' MAX|GSET%PRO(RAW)|=' &
+     &          ,MAXVAL(ABS(GSET%PRO(:,IBPRO:IBPRO+LNX-1))) &
+     &          ,' MAX|P(IAT=8,EXPANDED)|=',MAXVAL(ABS(PRO(:,1:LMNX)))
+        END IF
+        IPRO=IPRO+LMNX
+      ENDDO
+      DEALLOCATE(LOX)
+      DEALLOCATE(PRO)
+      DEALLOCATE(EIGR)
+      DEALLOCATE(GVEC)
+!
+!     ==================================================================
+!     ==  UPDATE THE CACHE KEY                                        ==
+!     ==================================================================
+      PROCACHER=R
+      PROCACHEID=GSET%ID
+      PROCACHENAT=NAT
+      PROCACHENGL=NGL
+      PROCACHENPRO=NPRO
+                                 CALL TIMING$CLOCKOFF('WAVES_FULLPRO')
+      RETURN
+      END
+!
+!     ..................................................................
+      SUBROUTINE WAVES_PROJECTIONS(MAP,GSET,NAT,R,NGL,NDIM,NB,NPRO,PSI,PROPSI)
+!     ******************************************************************
+!     **                                                              **
+!     **  CALCULATE PROJECTIONS                                       **
+!     **                                                              **
+!     **                                                              **
+!     *******************************************P.E. BLOECHL, (1998)***
+      USE WAVES_MODULE, ONLY : MAP_TYPE,GSET_TYPE,PROCACHEPRO
+      IMPLICIT NONE
+      TYPE(MAP_TYPE) ,INTENT(IN) :: MAP
+      TYPE(GSET_TYPE),INTENT(IN) :: GSET
+      INTEGER(4)     ,INTENT(IN) :: NAT
+      REAL(8)        ,INTENT(IN) :: R(3,NAT)
+      INTEGER(4)     ,INTENT(IN) :: NGL        ! #(PLANE WAVES)
+      INTEGER(4)     ,INTENT(IN) :: NDIM       ! #(SPINOR DIMENSIONS)
+      INTEGER(4)     ,INTENT(IN) :: NB         ! #(STATES)
+      INTEGER(4)     ,INTENT(IN) :: NPRO       ! #(PROJECTIONS)
+      COMPLEX(8)     ,INTENT(IN) :: PSI(NGL,NDIM,NB) !WAVEFUNCTIONS
+      COMPLEX(8)     ,INTENT(OUT):: PROPSI(NDIM,NB,NPRO) !
+      COMPLEX(8)     ,ALLOCATABLE:: PROPSI1(:,:)  !(NPRO,NDIM*NB)
+      INTEGER(4)                 :: IPRO,IB,IDIM,ICOL
+!     ******************************************************************
+                                CALL TIMING$CLOCKON('WAVES_PROJECTIONS')
+!
+!     ==================================================================
+!     ==  CONSISTENCY CHECKS                                          ==
+!     ==================================================================
+      IF(NPRO.NE.MAP%NPRO) THEN
+        CALL ERROR$MSG('INCONSISTENT NPRO')
+        CALL ERROR$STOP('WAVES_PROJECTIONS')
+      END IF
+      IF(GSET%NGL.NE.NGL) THEN
+        CALL ERROR$MSG('INCONSISTENT NGL')
+        CALL ERROR$STOP('WAVES_PROJECTIONS')
+      END IF
+!
+!     ==================================================================
+!     ==  <PRO|PSI>, ONE COMBINED SCALAR-PRODUCT CALL OVER *ALL* ATOMS ==
+!     ==  AT ONCE (PROFULL IS SINGLE-SLOT-CACHED, SEE WAVES_FULLPRO).  ==
+!     ==  PREVIOUSLY NAT SEPARATE CALLS, ONE PER ATOM (K=LMNX~O(10))   ==
+!     ==  -- STILL 20-29% OF TOTAL CPU ON A 64-ATOM SI TEST EVEN AFTER ==
+!     ==  PROJECTOR CACHING, SINCE MANY THIN-K BLAS3 CALLS ARE FAR     ==
+!     ==  LESS EFFICIENT THAN ONE CALL WITH K=NPRO~O(500). SEE          ==
+!     ==  THE DEV NOTES, 2026-09-07.                                ==
+!     ==================================================================
+      CALL WAVES_FULLPRO(MAP,GSET,NAT,R,NGL,NPRO)
+      ALLOCATE(PROPSI1(NPRO,NDIM*NB))
+      CALL PLANEWAVE$SCALARPRODUCT(' ',NGL,1,NPRO,PROCACHEPRO,NDIM*NB,PSI,PROPSI1)
+      DO IB=1,NB
+        DO IDIM=1,NDIM
+          ICOL=IDIM+NDIM*(IB-1)
+          DO IPRO=1,NPRO
+            PROPSI(IDIM,IB,IPRO)=PROPSI1(IPRO,ICOL)
+          ENDDO
+        ENDDO
+      ENDDO
+      DEALLOCATE(PROPSI1)
+                               CALL TIMING$CLOCKOFF('WAVES_PROJECTIONS')
+      RETURN
+      END
+!
+!     .....................................................NLSMX........
+      SUBROUTINE WAVES_ADDPRO(MAP,GSET,NAT,R,NGL,NDIM,NB,NPRO,PSI,PROPSI)
+!     ******************************************************************
+!     **                                                              **
+!     **  CALCULATE PROJECTIONS                                       **
+!     **                                                              **
+!     **                                                              **
+!     *******************************************P.E. BLOECHL, (1998)***
+      USE WAVES_MODULE, ONLY : MAP_TYPE,GSET_TYPE,PROCACHEPRO
+      IMPLICIT NONE
+      TYPE(MAP_TYPE) ,INTENT(IN) :: MAP
+      TYPE(GSET_TYPE),INTENT(IN) :: GSET
+      INTEGER(4)     ,INTENT(IN) :: NAT        ! #(ATOMS)
+      REAL(8)        ,INTENT(IN) :: R(3,NAT)   ! ATOMIC POSITIONS
+      INTEGER(4)     ,INTENT(IN) :: NGL        ! #(PLANE WAVES)
+      INTEGER(4)     ,INTENT(IN) :: NDIM       ! #(SPINOR DIMENSIONS)
+      INTEGER(4)     ,INTENT(IN) :: NB         ! #(STATES)
+      INTEGER(4)     ,INTENT(IN) :: NPRO       ! #(PROJECTIONS)
+      COMPLEX(8)     ,INTENT(INOUT) :: PSI(NGL,NDIM,NB)  !WAVEFUNCTIONS
+      COMPLEX(8)     ,INTENT(IN) :: PROPSI(NDIM,NB,NPRO) !
+      COMPLEX(8)     ,ALLOCATABLE:: PROPSI1(:,:)  !(NPRO,NDIM*NB)
+      INTEGER(4)                 :: IPRO,IB,IDIM,ICOL
+!     ******************************************************************
+                                 CALL TIMING$CLOCKON('WAVES_ADDPRO')
+!
+!     ==================================================================
+!     ==  CONSISTENCY CHECKS                                          ==
+!     ==================================================================
+      IF(NPRO.NE.MAP%NPRO) THEN
+        CALL ERROR$MSG('INCONSISTENT NPRO')
+        CALL ERROR$STOP('WAVES_ADDPRO')
+      END IF
+      IF(GSET%NGL.NE.NGL) THEN
+        CALL ERROR$MSG('INCONSISTENT NGL')
+        CALL ERROR$STOP('WAVES_ADDPRO')
+      END IF
+!
+!     ==================================================================
+!     ==  |PSI>=|PSI>+|PRO>PROPSI, ONE COMBINED GEMM OVER *ALL* ATOMS  ==
+!     ==  AT ONCE (PROFULL IS SINGLE-SLOT-CACHED, SEE WAVES_FULLPRO).  ==
+!     ==  PREVIOUSLY NAT SEPARATE ZGEMM CALLS, ONE PER ATOM (K=LMNX~   ==
+!     ==  O(10)) -- STILL 61% OF TOTAL CPU ON A 64-ATOM SI TEST EVEN   ==
+!     ==  AFTER PROJECTOR CACHING, SINCE MANY THIN-K BLAS3 CALLS ARE   ==
+!     ==  FAR LESS EFFICIENT THAN ONE CALL WITH K=NPRO~O(500). SEE     ==
+!     ==  THE DEV NOTES, 2026-09-07.                               ==
+!     ==================================================================
+      CALL WAVES_FULLPRO(MAP,GSET,NAT,R,NGL,NPRO)
+      ALLOCATE(PROPSI1(NPRO,NDIM*NB))
+      DO IB=1,NB
+        DO IDIM=1,NDIM
+          ICOL=IDIM+NDIM*(IB-1)
+          DO IPRO=1,NPRO
+            PROPSI1(IPRO,ICOL)=PROPSI(IDIM,IB,IPRO)
+          ENDDO
+        ENDDO
+      ENDDO
+!     == PSI=PSI+PRO*PROPSI1
+      CALL LIB$ADDPRODUCTC8(.FALSE.,NGL,NPRO,NDIM*NB,PROCACHEPRO,PROPSI1,PSI)
+      DEALLOCATE(PROPSI1)
+                                 CALL TIMING$CLOCKOFF('WAVES_ADDPRO')
+      RETURN
+      END
+!
+!     ..................................................................
+      SUBROUTINE WAVES_EXPANDPRO(LNX,LOX,LMNX,NGL,GVEC &
+     &                          ,BAREPRO,LMX,YLM,EIGR,PRO)
+!     ******************************************************************
+!     **                                                              **
+!     **  TAKES THE BARE PROJECTOR FUNCTIONS AND CALCULATES FULL      **
+!     **  PROJECTOR FUNCTIONS WITH STRUCTURE FACTOR AND I**L          **
+!     **                                                              **
+!     *******************************************P.E. BLOECHL, (1998)***
+      IMPLICIT NONE
+      INTEGER(4)    ,INTENT(IN) :: LNX       ! #(PROJECTORS PER ATOM)
+      INTEGER(4)    ,INTENT(IN) :: LMNX      ! #(PROJECTORS PER ATOM)
+      INTEGER(4)    ,INTENT(IN) :: LOX(LNX)  ! ANGULAR MOMENTA
+      INTEGER(4)    ,INTENT(IN) :: NGL           ! #(G-VECTORS(LOCAL))
+      REAL(8)       ,INTENT(IN) :: GVEC(3,NGL)   ! G-VECTORS
+      REAL(8)       ,INTENT(IN) :: BAREPRO(NGL,LNX)  ! PROJECTOR FUNCTIONS
+      INTEGER(4)    ,INTENT(IN) :: LMX           ! X#(ANGULAR MOMENTA IN YLM))
+      REAL(8)       ,INTENT(IN) :: YLM(NGL,LMX)  ! CI**(-L)*SPHERICAL HARMONICS
+      COMPLEX(8)    ,INTENT(IN) :: EIGR(NGL)     ! STRUCTURE FACTORS
+      COMPLEX(8)    ,INTENT(OUT):: PRO(NGL,LMNX) !PROJECTOR FUNCTION
+      COMPLEX(8)    ,PARAMETER  :: CI=(0.D0,1.D0)
+      INTEGER(4)                :: LMN,LN,L,LM,IM,IG
+      REAL(8)                   :: SVAR
+      COMPLEX(8)                :: CSVAR
+!     ******************************************************************
+      LMN=0
+      DO LN=1,LNX
+        L=LOX(LN)
+        LM=L**2
+        DO IM=1,2*L+1
+          LMN=LMN+1
+          LM=LM+1
+          CSVAR=(-CI)**L
+          DO IG=1,NGL
+            SVAR=YLM(IG,LM)*BAREPRO(IG,LN)
+            PRO(IG,LMN)=SVAR*CSVAR*EIGR(IG)
+          ENDDO
+        ENDDO
+      ENDDO
+      RETURN
+      END
+!
+!     ..................................................................
+      SUBROUTINE WAVES_PROFORCE(LNX,LMNX,LOX,NGL,GWEIGHT,GVEC,GIJ &
+     &           ,BAREPRO,DBAREPRO,LMX,YLM,SYLM,EIGR,DEDPRO,FORCE,TSTRESS,STRESS)
+!     ******************************************************************
+!     **                                                              **
+!     **  TAKES THE BARE PROJECTOR FUNCTIONS AND CALCULATES FULL      **
+!     **  PROJECTOR FUNCTIONS WITH STRUCTURE FACTOR AND I**L          **
+!     **                                                              **
+!     **  FOR NDIM.NE.3 FIRST DERIVATIVES ARE CALCULATED              **
+!     **  FOR NDIM.NE.6 SECOND DERIVATIVES ARE CALCULATED             **
+!     **                                                              **
+!     *******************************************P.E. BLOECHL, (1998)***
+      IMPLICIT NONE
+      INTEGER(4),INTENT(IN) :: LNX           ! #(BARE PROJECTORSS)
+      INTEGER(4),INTENT(IN) :: LMNX          ! #(PROJECTORSS)
+      INTEGER(4),INTENT(IN) :: LOX(LNX)      ! ANGULAR MOMENTA
+      INTEGER(4),INTENT(IN) :: NGL           ! #(G-VECTORS(LOCAL))
+      REAL(8)   ,INTENT(IN) :: GWEIGHT
+      REAL(8)   ,INTENT(IN) :: GVEC(3,NGL)   ! G-VECTORS
+      REAL(8)   ,INTENT(IN) :: GIJ(6,NGL)    ! GI*GJ/G**2
+      REAL(8)   ,INTENT(IN) :: BAREPRO(NGL,LNX) ! BARE PROJECTOR FUNCTIONS
+      REAL(8)   ,INTENT(IN) :: DBAREPRO(NGL,LNX) ! |G|DBAREPRO/DG
+      INTEGER(4),INTENT(IN) :: LMX           ! X#(ANGULAR MOMENTA IN YLM))
+      REAL(8)   ,INTENT(IN) :: YLM(NGL,LMX)  ! SPHERICAL HARMONICS
+      REAL(8)   ,INTENT(IN) :: SYLM(NGL,LMX,6) ! STRAINED SPHERICAL HARMONICS
+      COMPLEX(8),INTENT(IN) :: EIGR(NGL)     ! STRUCTURE FACTORS
+      COMPLEX(8),INTENT(IN) :: DEDPRO(NGL,LMNX) !PROJECTOR FUNCTION
+      REAL(8)   ,INTENT(OUT):: FORCE(3)
+      LOGICAL(4),INTENT(IN) :: TSTRESS       ! SWITCH FOR STRESS CALC.
+      REAL(8)   ,INTENT(OUT):: STRESS(3,3)
+      COMPLEX(8),PARAMETER  :: CI=(0.D0,1.D0)
+      COMPLEX(8)            :: CSVAR,CSVAR1,CSVAR2,CIL
+      COMPLEX(8)            :: CWORK1(NGL)
+      COMPLEX(8)            :: CWORK2(NGL)
+      REAL(8)               :: SVAR,SVAR1,SVAR2
+      REAL(8)               :: F(3)
+      REAL(8)               :: S(6),SDIAG
+      INTEGER(4)            :: LN,LMN,LM,L,M
+      INTEGER(4)            :: IG,I,J,IJ
+!     ******************************************************************
+      F(:)=0.D0
+      STRESS=0.D0
+      S(:)=0.D0
+      SDIAG=0.D0
+!   
+!     ==================================================================
+!     ==  START THE LOOP                                              ==
+!     ==================================================================
+      LMN=0
+      DO LN=1,LNX
+        L=LOX(LN)
+        CIL=(-CI)**L
+        IF(TSTRESS) THEN
+          DO IG=1,NGL
+            CSVAR=CIL*EIGR(IG)
+            CWORK1(IG)= BAREPRO(IG,LN)*CSVAR
+            CWORK2(IG)=DBAREPRO(IG,LN)*CSVAR
+          ENDDO
+        ELSE
+          DO IG=1,NGL
+            CWORK1(IG)=CI*BAREPRO(IG,LN)*CIL*EIGR(IG)
+          ENDDO
+        END IF
+!
+        LM=L**2
+        DO M=1,2*L+1
+          LM=LM+1
+          LMN=LMN+1
+!           
+!         ==========================================================
+!         ==  COMPOSE PROJECTOR FUNCTIONS                         ==
+!         ==========================================================
+!         ==  MULTIPLY PROJECTOR WITH STRUCTURE FACTOR ===========
+          IF(TSTRESS) THEN
+            DO IG=1,NGL
+!             == THE USE OF CONJG IN THE FOLLOWING LINE IS UNCLEAR
+!             == PREVIOUSLY CONJG WAS USED WHENEVER TINV=.TRUE.
+              CSVAR =CONJG(DEDPRO(IG,LMN))
+              CSVAR1=CSVAR*CWORK1(IG)
+              CSVAR2=CSVAR*CWORK2(IG)
+              SVAR  =REAL(CI*CSVAR1,KIND=8)*YLM(IG,LM)
+              DO I=1,3
+                F(I)=F(I)+SVAR*GVEC(I,IG)
+              ENDDO
+              SVAR1=REAL(CSVAR1,KIND=8)
+              SVAR2=REAL(CSVAR2,KIND=8)*YLM(IG,LM)
+              DO IJ=1,6
+                S(IJ)=S(IJ)-SVAR1*SYLM(IG,LM,IJ)-SVAR2*GIJ(IJ,IG)
+              ENDDO
+              SDIAG=SDIAG-SVAR1*YLM(IG,LM)
+            ENDDO
+          ELSE
+            DO IG=1,NGL
+              SVAR=REAL(CWORK1(IG)*CONJG(DEDPRO(IG,LMN)),KIND=8)*YLM(IG,LM)
+              DO I=1,3
+                F(I)=F(I)+SVAR*GVEC(I,IG)
+              ENDDO
+            ENDDO
+          END IF
+        ENDDO
+      ENDDO
+!
+!     ==================================================================
+!     == <P|DE/D<P| + DE/D|P> |P>                                     ==
+!     ==================================================================
+      DO I=1,3
+        FORCE(I)=GWEIGHT*2.D0*F(I)
+      ENDDO
+      IF(TSTRESS) THEN
+        IJ=0
+        DO I=1,3
+          DO J=I,3
+            IJ=IJ+1
+            IF(I.EQ.J) THEN
+              STRESS(I,J)=GWEIGHT*(2.D0*S(IJ)+SDIAG)
+            ELSE
+              STRESS(I,J)=GWEIGHT*2.D0*S(IJ)
+              STRESS(J,I)=STRESS(I,J)
+            END IF
+          ENDDO
+        ENDDO
+      END IF
+      RETURN
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WAVES_UPDATEGSET()
+!     **************************************************************************
+!     **                                                                      **
+!     **  THIS ROUTINE MUST BE CALLED INITIALLY AND AFTER EACH                **
+!     **  CHANGE OF THE CELL-SHAPE.                                           **
+!     **                                                                      **
+!     **    GSET%PRO PROJECTOR FUNCTIONS  GRADIENT                            **
+!     **    GSET%DPRO                                                         **
+!     **    GSET%YLM                                                          **
+!     **    GSET%SYLM                                                         **
+!     **    GSET%BUCKET                                                      **
+!     **    GSET%DBUCKET                                                      **
+!     **                                                                      **
+!     *******************************************P.E. BLOECHL, (1999)***********
+      USE WAVES_MODULE, ONLY : GSET_TYPE,GSET,MAP,TBUCKET,EPWPSI0,D2EPWPSI &
+     &                         ,NKPTL,WAVES_SELECTWV,TSTRESSX
+      IMPLICIT NONE
+      REAL(8)        ,ALLOCATABLE   :: G2(:)
+      REAL(8)        ,ALLOCATABLE   :: GVEC(:,:)
+      REAL(8)        ,ALLOCATABLE   :: YLM(:)
+      INTEGER(4)                    :: IG,ISP,IND,LN,IKPT
+      INTEGER(4)                    :: NBAREPRO,NGL
+      REAL(8)                       :: RBAS(3,3),GBAS(3,3),CELLVOL
+      INTEGER(4)                    :: LMX
+      LOGICAL(4)                    :: TSTRESS
+      REAL(8)                       :: MING2,MING,DG,ABSG
+!     ******************************************************************
+                              CALL TRACE$PUSH('WAVES_UPDATEGSET')
+!
+!     ==================================================================
+!     ==  UPDATE RADIAL PROJECTOR FUNCTIONS                           ==
+!     ==================================================================
+      CALL CELL$GETL4('MOVE',TSTRESS)
+      CALL CELL$GETL4('ON',TSTRESS)
+      TSTRESS=TSTRESS.OR.TSTRESSX   ! STRESS=T: STRESS ALSO FOR A FIXED CELL
+      CALL CELL$GETR8A('T0',9,RBAS)
+      CALL POTENTIAL$SETR8A('RBAS',9,RBAS)
+      CALL GBASS(RBAS,GBAS,CELLVOL)
+      LMX=MAP%LMX
+      DO IKPT=1,NKPTL
+        CALL WAVES_SELECTWV(IKPT,1)
+        CALL PLANEWAVE$SELECT(GSET%ID)
+        NGL=GSET%NGL
+        NBAREPRO=MAP%NBAREPRO
+!
+!       ================================================================
+!       == UPDATE PLANEWAVE OBJECT                                    ==
+!       ================================================================
+        CALL PLANEWAVE$SETR8A('RBAS',9,RBAS)
+!
+!       ================================================================
+!       ==  EVALUATE PROJECTOR FUNCTIONS IN G-SPACE                   ==
+!       ================================================================
+        IF(.NOT.ASSOCIATED(GSET%PRO)) ALLOCATE(GSET%PRO(NGL,NBAREPRO))
+        IF(.NOT.ASSOCIATED(GSET%DPRO))ALLOCATE(GSET%DPRO(NGL,NBAREPRO))
+        ALLOCATE(G2(NGL))
+        CALL PLANEWAVE$GETR8A('G2',NGL,G2)
+        IND=0
+        DO ISP=1,MAP%NSP
+          CALL SETUP$ISELECT(ISP)
+          DO LN=1,MAP%LNX(ISP)
+            IND=IND+1
+            CALL SETUP$GETFOFG('PRO',.FALSE.,LN,NGL,G2,CELLVOL,GSET%PRO(:,IND))
+            CALL SETUP$GETFOFG('PRO',.TRUE.,LN,NGL,G2,CELLVOL,GSET%DPRO(:,IND))
+          ENDDO
+          CALL SETUP$UNSELECT()
+        ENDDO
+!
+!       ================================================================
+!       ==  UPDATE SPHERICAL HARMONICS                                ==
+!       ================================================================
+        IF(.NOT.ASSOCIATED(GSET%YLM)) ALLOCATE(GSET%YLM(NGL,LMX))
+        IF(.NOT.ASSOCIATED(GSET%SYLM))ALLOCATE(GSET%SYLM(NGL,LMX,6))
+        ALLOCATE(GVEC(3,NGL))
+        CALL PLANEWAVE$GETR8A('GVEC',3*NGL,GVEC)
+        ALLOCATE(YLM(LMX))
+        DO IG=1,NGL
+          CALL GETYLM(LMX,GVEC(1,IG),YLM)
+          GSET%YLM(IG,:)=YLM(:) 
+        ENDDO        
+        DEALLOCATE(YLM)
+!       == NOW THE STRAINED SPHERICAL HARMONICS ==========================
+        CALL WAVES_STRAINEDYLM(NGL,LMX,GVEC,GSET%YLM,GSET%SYLM)
+        DEALLOCATE(GVEC)
+!
+!       ================================================================
+!       ==  EVALUATE BUCKET POTENTIAL                                 ==
+!       ================================================================
+        IF(.NOT.ASSOCIATED(GSET%BUCKET)) ALLOCATE(GSET%BUCKET(NGL))
+        IF(.NOT.ASSOCIATED(GSET%DBUCKET)) ALLOCATE(GSET%DBUCKET(NGL))
+        IF(TBUCKET) THEN
+          MING2=2.D0*EPWPSI0
+          MING=SQRT(MING2)
+          DO IG=1,NGL
+            IF(G2(IG).LT.MING2) THEN
+              GSET%BUCKET(IG)=0.D0
+              GSET%DBUCKET(IG)=0.D0
+            ELSE
+              ABSG=SQRT(G2(IG))
+              DG=ABSG-MING
+              GSET%BUCKET(IG) =     D2EPWPSI*DG**2
+              GSET%DBUCKET(IG)=2.D0*D2EPWPSI*DG/ABSG
+            END IF 
+          ENDDO
+        ELSE
+          GSET%BUCKET(:)=0.D0
+          GSET%DBUCKET(:)=0.D0
+        END IF
+        DEALLOCATE(G2)
+      ENDDO
+!
+!     ================================================================
+!     ==  EVALUATE WAVE FUNCTION MASS                               ==
+!     ================================================================
+      CALL WAVES_PSIMASS
+                              CALL TRACE$POP
+      RETURN
+      END
+!
+!     .....................................................NLSMX........
+      SUBROUTINE WAVES_STRAINEDYLM(NGL,LMX,GVEC,YLM,SYLM)
+!     ******************************************************************
+!     **                                                              **
+!     **  EVALUATES STRAINED SPHERICAL HARMONICS ON THE G-SPACE GRID  **
+!     **                                                              **
+!     *******************************************P.E. BLOECHL, (1999)***
+      USE WAVES_MODULE, ONLY : GSET_TYPE,MAP_TYPE
+      IMPLICIT NONE
+      INTEGER(4)     ,INTENT(IN)    :: NGL  ! #(G-VECTORS)
+      INTEGER(4)     ,INTENT(IN)    :: LMX ! X#(SPHERICAL HARMONICS
+      REAL(8)        ,INTENT(IN)    :: GVEC(3,NGL)
+      REAL(8)        ,INTENT(IN)    :: YLM(NGL,LMX)
+      REAL(8)        ,INTENT(OUT)   :: SYLM(NGL,LMX,6)
+      INTEGER(4)                    :: IG,IND,I,J,LM1,LM2,IJ,L
+      REAL(8)                       :: CC(3,3)
+      REAL(8)                       :: SVAR
+      REAL(8)                       :: GIJ(NGL,6)
+      REAL(8)        ,PARAMETER     :: RSMALL=1.D-20
+!     ******************************************************************
+!
+!     ==================================================================
+!     ==  PREPARE GI*GJ/G2                                            ==
+!     ==================================================================
+      DO IG=1,NGL
+        SVAR=1.D0/(GVEC(1,IG)**2+GVEC(2,IG)**2+GVEC(3,IG)**2+RSMALL)
+        IJ=0
+        DO I=1,3
+          DO J=I,3
+            IJ=IJ+1
+            GIJ(IG,IJ)=SVAR*GVEC(I,IG)*GVEC(J,IG)
+          ENDDO
+        ENDDO
+      ENDDO
+!
+!     ==================================================================
+!     ==  NOW STRAIN THE SPHERICAL HARMONICS                          ==
+!     ==  CC(I,J) REPRESENTS G_I D/DG_J, WHICH IS NOT SYMMETRIC. A    ==
+!     ==  SYMMETRIC STRAIN NEEDS THE SYMMETRIC PART; THE ANTISYMMETRIC==
+!     ==  PART (A RIGID ROTATION) VANISHES ONLY IN THE SUM OVER THE   ==
+!     ==  WHOLE BRILLOUIN ZONE, SO WITHOUT SYMMETRIZATION THE STRESS  ==
+!     ==  OF A SINGLE K-POINT IS NOT COVARIANT AND OFF-DIAGONAL       ==
+!     ==  STRESSES FROM AN IRREDUCIBLE K-SET ARE WRONG.               ==
+!     ==================================================================
+      SYLM=0.D0
+      DO LM1=1,LMX
+!
+!       ================================================================
+!       ==                                                            ==
+!       ================================================================
+        DO IND=1,10
+          CALL SPHERICAL$CCMAT0(LM1,IND,LM2,CC)
+          IF(LM2.EQ.0) EXIT
+          IJ=0
+          DO I=1,3
+            DO J=I,3
+              IJ=IJ+1
+              DO IG=1,NGL
+                SYLM(IG,LM1,IJ)=SYLM(IG,LM1,IJ)+0.5D0*(CC(I,J)+CC(J,I))*YLM(IG,LM2)
+              ENDDO
+            ENDDO
+          ENDDO
+        ENDDO        
+!
+!       ================================================================
+!       ==                                                            ==
+!       ================================================================
+        DO IND=1,10
+          CALL SPHERICAL$CCMATM(LM1,IND,LM2,CC)
+          IF(LM2.EQ.0) EXIT
+          IJ=0
+          DO I=1,3
+            DO J=I,3
+              IJ=IJ+1
+              DO IG=1,NGL
+                SYLM(IG,LM1,IJ)=SYLM(IG,LM1,IJ)+0.5D0*(CC(I,J)+CC(J,I))*YLM(IG,LM2)
+              ENDDO
+            ENDDO
+          ENDDO
+        ENDDO
+!
+!       ================================================================
+!       ==  NOW THE TERM -L*GI*GJ/G**2                                ==
+!       ================================================================
+        L=INT(SQRT(REAL(LM1-1,KIND=8))+1.D-5)
+        SVAR=-REAL(L,KIND=8)
+        DO IJ=1,6
+          DO IG=1,NGL
+            SYLM(IG,LM1,IJ)=SYLM(IG,LM1,IJ)+SVAR*YLM(IG,LM1)*GIJ(IG,IJ)
+          ENDDO
+        ENDDO
+      ENDDO
+      RETURN
+      END
+!
+!     ..................................................................
+      SUBROUTINE WAVES$PROPAGATE()
+!     ******************************************************************
+!     **                                                              **
+!     **  PROPAGATES WAVE FUNCTIONS                                   **
+!     **                                                              **
+!     **  REMARKS:                                                    **
+!     **    PARAMETERS DELT,EMASS,EMASSCG2,ANNEE AND TSTOP MUST BE SET**
+!     **                                                              **
+!     ******************************************************************
+      USE WAVES_MODULE
+      IMPLICIT NONE
+      INTEGER(4)            :: IKPT,ISPIN,IG,IDIM,IB
+      INTEGER(4)            :: NGL
+      INTEGER(4)            :: NBH
+      REAL(8)   ,ALLOCATABLE:: ARR1(:)
+      REAL(8)   ,ALLOCATABLE:: ARR2(:)
+      REAL(8)   ,ALLOCATABLE:: ARR3(:)
+      REAL(8)               :: SVAR1,SVAR2,SVAR3
+      LOGICAL(4)            :: TSTRESS
+      REAL(8)               :: FRICMAT(3,3)
+      REAL(8)  ,ALLOCATABLE :: GVEC(:,:)
+      REAL(8)  ,ALLOCATABLE :: ANNEEVEC(:)
+!     ******************************************************************
+      IF(OPTIMIZERTYPE.EQ.'CG'.OR.OPTIMIZERTYPE.EQ.'DAV'.OR.OPTIMIZERTYPE.EQ.'RMM' &
+     &   .OR.OPTIMIZERTYPE.EQ.'EDFT') RETURN !KAESTNERCG
+                              CALL TRACE$PUSH('WAVES$PROPAGATE')
+!
+!     ==================================================================
+!     ==  STOP WAVE FUNCTIONS                                         ==
+!     ==================================================================
+      IF(TSTOP) THEN
+        DO IKPT=1,NKPTL
+          DO ISPIN=1,NSPIN
+            CALL WAVES_SELECTWV(IKPT,ISPIN)
+            THIS%PSIM(:,:,:)=THIS%PSI0(:,:,:)
+          ENDDO
+        ENDDO
+        WAVEEKIN1=0.D0
+        TSTOP=.FALSE.
+      END IF
+!
+!     ==================================================================
+!     ==  PROPAGATE WAVE FUNCTIONS (PUT PSI(+) INTO PSIM)             ==
+!     ==================================================================
+      CALL CELL$GETL4('MOVE',TSTRESS)
+      DO IKPT=1,NKPTL
+        CALL WAVES_SELECTWV(IKPT,1)
+        CALL PLANEWAVE$SELECT(GSET%ID)
+        NGL=GSET%NGL
+!       == EVALUATE FACTORS ============================================
+        ALLOCATE(ARR1(NGL))
+        ALLOCATE(ARR2(NGL))
+        ALLOCATE(ARR3(NGL))
+        IF(TSTRESS) THEN
+          CALL CELL$GETR8A('FRICMAT',9,FRICMAT) !\ALPHADOT*DELTA/2
+          ALLOCATE(GVEC(3,NGL))
+          CALL PLANEWAVE$GETR8A('GVEC',3*NGL,GVEC)
+          ALLOCATE(ANNEEVEC(NGL))
+          CALL WAVES_DMPSI(.FALSE.,ANNEE,FRICMAT,NGL,GVEC &
+     &                      ,EMASS,EMASSCG2,GSET%DBUCKET,ANNEEVEC)
+!          CALL WAVES_DMPSI(TSTRESS,ANNEE,FRICMAT,NGL,GVEC &
+!     &                      ,EMASS,EMASSCG2,GSET%DBUCKET,ANNEEVEC)
+          DEALLOCATE(GVEC)
+          ARR1(:)=2.D0/(1.D0+ANNEEVEC(:))
+          ARR2(:)=1.D0-ARR1(:)
+          ARR3(:)=-DELT**2/(1.D0+ANNEEVEC(:))/GSET%MPSI(:)
+          DEALLOCATE(ANNEEVEC)
+!PB070802        IF(ASSOCIATED(GSET%DMPSI)) THEN
+!PB070802          DO IG=1,NGL
+!PB070802!PB         SVAR1=1.D0+ANNEE+GSET%DMPSI(IG)
+!PB070802            SVAR1=1.D0+ANNEE
+!PB070802            ARR1(IG)=2.D0/SVAR1
+!PB070802            ARR2(IG)=1.D0-ARR1(IG)
+!PB070802            ARR3(IG)=-DELT**2/GSET%MPSI(IG)/SVAR1
+!PB070802          ENDDO
+        ELSE
+          SVAR1=2.D0/(1.D0+ANNEE)
+          SVAR2=1.D0-SVAR1
+          SVAR3=-DELT**2/(1.D0+ANNEE)
+          DO IG=1,NGL
+            ARR1(IG)=SVAR1
+            ARR2(IG)=SVAR2
+            ARR3(IG)=SVAR3/GSET%MPSI(IG)
+          ENDDO
+        END IF
+!       ==  NOW PROPAGATE ==============================================
+        DO ISPIN=1,NSPIN
+          CALL WAVES_SELECTWV(IKPT,ISPIN)
+          CALL PLANEWAVE$SELECT(GSET%ID)
+          IF(.NOT.ASSOCIATED(THIS%HPSI)) THEN
+            CALL ERROR$MSG('HPSI NOT AVAILABLE')
+            CALL ERROR$MSG('EITHER WAVES$ETOT HAS NOT BEEN CALLED')
+            CALL ERROR$MSG('OR WAVES$PROPAGATE HAS BEEN CALLED PREVIOUSLY')
+            CALL ERROR$I4VAL('IKPT',IKPT)
+            CALL ERROR$I4VAL('ISPIN',ISPIN)
+            CALL ERROR$STOP('WAVES$PROPAGATE')
+          END IF
+          NBH=THIS%NBH
+          DO IB=1,NBH
+            DO IDIM=1,NDIM
+              DO IG=1,NGL
+                THIS%PSIM(IG,IDIM,IB)=ARR1(IG)*THIS%PSI0(IG,IDIM,IB) &
+       &                             +ARR2(IG)*THIS%PSIM(IG,IDIM,IB) &
+       &                             +ARR3(IG)*THIS%HPSI(IG,IDIM,IB) 
+              ENDDO
+            ENDDO
+          ENDDO
+          DEALLOCATE(THIS%HPSI)
+        ENDDO
+        DEALLOCATE(ARR1)
+        DEALLOCATE(ARR2)
+        DEALLOCATE(ARR3)
+      ENDDO
+                              CALL TRACE$POP
+      RETURN
+      END
+!
+!     ..................................................................
+      SUBROUTINE WAVES_PSIMASS
+!     ******************************************************************
+!     **                                                              **
+!     **  CALCULATES THE WAVE FUNCTION MASS AND ITS CHANGES           **
+!     **                                                              **
+!     ******************************************************************
+      USE WAVES_MODULE
+      USE MPE_MODULE
+      IMPLICIT NONE
+      REAL(8)   ,ALLOCATABLE :: GVEC(:,:)
+!PB070802      REAL(8)   ,ALLOCATABLE :: DG2(:)
+!PB070802      REAL(8)                :: FRICMAT(3,3)
+      REAL(8)                :: G2
+      REAL(8)                :: FAC1
+      INTEGER(4)             :: IKPT,IG
+      INTEGER(4)             :: NGL
+      LOGICAL(4)             :: TSTRESS
+!     ******************************************************************
+      CALL CELL$GETL4('ON',TSTRESS)
+!PB070802      IF(TSTRESS) THEN
+!PB070802        CALL CELL$GETR8A('FRICMAT',9,FRICMAT) !\ALPHADOT*DELTA/2
+!PB070802      ELSE
+!PB070802        FRICMAT=0.D0
+!PB070802      END IF
+      FAC1=EMASS*2.D0*EMASSCG2
+      DO IKPT=1,NKPTL
+        CALL WAVES_SELECTWV(IKPT,1)
+        CALL PLANEWAVE$SELECT(GSET%ID)
+        NGL=GSET%NGL
+        IF(TSTRESS) THEN
+          ALLOCATE(GVEC(3,NGL))
+          CALL PLANEWAVE$GETR8A('GVEC',3*NGL,GVEC)
+          IF(.NOT.ASSOCIATED(GSET%MPSI)) ALLOCATE(GSET%MPSI(NGL))
+!PB070802    IF(.NOT.ASSOCIATED(GSET%DMPSI))ALLOCATE(GSET%DMPSI(NGL))
+!PB070802    ALLOCATE(DG2(NGL))
+!PB070802    DO IG=1,NGL
+!PB070802      DG2(IG)=FRICMAT(1,1)     *GVEC(1,IG)*GVEC(1,IG) &
+!PB070802   &        +FRICMAT(1,2)*2.D0*GVEC(1,IG)*GVEC(2,IG) &
+!PB070802   &        +FRICMAT(1,3)*2.D0*GVEC(1,IG)*GVEC(3,IG) &
+!PB070802   &        +FRICMAT(2,2)     *GVEC(2,IG)*GVEC(2,IG) &
+!PB070802   &        +FRICMAT(2,3)*2.D0*GVEC(2,IG)*GVEC(3,IG) &
+!PB070802   &        +FRICMAT(3,3)     *GVEC(3,IG)*GVEC(3,IG)
+!PB070802 ENDDO
+!         == MASS ======================================================
+          DO IG=1,NGL
+            G2=GVEC(1,IG)**2+GVEC(2,IG)**2+GVEC(3,IG)**2
+            GSET%MPSI(IG) =EMASS*(1.D0+EMASSCG2*G2)
+!PB070802   GSET%DMPSI(IG)=EMASS*EMASSCG2*2.D0*DG2(IG)
+          END DO
+!         == ADD MASS FOR BUCKET POTENTIAL =============================
+          IF(TBUCKET) THEN
+            DO IG=1,NGL
+              GSET%MPSI(IG) =GSET%MPSI(IG) +FAC1*GSET%BUCKET(IG) 
+!PB070802     GSET%DMPSI(IG)=GSET%DMPSI(IG)+FAC1*GSET%DBUCKET(IG)*DG2(IG)
+            ENDDO
+          END IF
+!PB070802 DEALLOCATE(DG2)
+          DEALLOCATE(GVEC)
+        ELSE 
+!PB070802 IF(ASSOCIATED(GSET%DMPSI))DEALLOCATE(GSET%DMPSI)   
+          IF(.NOT.ASSOCIATED(GSET%MPSI)) THEN
+            ALLOCATE(GVEC(3,NGL))
+            CALL PLANEWAVE$GETR8A('GVEC',3*NGL,GVEC)
+            ALLOCATE(GSET%MPSI(NGL))
+            DO IG=1,NGL
+              G2=GVEC(1,IG)**2+GVEC(2,IG)**2+GVEC(3,IG)**2
+              GSET%MPSI(IG)=EMASS*(1.D0+EMASSCG2*G2)
+            ENDDO
+            DEALLOCATE(GVEC)
+            IF(TBUCKET) THEN
+              DO IG=1,NGL
+                GSET%MPSI(IG)=GSET%MPSI(IG)+FAC1*GSET%BUCKET(IG)
+              ENDDO
+            END IF
+          END IF
+        END IF
+      ENDDO
+      RETURN
+      END
+!
+!     ..................................................................
+      SUBROUTINE WAVES_DMPSI(TSTRESS,ANNEE,FRICMAT,NG,GVEC &
+     &                      ,EMASS,EMASSCG2,DBUCKET,ANNEEVEC)
+!     ******************************************************************
+!     **                                                              **
+!     **                                                              **
+!     **                                                              **
+!     **                                                              **
+!     **                                                              **
+!     ******************************************************************
+      IMPLICIT NONE
+      LOGICAL(4),INTENT(IN)  :: TSTRESS             
+      REAL(8)   ,INTENT(IN)  :: ANNEE
+      REAL(8)   ,INTENT(IN)  :: FRICMAT(3,3)
+      INTEGER(4),INTENT(IN)  :: NG
+      REAL(8)   ,INTENT(IN)  :: GVEC(3,NG)
+      REAL(8)   ,INTENT(IN)  :: EMASS
+      REAL(8)   ,INTENT(IN)  :: EMASSCG2
+      REAL(8)   ,INTENT(IN)  :: DBUCKET(NG)
+      REAL(8)   ,INTENT(OUT) :: ANNEEVEC(NG)
+      REAL(8)                :: FAC1,FAC2,SVAR
+      INTEGER(4)             :: IG
+!     ******************************************************************
+      IF(.NOT.TSTRESS) THEN
+        ANNEEVEC(:)=ANNEE
+        RETURN
+      END IF
+      FAC1=ANNEE-0.5D0*(FRICMAT(1,1)+FRICMAT(2,2)+FRICMAT(3,3))
+      FAC2=-0.5D0*EMASS*2.D0*EMASSCG2
+      DO IG=1,NG
+        SVAR=FRICMAT(1,1)     *GVEC(1,IG)*GVEC(1,IG) &
+     &      +FRICMAT(1,2)*2.D0*GVEC(1,IG)*GVEC(2,IG) &
+     &      +FRICMAT(1,3)*2.D0*GVEC(1,IG)*GVEC(3,IG) &
+     &      +FRICMAT(2,2)     *GVEC(2,IG)*GVEC(2,IG) &
+     &      +FRICMAT(2,3)*2.D0*GVEC(2,IG)*GVEC(3,IG) &
+     &      +FRICMAT(3,3)     *GVEC(3,IG)*GVEC(3,IG)
+        ANNEEVEC(IG)=FAC1+FAC2*SVAR*(1.D0+DBUCKET(IG))
+      ENDDO
+      RETURN
+      END
+!
+!     ..................................................................
+      SUBROUTINE WAVES_WAVEKINETIC(EKIN)
+!     ******************************************************************
+!     **                                                              **
+!     **  CALCULATES FICTITIOUS KINETIC ENERGY OF THE WAVE FUNCTIONS  **
+!     **                                                              **
+!     **  REMARKS:                                                    **
+!     **    PARAMETERS DELT,EMASS,EMASSCG2 MUST BE SET                **
+!     **                                                              **
+!     ******************************************************************
+      USE WAVES_MODULE
+      USE MPE_MODULE
+      IMPLICIT NONE
+      REAL(8)   ,INTENT(OUT):: EKIN
+      INTEGER(4)            :: IKPT,ISPIN,IG,IDIM,IB
+      INTEGER(4)            :: NGL
+      INTEGER(4)            :: NBX
+      COMPLEX(8),ALLOCATABLE:: TPSIP(:)
+      COMPLEX(8),ALLOCATABLE:: TPSIM(:)
+      REAL(8)               :: EKIN1,SUM
+      REAL(8)   ,ALLOCATABLE:: OCC(:,:,:)
+      REAL(8)   ,ALLOCATABLE:: EIG(:,:,:)
+      REAL(8)               :: RBAS(3,3),GBAS(3,3),CELLVOL
+      REAL(8)               :: V1,V2
+      REAL(8)               :: F1,F2
+      LOGICAL(4)            :: TINV
+      COMPLEX(8)            :: CSVAR
+      REAL(8)   ,PARAMETER  :: DSMALL=1.D-12
+      INTEGER(4)            :: IB1,IB2
+      INTEGER(4)            :: NGAMMA
+!     ******************************************************************
+!
+!     ==================================================================
+!     == COLLECT UNIT CELL VOLUME                                     ==
+!     ==================================================================
+      CALL CELL$GETR8A('T0',9,RBAS)
+      CALL GBASS(RBAS,GBAS,CELLVOL)
+!
+!     ==================================================================
+!     == COLLECT OCCUPATIONS                                          ==
+!     ==================================================================
+      CALL DYNOCC$GETI4('NB',NBX)
+      ALLOCATE(OCC(NBX,NKPTL,NSPIN))
+      ALLOCATE(EIG(NBX,NKPTL,NSPIN))
+      CALL WAVES_DYNOCCGETR8A('OCC',NBX*NKPTL*NSPIN,OCC)
+      EIG(:,:,:)=0.D0
+!
+!     ==================================================================
+!     ==                                                              ==
+!     ==================================================================
+      EKIN=0.D0
+      DO IKPT=1,NKPTL
+        DO ISPIN=1,NSPIN
+          CALL WAVES_SELECTWV(IKPT,ISPIN)
+          CALL PLANEWAVE$SELECT(GSET%ID)
+          NGL=GSET%NGL
+          TINV=GSET%TINV
+          NGAMMA=0
+          IF(GSET%TSUPER) CALL PLANEWAVE$GETI4('NGAMMA',NGAMMA)
+          ALLOCATE(TPSIP(NGL))
+          ALLOCATE(TPSIM(NGL))
+          EKIN1=0.D0
+          DO IB=1,THIS%NBH
+            IF(GSET%TSUPER) THEN
+              F1=OCC(IB,IKPT,ISPIN)
+              F2=0.D0
+            ELSE IF(TINV) THEN
+              IB1=2*IB-1
+              IB2=2*IB
+              F1=OCC(IB1,IKPT,ISPIN)
+              F2=OCC(IB2,IKPT,ISPIN)
+            ELSE
+              F1=OCC(IB,IKPT,ISPIN)
+              F2=0.D0
+            END IF
+            IF(F1.EQ.0.D0.AND.F2.EQ.0.D0) CYCLE
+!
+!           ============================================================
+!           ==  WAVE FUNCTION KINETIC ENERGY FOR GENERAL WAVE FUNCTIONS=
+!           ==  AND FIRST PART FOR SUPER WAVE FUNCTIONS                =
+!           ============================================================
+            SUM=0.D0
+            DO IDIM=1,NDIM
+              DO IG=1,NGL
+                CSVAR=THIS%PSI0(IG,IDIM,IB)-THIS%PSIM(IG,IDIM,IB)
+                V1=REAL(CSVAR,KIND=8)
+                V2=AIMAG(CSVAR)
+                SUM=SUM+GSET%MPSI(IG)*(V1**2+V2**2)
+              ENDDO
+            ENDDO
+            SUM=SUM/DELT**2
+!
+!           == TSUPER: EACH ORBITAL IS STORED INDEPENDENTLY AT HALF        ==
+!           == RESOLUTION (NBH=NB, NO PAIRING -- SEE LGAMMASUPER), SO      ==
+!           == THERE IS NO <PSI_+|PSI_-> CROSS TERM TO ADD (UNLIKE THE     ==
+!           == LEGACY PACKED BRANCH BELOW) -- ONLY THE HALF-SPHERE-VS-     ==
+!           == FULL-SPHERE DOUBLING, WITH MPSI(G=0) (GENERALLY NONZERO,    ==
+!           == UNLIKE G**2) COUNTED ONCE, NOT TWICE.                       ==
+            IF(GSET%TSUPER) THEN
+              SUM=2.D0*SUM
+              IF(NGAMMA.NE.0) THEN
+                CSVAR=THIS%PSI0(NGAMMA,1,IB)-THIS%PSIM(NGAMMA,1,IB)
+                SUM=SUM-GSET%MPSI(NGAMMA) &
+     &                 *(REAL(CSVAR,KIND=8)**2+AIMAG(CSVAR)**2)/DELT**2
+              END IF
+              EKIN1=EKIN1+SUM*F1
+              EIG(IB,IKPT,ISPIN)=SUM
+              CYCLE
+            ELSE IF(.NOT.TINV) THEN
+              EKIN1=EKIN1+SUM*F1
+              EIG(IB,IKPT,ISPIN)=SUM
+              CYCLE
+            ELSE
+              EIG(IB1,IKPT,ISPIN)=0.5D0*SUM
+              EIG(IB2,IKPT,ISPIN)=0.5D0*SUM
+              EKIN1=EKIN1+SUM*0.5D0*(F1+F2)
+            END IF
+!
+!           ============================================================
+!           ==  NOW CONTINUE WITH SUPERWAVE FUNCTIONS ONLY            ==
+!           ============================================================
+!           == PSI- ONLY REQUIRED IF THE OCCUPATIONS DIFFER ==========
+            IF(F1-F2.EQ.0.D0) CYCLE
+            SUM=0.D0
+            DO IDIM=1,NDIM
+              TPSIP(:)=THIS%PSI0(:,IDIM,IB)-THIS%PSIM(:,IDIM,IB)
+              CALL PLANEWAVE$INVERTG(NGL,TPSIP,TPSIM)
+              DO IG=1,NGL
+                SUM=SUM+GSET%MPSI(IG) &
+     &                 *(REAL(TPSIP(IG),KIND=8)*REAL(TPSIM(IG),KIND=8) &
+     &                   +AIMAG(TPSIP(IG))*AIMAG(TPSIM(IG)))
+              ENDDO
+            ENDDO
+            SUM=SUM/DELT**2
+            EIG(IB1,IKPT,ISPIN)=EIG(IB1,IKPT,ISPIN)+0.5D0*SUM
+            EIG(IB2,IKPT,ISPIN)=EIG(IB2,IKPT,ISPIN)-0.5D0*SUM
+            EKIN1=EKIN1+SUM*0.5D0*(F1-F2)
+          ENDDO
+          DEALLOCATE(TPSIP)
+          DEALLOCATE(TPSIM)
+          EKIN=EKIN+EKIN1*CELLVOL
+        ENDDO
+      ENDDO
+!
+!     ==================================================================
+!     == COMMUNICATE                                                  ==
+!     ==================================================================
+      CALL MPE$COMBINE('MONOMER','+',EKIN)
+      CALL MPE$COMBINE('K','+',EIG)
+!
+!     ==================================================================
+!     == SET CONTRIBUTION TO EIGENVALUES                              ==
+!     ==================================================================
+      CALL WAVES_DYNOCCSETR8A('M<PSIDOT|PSIDOT>',NBX*NKPTL*NSPIN,EIG)
+      DEALLOCATE(EIG)
+      DEALLOCATE(OCC)
+      RETURN
+      END
+! 
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WAVES_KDISTRIBUTE(NTASKS,NKPT,TINV,ICOLOR,KMAP)
+!     **************************************************************************
+!     **   ICOLOR GIVES EACH TASK AN INTEGER. TASKS WITH EQUAL                **
+!     **   VALUE OF ICOLOR WILL BE IN THE SAME GROUP                          **
+!     **                                                                      **
+!     **   KMAP POINTS TO THE TASK, WHICH IS THE FIRST TASK IN THE            **
+!     **   CORRESPONDING K-GROUP                                              **
+!     **                                                                      **
+!     ******************************* PETER BLOECHL, TU CLAUSTJAL 2005 *********
+       IMPLICIT NONE
+       INTEGER(4),INTENT(IN) :: NTASKS      ! #(TASKS)
+       INTEGER(4),INTENT(IN) :: NKPT        ! #(K-POINTS)
+       LOGICAL(4),INTENT(IN) :: TINV(NKPT)  ! TRUE FOR SPECIAL K-POINTS
+       INTEGER(4),INTENT(OUT):: ICOLOR(NTASKS) !USED TO SPLIT PROCESSORS
+       INTEGER(4),INTENT(OUT):: KMAP(NKPT)   ! FIRST TASK IN K-GROUP
+       REAL(8)   ,PARAMETER  :: WA=1.D0,WB=0.5D0,WA0=0.2,WB0=0.2
+       REAL(8)               :: WK(NKPT)
+       REAL(8)               :: WK0(NKPT)
+       INTEGER(4)            :: SK(NKPT)
+       INTEGER(4)            :: SKSAVE(NKPT)
+       REAL(8)   ,ALLOCATABLE:: XLOAD(:)
+       REAL(8)               :: XLOAD1
+       REAL(8)   ,PARAMETER  :: R8LARGE=1.D+20
+       INTEGER(4)            :: I,J,IKPT,IPOS,IGROUP
+       INTEGER(4)            :: ISVAR
+       INTEGER(4)            :: IND(1)
+       INTEGER(4)            :: IFIRST(NTASKS)
+       INTEGER(4),ALLOCATABLE:: NA(:),NB(:)
+       INTEGER(4),ALLOCATABLE:: MG(:),MGSAVE(:)
+       INTEGER(4)            :: NGROUPS
+!      *************************************************************************
+       DO I=1,NKPT
+         WK(I)=WA
+         WK0(I)=WA0
+         IF(TINV(I))WK(I)=WB
+         IF(TINV(I))WK0(I)=WB0
+       ENDDO
+!
+!      =========================================================================
+!      ==  OPTMIZATION OF SK. SK US A POINTER IKPT->IGROUP                    ==
+!      =========================================================================
+       XLOAD1=R8LARGE
+!      == TEST DIFFERENT NUMBER OF SUBGROUPS ===================================
+       DO NGROUPS=1,NTASKS       
+         IF(NGROUPS.GT.NKPT) EXIT  ! THERE MUST NOT BE AN EMPTY GROUP
+!        =======================================================================
+!        == DISTRIBUTE ALL K-POINTS INTO "NGROUPS" GROUPS                     ==
+!        == NB(IGROUP) IS THE NUMBER OF KPOINTS WITH REAL WAVE                ==
+!        == FUNCTIONS IN THE GROUP "IGROUP"; NA(IGROUP IS THE                 ==
+!        == NUMBER OF COMPLEX WAVE FUNCTIONS                                  ==
+!        =======================================================================
+         ALLOCATE(NA(NGROUPS)) !#(K-POINTS WITH COMPLEX PSI)
+         ALLOCATE(NB(NGROUPS)) !#(K-POINTS WITH REAL PSI)
+         NA(:)=0
+         NB(:)=0
+         DO IKPT=1,NKPT
+           IPOS=MODULO(IKPT-1,NGROUPS)+1
+           IF(TINV(IKPT)) THEN
+             NB(IPOS)=NB(IPOS)+1
+           ELSE
+             NA(IPOS)=NA(IPOS)+1
+           END IF
+         ENDDO
+!
+!        === RESHUFFLE NA AND NB TO DISTRIBUTE LOAD EQUALLY AMONG GROUPS =======
+         CALL WAVES_PREBALANCE(NGROUPS,NA,NB,WA,WB)
+!
+!        == DETERMINE POINTER SK(IKPT)=IGROUP
+         DO IKPT=1,NKPT
+           DO IGROUP=1,NGROUPS
+             IF(TINV(IKPT).AND.NB(IGROUP).NE.0) THEN
+               NB(IGROUP)=NB(IGROUP)-1   ! FOR CONSISTENCY CHECK
+               SK(IKPT)=IGROUP
+               EXIT
+             ELSE IF(.NOT.TINV(IKPT).AND.NA(IGROUP).NE.0) THEN
+               NA(IGROUP)=NA(IGROUP)-1   ! FOR CONSISTENCY CHECK
+               SK(IKPT)=IGROUP
+               EXIT
+             END IF
+           ENDDO
+         ENDDO
+!
+!        == CONSISTENCY CHECK ==================================================
+         DO IGROUP=1,NGROUPS
+           IF(NB(IGROUP).NE.0.OR.NA(IGROUP).NE.0) THEN
+             CALL ERROR$MSG('INCONSISTENCY DETECTED WITH NA,NB')
+             CALL ERROR$I4VAL('NGROUPS',NGROUPS)
+             CALL ERROR$I4VAL('NKPT',NKPT)
+             CALL ERROR$I4VAL('NA: #(TINV)',NA(IGROUP))
+             CALL ERROR$I4VAL('NA: #(.NOT.TINV)',NB(IGROUP))
+             CALL ERROR$STOP('WAVES_KDISTRIBUTE')
+           END IF
+         ENDDO
+         DEALLOCATE(NA)
+         DEALLOCATE(NB)
+!
+!        =======================================================================
+!        == CHECK IF THIS #(GROUPS) IMPROVED THE LOADBALANCE                  ==
+!        == AND DISCARD IF NOT.                                               ==
+!        =======================================================================
+         ALLOCATE(MG(NGROUPS))
+         ALLOCATE(XLOAD(NGROUPS))
+         CALL WAVES_LOADPERPROC(NGROUPS,NTASKS,NKPT,WK,WK0,SK,MG,XLOAD)
+         IND=MAXLOC(XLOAD)
+         IF(XLOAD(IND(1)).LE.XLOAD1) THEN
+           IF(ALLOCATED(MGSAVE))DEALLOCATE(MGSAVE)
+           ALLOCATE(MGSAVE(NGROUPS))
+           MGSAVE=MG
+           SKSAVE=SK
+           XLOAD1=XLOAD(IND(1))
+         END IF
+         DEALLOCATE(MG)
+         DEALLOCATE(XLOAD)
+       ENDDO
+       NGROUPS=SIZE(MGSAVE)
+       ALLOCATE(MG(NGROUPS))
+       MG(:)=MGSAVE(:)  ! #(PROCS PER GROUP)
+       SK=SKSAVE        ! POINTER: IKPT-> IGROUP
+       DEALLOCATE(MGSAVE)
+!
+!      =========================================================================
+!      ==  WRAP UP  AND PREPARE OUTPUT                                        ==
+!      =========================================================================
+       ISVAR=0
+       DO I=1,NGROUPS
+         IFIRST(I)=ISVAR+1   ! FIRST TASK FOR THIS GROUP
+         ISVAR=ISVAR+MG(I)
+         ICOLOR(IFIRST(I):ISVAR)=I   
+       ENDDO
+       DO IKPT=1,NKPT 
+         KMAP(IKPT)=IFIRST(SK(IKPT))
+       ENDDO
+!
+!      =========================================================================
+!      == CHECKS                                                              ==
+!      =========================================================================
+       IF(SUM(MG).NE.NTASKS) THEN
+         CALL ERROR$MSG('INCONSISTENT DIVISION')
+         CALL ERROR$STOP('WAVES_KDISTRIBUTE')
+       END IF
+       ALLOCATE(NA(NTASKS))
+       NA(:)=0
+       DO IKPT=1,NKPT
+         IGROUP=SK(IKPT)
+         I=IFIRST(IGROUP)
+         J=IFIRST(IGROUP)-1+MG(IGROUP)
+         NA(I:J)=NA(I:J)+1
+       ENDDO
+       DO I=1,NTASKS
+         IF(NA(I).EQ.0) THEN
+           CALL ERROR$MSG('TASK WITH NKPTL=0 IS NOT ALLOWED')
+           CALL ERROR$MSG('REDUCE NUMBER OF PROCESSORS')
+           CALL ERROR$STOP('WAVES_KDISTRIBUTE')
+         END IF
+       ENDDO              
+
+       DO I=1,NTASKS
+         IF(ICOLOR(I).EQ.0) THEN
+           CALL ERROR$MSG('ICOLOR HAS AN ELEMENT ZERO')
+           CALL ERROR$I4VAL('I',I)
+           CALL ERROR$I4VAL('ICOLOR(I)',ICOLOR(I))
+           CALL ERROR$STOP('WAVES_KDISTRIBUTE')
+         END IF
+       ENDDO
+       DO I=1,NKPT
+         IF(KMAP(I).EQ.0) THEN
+           CALL ERROR$MSG('KMAP HAS AN ELEMENT ZERO')
+           CALL ERROR$I4VAL('I',I)
+           CALL ERROR$I4VAL('KMAP(I)',KMAP(I))
+           CALL ERROR$STOP('WAVES_KDISTRIBUTE')
+         END IF
+       ENDDO
+
+       RETURN
+       END
+!
+!      ...............................................................
+       SUBROUTINE WAVES_LOADPERPROC(NGROUPS,NTASKS,NKPT,WK,WK0,SK,MG,XLOAD)
+!      **  ASSIGN TO EACH GROUP A NUMBER OF PROCESSORS              **
+!      **                                                           **
+!      **                                                           **
+!      ********************* PETER BLOECHL, TU CLAUSTJAL 2005 *********
+       IMPLICIT NONE
+       INTEGER(4),INTENT(IN) :: NGROUPS
+       INTEGER(4),INTENT(IN) :: NTASKS
+       INTEGER(4),INTENT(IN) :: NKPT
+       REAL(8)   ,INTENT(IN) :: WK(NKPT)     ! WEIGHT PER K-POINT
+       REAL(8)   ,INTENT(IN) :: WK0(NKPT)     ! WEIGHT PER K-POINT
+       INTEGER(4),INTENT(IN) :: SK(NKPT)     ! GROUP INDEX
+       INTEGER(4),INTENT(OUT):: MG(NGROUPS)   ! #PROC FOR K-GROUP
+       REAL(8)   ,INTENT(OUT):: XLOAD(NGROUPS) ! LOAD PER PROCFOR EACH GROUP
+       REAL(8)               :: WG(NGROUPS) ! TOTAL LOAD OF THE K-GROUP
+       REAL(8)               :: WG0(NGROUPS) ! TOTAL LOAD OF THE K-GROUP
+       INTEGER(4)            :: NODESLEFT
+       INTEGER(4)            :: IPOS1,IPOS2
+       REAL(8)               :: XLOADTEST(NGROUPS) ! LOAD PER PROCESSOR
+       REAL(8)               :: XLOAD1
+       INTEGER(4)            :: IND(1)
+       INTEGER(4)            :: I
+       REAL(8)   ,PARAMETER  :: R8LARGE=1.D+20
+!      ***************************************************************
+!
+!      ===============================================================
+!      == START UP                                                  ==
+!      ===============================================================
+!      == DETERMINE WORK FOR EACH GROUP
+       WG(:)=0.D0
+       WG0(:)=0.D0
+       DO I=1,NKPT
+         IF(SK(I).LT.1.OR.SK(I).GT.NGROUPS) THEN
+           CALL ERROR$MSG('SK OUT OF RANGE')
+           CALL ERROR$STOP('WAVES_LOADPERPROC')
+         END IF
+         WG(SK(I))=WG(SK(I))+WK(I)
+         WG0(SK(I))=WG0(SK(I))+WK0(I)
+       ENDDO
+       IF(NGROUPS.GT.NTASKS) THEN
+         CALL ERROR$MSG('NGROUPS MUST BE SMALLER OR EQUAL TO NTASKS')
+         CALL ERROR$STOP('WAVES_LOADPERPROC')
+         XLOAD(:)=0
+         XLOAD(1:NTASKS)=1.D0
+         MG(:)=0
+         MG(1:NTASKS)=1
+         RETURN
+       END IF
+       MG(:)=1  ! GIVE EACH GROUP ONE PROCESSOR
+! 
+!      ===============================================================
+!      == ENFORCE SUM RULE                                          ==
+!      ===============================================================
+       NODESLEFT=NTASKS-SUM(MG)  ! #(UNOCCUPIED NODES)
+       IF(NODESLEFT.LT.0) THEN
+         CALL ERROR$MSG('NODESLEFT<0')
+         CALL ERROR$STOP('WAVES_LOADPERPROC')
+       END IF
+       DO I=1,NODESLEFT
+         XLOAD(:)=WG0(:)+WG(:)/MG(:)  !DETERMINE LOAD FOR EACH GROUP
+         IND=MAXLOC(XLOAD)
+         IPOS1=IND(1)
+         MG(IPOS1)=MG(IPOS1)+1  ! GIVE MAXIMUM LOADED GROUP AN ADDITIONAL NODE
+       ENDDO  
+!
+!      ===============================================================
+!      == RESHUFFLE NODES TO REDUCE MAXIMUM LOAD                    ==
+!      ===============================================================
+1000   CONTINUE
+       XLOAD(:)=WG0(:)+WG(:)/MG(:)  ! CURRENT WORK PER PROC IN EACH GROUP
+       IND=MAXLOC(XLOAD)
+       IPOS1=IND(1)
+       XLOAD1=XLOAD(IPOS1)          ! MAX WORK PER PROC
+       XLOADTEST(IPOS1)=WG0(IPOS1)+WG(IPOS1)/REAL(MG(IPOS1)+1)
+       DO I=1,NGROUPS
+         IF(I.EQ.IPOS1) CYCLE
+         IF(MG(I).GT.1) THEN
+           XLOADTEST(I)=WG0(I)+WG(I)/REAL(MG(I)-1)
+         ELSE
+           XLOADTEST(I)=R8LARGE
+         END IF
+       ENDDO
+       IND=MINLOC(XLOADTEST)
+       IPOS2=IND(1)
+       IF(IPOS2.NE.IPOS1.AND.XLOADTEST(IPOS2).LT.XLOAD1) THEN
+         MG(IPOS1)=MG(IPOS1)+1
+         MG(IPOS2)=MG(IPOS2)-1
+         GOTO 1000
+       END IF
+!
+!      ===============================================================
+!      == DETERMINE LOAD FOR EACH PROCESSOR                         ==
+!      ===============================================================
+       XLOAD(:)=WG0(:)+WG(:)/MG(:)
+       RETURN
+       END
+!
+!      ...............................................................
+       SUBROUTINE WAVES_PREBALANCE(NGROUPS,NA,NB,WA,WB)
+!      **                                                             **
+!      **  TRIES DO DISTRIBUTE THE COMPUTATIONAL EFFORT EQUALLY       **
+!      **  ONTO NGROUPS GROUPS. IT ASSUMES THAT THERE ARE TWO TYPES   **
+!      **  OF KPOINTS WITH WEIGHTS WA AND WB. NA AND NB SPECIFIES     **
+!      **  THE NUMBER OF K-POINTS FROM EACH TYPE IN THE CORRESPONDING **
+!      **  GROUPS                                                     **
+!      **                                                             **
+       IMPLICIT NONE
+       INTEGER(4),INTENT(IN)    :: NGROUPS
+       INTEGER(4),INTENT(INOUT) :: NA(NGROUPS)
+       INTEGER(4),INTENT(INOUT) :: NB(NGROUPS)
+       REAL(8)   ,INTENT(IN)    :: WA
+       REAL(8)   ,INTENT(IN)    :: WB
+       REAL(8)                  :: XLOAD(NGROUPS)
+       REAL(8)                  :: XLOADTESTA(NGROUPS)
+       REAL(8)                  :: XLOADTESTB(NGROUPS)
+       INTEGER(4)               :: IND(1)
+       REAL(8)                  :: XLOAD1,XLOAD2A,XLOAD2B
+       INTEGER(4)               :: IPOS1,IPOS2A,IPOS2B
+       INTEGER(4)               :: J,ICOUNT
+       REAL(8)   ,PARAMETER     :: R8LARGE=1.D20
+!      ***************************************************************
+       ICOUNT=0
+       DO ICOUNT=1,100
+!        == XLOAD QUANTIFIES THE ESTIMATED COMPUTATIONAL EFFORT FOR EACH GROUP
+         XLOAD(:)=REAL(NA(:),KIND=8)*WA+REAL(NB(:),KIND=8)*WB
+!        == FIND THE GROUP HAVING THE LARGEST LOAD
+         IND=MAXLOC(XLOAD)
+         IPOS1=IND(1)
+         XLOAD1=XLOAD(IPOS1)
+!        == IT IS NOT ALLOWED TO REDUCE THE NUMBER OF KPOINTS IN A GROUP TO ZERO
+         IF(NA(IPOS1)+NB(IPOS1).LE.1) EXIT
+!        ==  TRY TO RESHUFFLE FROM THE GROUP WITH THE LARGEST LOAD TO THE OTHERS
+!        ==  XLOADTESTA ESTIMATES THE LOAD WHEN A K-POINT OF TYPE A IS ADDED
+!        ==  XLOADTESTB ESTIMATES THE LOAD WHEN A K-POINT OF TYPE B IS ADDED
+!        ==  THE FACTOR IN THE FOLLOWING LINE IS BECAUSE THE PGI COMPILER DOES
+!        ==  NOT HANDLE MINLOC WITH THE LARGEST POSSIBLE VALUE.
+         XLOADTESTA(IPOS1)=R8LARGE
+         XLOADTESTB(IPOS1)=R8LARGE
+         DO J=1,NGROUPS
+           IF(J.EQ.IPOS1) CYCLE
+           XLOADTESTA(J)=XLOAD(J)+WA
+           XLOADTESTB(J)=XLOAD(J)+WB
+         ENDDO
+         IF(NA(IPOS1).EQ.0) XLOADTESTA=R8LARGE
+         IF(NB(IPOS1).EQ.0) XLOADTESTB=R8LARGE
+         IND=MINLOC(XLOADTESTA)
+         IPOS2A=IND(1)       
+         XLOAD2A=XLOADTESTA(IPOS2A)
+         IND=MINLOC(XLOADTESTB)
+         IPOS2B=IND(1)
+         XLOAD2B=XLOADTESTB(IPOS2B)
+         IF(MIN(XLOAD2A,XLOAD2B).LT.XLOAD1) THEN 
+           IF(XLOAD2A.LE.XLOAD1.AND.NA(IPOS1).GT.0) THEN
+             NA(IPOS1)=NA(IPOS1)-1        
+             NA(IPOS2A)=NA(IPOS2A)+1        
+             CYCLE
+           ELSE IF(XLOAD2A.GE.XLOAD1.AND.NB(IPOS1).GT.0) THEN
+             NB(IPOS1)=NB(IPOS1)-1        
+             NB(IPOS2A)=NB(IPOS2A)+1        
+             CYCLE
+           END IF
+         END IF
+         EXIT !EXIT LOOK IF THERE IS NO MORE CHANGE
+       ENDDO
+       RETURN
+       END

@@ -1,0 +1,41 @@
+# build output (make, configure)
+/bin/
+/Makefile
+/Makefile_bare
+/config.log
+/config.status
+/configure~
+/autom4te.cache/
+/parms.in_use
+/parms.auto
+*.o
+*.mod
+*.x
+# run output inside the repository
+*.rstrt
+*.log
+*.prot
+*.pdos
+*.banddata
+*.tra
+*.strc_out
+*_constr.report
+*_stpforz*.myxml
+results.h5
+run.json
+/testsuite/*/work/
+# LaTeX intermediates
+*.aux
+*.bbl
+*.blg
+*.dvi
+*.idx
+*.ilg
+*.ind
+*.toc
+*.out
+# editors and OS
+*.bak
+*~
+.DS_Store
+__pycache__/

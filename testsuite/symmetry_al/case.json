@@ -1,0 +1,43 @@
+{
+  "description": "Space-group symmetry (!KPOINTS SYMMETRY=T) on fcc Al (metal, Mermin T=1000 K, 8x8x8 k): 48 operations mapping the FFT grid onto itself, so the density is symmetrized exactly in real space; exercises exactly degenerate bands at time-reversal-invariant k-points (super wave functions) in every iterative solver",
+  "inputs": [
+    "al.cntl",
+    "al.strc"
+  ],
+  "timeout": 900,
+  "defaults": {
+    "@SYM@": "T"
+  },
+  "runs": {
+    "full": {
+      "subs": {
+        "@SYM@": "F",
+        "@PSIDYN@": "OPTIMIZER='DAV' MIXER='VARIATIONAL' SAFEORTHO=F STOP=T"
+      }
+    },
+    "sym_dav": {
+      "subs": {
+        "@PSIDYN@": "OPTIMIZER='DAV' MIXER='VARIATIONAL' SAFEORTHO=F STOP=T"
+      }
+    },
+    "sym_rmm": {
+      "subs": {
+        "@PSIDYN@": "OPTIMIZER='RMM' MIXER='VARIATIONAL' SAFEORTHO=F STOP=T"
+      }
+    },
+    "sym_cg": {
+      "subs": {
+        "@PSIDYN@": "OPTIMIZER='CG' MIXER='VARIATIONAL' SAFEORTHO=F STOP=T"
+      }
+    }
+  },
+  "checks": [],
+  "agree": [
+    {
+      "runs": ["full", "sym_dav", "sym_rmm", "sym_cg"],
+      "quantity": "energy",
+      "tol": 1e-06
+    }
+  ],
+  "known_issues": {}
+}

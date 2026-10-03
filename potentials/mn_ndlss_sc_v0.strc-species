@@ -1,0 +1,26 @@
+# Mn -- PAW setup ("NDLSS" augmentation), REAL PUBLISHED PARAMETERS
+# Source: Peter Bloechl's own production setup, as printed directly in
+#   Bloechl group, PBE0r paper, Phys. Rev. B 95, 235150 (2017)
+#   (pasted into this session by the user from the paper itself, not
+#   re-derived) -- supersedes the generic Element0ktest recipe this file
+#   used to hold.
+# This block also carries the paper's own !NTBO (onsite-hybrid) sub-block
+#   (LHFWEIGHT etc.) for PBE0r/SCAN0r use -- inert for a plain TYPE='PBE'
+#   run (no !DFT!NTBO MODUS='HYBRID' active), real production values if
+#   hybrid IS requested.
+# Still worth a convergence/GHOSTBUSTER check in YOUR specific system
+#   before trusting it blindly, same as any setup -- but this is the
+#   closest thing to "already validated in a real publication" available.
+#
+  !SPECIES NAME='MN' NPRO=2 2 1 LRHOX=4 RAD/RCOV=1.2
+    !NTBO NOFL=2 1 1 CV=T LHFWEIGHT=0.09
+          TAILLAMBDA=4. 2. RAUG/RCOV=1.
+          RTAIL/RCOV=1.2 RTAILCUT/RCOV=2. !END
+    !AUGMENT ID='MN_NDLSS_PBE0R_PRB2017' EL='MN' ZV=15. TYPE='NDLSS'
+             RBOX/RCOV=1.2 RCSM/RCOV=0.25
+             RCL/RCOV=0.7 0.7 0.7 0.7
+      !GRID DMIN=1.E-6 DMAX=0.1 RMAX=10. !END
+      !POT  POW=3. RC/RCOV=0.7 !END
+      !CORE POW=2. RC/RCOV=0.7 !END
+    !END
+  !END

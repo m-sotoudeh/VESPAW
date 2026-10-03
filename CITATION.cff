@@ -1,0 +1,34 @@
+cff-version: 1.2.0
+message: "If you use VESPAW, please cite the software and the method paper below."
+title: "VESPAW: variational electronic structure with projector augmented waves"
+authors:
+  - family-names: Sotoudeh
+    given-names: Mohsen
+    orcid: "https://orcid.org/0000-0002-0970-5336"
+    affiliation: "Helmholtz Institute Ulm (HIU) / Karlsruhe Institute of Technology (KIT)"
+license: GPL-3.0-only
+version: "1.0.0"
+date-released: "2026-10-12"
+repository-code: "https://github.com/m-sotoudeh/VESPAW"
+keywords:
+  - density functional theory
+  - projector augmented-wave method
+  - self-consistent field
+  - variational principle
+preferred-citation:
+  type: article
+  authors:
+    - family-names: Sotoudeh
+      given-names: Mohsen
+  title: "The Kohn-Sham Hamiltonian as the variational object: strictly monotone self-consistency in the projector augmented-wave method"
+  year: 2026
+references:
+  - type: article
+    authors:
+      - family-names: Bloechl
+        given-names: Peter E.
+    title: "Projector augmented-wave method"
+    journal: "Physical Review B"
+    volume: 50
+    start: 17953
+    year: 1994

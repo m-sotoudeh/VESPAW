@@ -1,0 +1,94 @@
+{
+  "description": "Tutorial example 2: Si diamond (PBE, 6x6x6 k). SCF and band gap (25 Ry); energy-volume curve at 40 Ry (lattice constants 0.97..1.03 x 5.469 AA); forces and stress with one atom displaced by 0.05 AA.",
+  "inputs": [
+    "si.cntl",
+    "si.strc"
+  ],
+  "timeout": 900,
+  "defaults": {
+    "@EPW@": "25.",
+    "@LUNIT@": "1.0",
+    "@X2@": "1.3575000000",
+    "@OUTPUT@": ""
+  },
+  "runs": {
+    "scf": {
+      "subs": {}
+    },
+    "eos_0.97": {
+      "subs": {
+        "@EPW@": "40.",
+        "@LUNIT@": "0.97696685"
+      }
+    },
+    "eos_0.985": {
+      "subs": {
+        "@EPW@": "40.",
+        "@LUNIT@": "0.99207459"
+      }
+    },
+    "eos_1.00": {
+      "subs": {
+        "@EPW@": "40.",
+        "@LUNIT@": "1.00718232"
+      }
+    },
+    "eos_1.015": {
+      "subs": {
+        "@EPW@": "40.",
+        "@LUNIT@": "1.02229006"
+      }
+    },
+    "eos_1.03": {
+      "subs": {
+        "@EPW@": "40.",
+        "@LUNIT@": "1.03739779"
+      }
+    },
+    "forces": {
+      "subs": {
+        "@X2@": "1.4075000000",
+        "@OUTPUT@": "FORCES=T STRESS=T"
+      }
+    }
+  },
+  "checks": [
+    {
+      "run": "scf",
+      "quantity": "energy",
+      "value": -7.9731003363,
+      "tol": 2e-06,
+      "reference": "2026-09-28 -- re-checked 2026-10-03 with the corrected functionals and CODATA 2018 constants"
+    },
+    {
+      "run": "scf",
+      "quantity": "gap_ev",
+      "value": 0.7097,
+      "tol": 0.002,
+      "reference": "same -- re-checked 2026-10-03 with the corrected functionals and CODATA 2018 constants"
+    },
+    {
+      "run": "eos_1.00",
+      "quantity": "energy",
+      "value": -7.9735228833,
+      "tol": 2e-06,
+      "reference": "EOS fit: a0 5.487 AA, B 89.4 GPa (AE PBE 5.469 AA) -- re-checked 2026-10-03 with the corrected functionals and CODATA 2018 constants"
+    },
+    {
+      "run": "forces",
+      "quantity": "force:SI2:x",
+      "value": -0.0134322821,
+      "tol": 2e-06,
+      "reference": "6x6x6 k, 25 Ry -- re-checked 2026-10-03 with the corrected functionals and CODATA 2018 constants"
+    },
+    {
+      "run": "forces",
+      "quantity": "pressure_gpa",
+      "value": 2.3092,
+      "tol": 0.02,
+      "reference": "same -- re-checked 2026-10-03 with the corrected functionals and CODATA 2018 constants"
+    }
+  ],
+  "agree": [],
+  "known_issues": {}
+}

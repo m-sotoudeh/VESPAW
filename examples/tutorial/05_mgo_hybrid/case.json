@@ -1,0 +1,61 @@
+{
+  "description": "Tutorial example 5: MgO (primitive, 4x4x4 k, 30 Ry): PBE, PBE0r and PBE-SL0r band gaps.",
+  "inputs": [
+    "mgo.cntl",
+    "mgo.strc"
+  ],
+  "timeout": 1800,
+  "defaults": {
+    "@NSTEP@": "300",
+    "@NTBO@": "    !NTBO MODUS='HYBRID' HFWEIGHT=0.25 DCTYPE='SCANL' K2=-0.25 SCALERCUT=2. !END\n",
+    "@PSIDYN@": "OPTIMIZER='DAV' MIXER='VARIATIONAL' SAFEORTHO=T STOP=T",
+    "@START@": "T"
+  },
+  "runs": {
+    "pbe": {
+      "subs": {
+        "@NTBO@": ""
+      }
+    },
+    "pbe0r": {
+      "subs": {
+        "@NTBO@": "    !NTBO MODUS='HYBRID' HFWEIGHT=0.25 K2=-0.25 SCALERCUT=2. !END\n"
+      }
+    },
+    "pbesl0r": {
+      "subs": {}
+    }
+  },
+  "checks": [
+    {
+      "run": "pbesl0r",
+      "quantity": "energy",
+      "value": -55.2383312541,
+      "tol": 2e-06,
+      "reference": "2026-09-27 after the SCAN-L onsite potential fix; DAV+VARIATIONAL, RMM+VARIATIONAL and PBE-seeded friction MD agree to 6e-8 Ha. Before the fix the variational optimizer never converged (SCAN0r potential was not the derivative of its energy) and MD/Pulay converged to a non-stationary point (-55.058708 Ha, 4.393 eV). -- re-checked 2026-10-03 with the corrected functionals and CODATA 2018 constants"
+    },
+    {
+      "run": "pbesl0r",
+      "quantity": "gap_ev",
+      "value": 4.1155,
+      "tol": 0.01,
+      "reference": "same; PBE 4.4269 eV, PBE0r 4.1386 eV in this setup -- re-checked 2026-10-03 with the corrected functionals and CODATA 2018 constants"
+    },
+    {
+      "run": "pbe0r",
+      "quantity": "energy",
+      "value": -55.0802450838,
+      "tol": 2e-06,
+      "reference": "2026-09-27 -- re-checked 2026-10-03 with the corrected functionals and CODATA 2018 constants"
+    },
+    {
+      "run": "pbe",
+      "quantity": "energy",
+      "value": -55.1103453971,
+      "tol": 2e-06,
+      "reference": "2026-09-27 -- re-checked 2026-10-03 with the corrected functionals and CODATA 2018 constants"
+    }
+  ],
+  "agree": [],
+  "known_issues": {}
+}

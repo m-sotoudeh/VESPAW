@@ -1,0 +1,29 @@
+# SN -- PAW setup ("NDLSS" augmentation), PRB2017-style generic recipe
+# Source: element/variant structure (NPRO, ID, ZV) from Peter Bloechl's CP-PAW
+#   Element0ktest benchmark species list
+#   (CP-PAW: src/Benchmarks/Element0ktest/src/specieslist);
+#   the RCL/RCOV, CORE POW, LRHOX and RAD/RCOV values below instead follow
+#   the general-purpose "house" ratios seen directly in Peter's own real,
+#   published production setups for H/Li/O/Mn in
+#   Bloechl group, PBE0r paper, Phys. Rev. B 95, 235150 (2017)
+#   (RBOX/RCOV=1.2, RCSM/RCOV=0.25 already matched Element0ktest; RCL/RCOV,
+#   CORE POW, and LRHOX did not -- see the dev notes for the
+#   comparison that motivated this switch).
+# CAVEAT: this element itself was NOT one of the ones validated in the
+#   paper -- only the generic ratios are paper-derived, this specific
+#   element/variant combination still needs its own GHOSTBUSTER/EPWPSI/
+#   equilibrium-volume check before production use. No !NTBO (onsite-
+#   hybrid) block is included here (only known for H/Li/O/Mn).
+# Variant selected: semicore (_SC) -- see ../VASP_VARIANT_MAPPING.md
+#   (best-effort, not independently verified -- see the Li correction noted
+#   there and in the dev notes).
+#
+  !SPECIES NAME='SN' NPRO=2 2 1 LRHOX=4 RAD/RCOV=1.2
+    !AUGMENT ID='SN_NDLSS_SC_V0' EL='SN' ZV=14. TYPE='NDLSS'
+             RBOX/RCOV=1.2 RCSM/RCOV=0.25
+             RCL/RCOV=0.7 0.7 0.7 0.7
+      !GRID DMIN=1.E-6 DMAX=0.1 RMAX=10. !END
+      !POT  POW=3. RC/RCOV=0.7 !END
+      !CORE POW=2. RC/RCOV=0.7 !END
+    !END
+  !END
