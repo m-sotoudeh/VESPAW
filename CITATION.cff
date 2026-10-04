@@ -20,7 +20,7 @@ preferred-citation:
   authors:
     - family-names: Sotoudeh
       given-names: Mohsen
-  title: "The Kohn-Sham Hamiltonian as the variational object: strictly monotone self-consistency in the projector augmented-wave method"
+  title: "The Kohn-Sham Hamiltonian as the variational object"
   year: 2026
 references:
   - type: article

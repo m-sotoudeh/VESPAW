@@ -113,8 +113,7 @@ correction of the PBE reduced gradient).
 If you use VESPAW, please cite
 
 - the variational self-consistency method: M. Sotoudeh, *The Kohn–Sham
-  Hamiltonian as the variational object: strictly monotone
-  self-consistency in the projector augmented-wave method* (2026);
+  Hamiltonian as the variational object* (2026);
 - the PAW method: P. E. Blöchl, Phys. Rev. B **50**, 17953 (1994);
 - for the local hybrids: M. Sotoudeh *et al.*, Phys. Rev. B **95**,
   235150 (2017); P. E. Blöchl, C. F. J. Walther and Th. Pruschke,
