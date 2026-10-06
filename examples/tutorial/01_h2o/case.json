@@ -1,5 +1,5 @@
 {
-  "description": "Tutorial example 1: H2O in a 10 AA box (PBE, 60 Ry, Gamma). SCF at a distorted geometry, then relaxation with damped dynamics.",
+  "description": "Tutorial example 1: H2O in a 10 AA box (PBE, 60 Ry, Gamma). SCF at a distorted geometry, then relaxation with damped dynamics, and with L-BFGS (!RDYN OPTIMIZER='LBFGS', Davidson + Pulay mixing).",
   "inputs": [
     "h2o.cntl",
     "h2o.strc"
@@ -29,6 +29,13 @@
           }
         }
       ]
+    },
+    "relax_lbfgs": {
+      "subs": {
+        "@NSTEP@": "600",
+        "@PSIDYN@": "OPTIMIZER='DAV' MIXER='PULAY' MIXG0SQ=0.05 SAFEORTHO=T STOP=T",
+        "@RDYN@": "  !RDYN OPTIMIZER='LBFGS' FMAX[EV/AA]=0.01 !END"
+      }
     }
   },
   "checks": [
@@ -45,6 +52,13 @@
       "value": -17.3267510643,
       "tol": 3e-05,
       "reference": "2026-09-28; relaxed OH 0.971 AA, HOH 104.7 deg (PBE: 0.970, 104.2) -- re-checked 2026-10-03 with the corrected functionals and CODATA 2018 constants"
+    },
+    {
+      "run": "relax_lbfgs",
+      "quantity": "energy",
+      "value": -17.3267570493,
+      "tol": 3e-06,
+      "reference": "2026-10-06; L-BFGS with DAV+PULAY, 7 geometries / 228 SCF it, FMAX 0.004 eV/AA; OH 0.9716 AA, HOH 104.0 deg. 0.16 meV below the damped-dynamics run, which the autopilot stops at forces of 0.07 eV/AA. With MIXER='VARIATIONAL' the relaxation stalls near 0.05 eV/AA (vacuum bias of the variational mixer, ~1e-5 H)"
     }
   ],
   "agree": [],

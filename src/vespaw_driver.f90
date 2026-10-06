@@ -352,6 +352,9 @@
       REAL(8)     ,SAVE       :: EDFTHAUXCONVTOL2=1.D-5
       CHARACTER(32)           :: CENVVALHAUXTOL2
       LOGICAL(4)              :: TEDFTOKTOSTOP
+      LOGICAL(4)              :: TRELAX   ! L-BFGS GEOMETRY OPTIMIZATION
+      LOGICAL(4)              :: TSCFCONV ! SCF CONVERGED AT THIS GEOMETRY
+      LOGICAL(4)              :: TMOVED   ! RELAX HAS PROPOSED A NEW GEOMETRY
 !     ******************************************************************
                               CALL TRACE$PUSH('TIMESTEP')
       CALL FILEHANDLER$UNIT('PROT',NFILO)
@@ -468,6 +471,25 @@
         END IF
         EPREVEDIFF=ETOTNOW
         TFIRSTEDIFF=.FALSE.
+      END IF
+!
+!     ==================================================================
+!     ==  GEOMETRY OPTIMIZATION (!RDYN/!CELL OPTIMIZER='LBFGS'): THE   ==
+!     ==  SCF STOP SIGNAL ONLY MEANS "CONVERGED AT THIS GEOMETRY".     ==
+!     ==  RELAX$STEP THEN PROPOSES THE NEXT GEOMETRY, WHICH            ==
+!     ==  ATOMS$PROPAGATE AND CELL$PROPAGATE BELOW TAKE OVER, OR SETS  ==
+!     ==  THE STOP ITSELF WHEN FORCES AND STRESS ARE CONVERGED.        ==
+!     ==================================================================
+      CALL RELAX$GETL4('ON',TRELAX)
+      IF(TRELAX) THEN
+        TSCFCONV=.FALSE.
+        IF(.NOT.TSTOP) CALL STOPIT$TAKESCFCONVERGED(TSCFCONV)
+        CALL RELAX$STEP(TSCFCONV,TSTOP,TMOVED)
+        IF(TMOVED) THEN
+!         __ NEW ENERGY SURFACE: RESTART THE SCF HISTORIES________________
+          CALL MIXER$NEWGEOMETRY()
+          TFIRSTEDIFF=.TRUE.
+        END IF
       END IF
 !
 !     ==================================================================
@@ -777,6 +799,34 @@ END MODULE STOPIT_MODULE
       END IF
       RETURN
       END
+      SUBROUTINE STOPIT$TAKESCFCONVERGED(TCONV)
+!     ** GEOMETRY OPTIMIZATION (RELAX OBJECT): AN SCF STOP SIGNAL -- THE   **
+!     ** DENSITY RESIDUAL, THE EDIFF OR THE VARIATIONAL-MIXER CRITERION -- **
+!     ** MEANS "ELECTRONS CONVERGED AT THIS GEOMETRY", NOT "END THE RUN".  **
+!     ** TAKE IT BACK AND REPORT IT AS TCONV. ANY OTHER STOP REQUEST (EXIT **
+!     ** FILE, RUN-TIME LIMIT, AUTOPILOT, L-BFGS CONVERGED) STAYS.         **
+      USE STOPIT_MODULE
+      USE MPE_MODULE
+      IMPLICIT NONE
+      LOGICAL(4),INTENT(OUT) :: TCONV
+      INTEGER(4)             :: NVAL
+!     ******************************************************************
+      TCONV=TSTOP.AND.(STOPREASON(1:19).EQ.'CONVERGED (DENSITY' &
+     &             .OR.STOPREASON(1:25).EQ.'CONVERGED (ENERGY CHANGE' &
+     &             .OR.STOPREASON(1:23).EQ.'CONVERGED (VARIATIONAL')
+!     == ALL TASKS MUST TAKE THE SAME DECISION ===========================
+      NVAL=0
+      IF(TCONV) NVAL=1
+      CALL MPE$COMBINE('~','+',NVAL)
+      TCONV=(NVAL.NE.0)
+      IF(TCONV) THEN
+        TSTOP=.FALSE.
+        STOPREASON=' '
+      END IF
+      RETURN
+      END
+!
+!     ..................................................................
       SUBROUTINE STOPIT$GETCH(ID_,VAL_)
       USE STOPIT_MODULE
       IMPLICIT NONE

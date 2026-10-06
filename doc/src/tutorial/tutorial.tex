@@ -1,62 +1,117 @@
 \documentclass[11pt,a4paper,oneside]{book}
-\usepackage[margin=2.5cm]{geometry}
+\usepackage[margin=2.6cm,headheight=14pt]{geometry}
+\usepackage{cmbright}
+\usepackage[T1]{fontenc}
+\renewcommand{\ttdefault}{pcr}
 \usepackage{amsmath}
 \usepackage{booktabs}
 \usepackage{verbatim}
 \usepackage{xcolor}
+\usepackage{fancyhdr}
+\usepackage[nohints]{minitoc}
 \usepackage[colorlinks=true,linkcolor=blue!50!black,urlcolor=blue!60!black]{hyperref}
 
-\newcommand{\key}[1]{\texttt{#1}}
-\newcommand{\file}[1]{\texttt{#1}}
+\setcounter{minitocdepth}{2}
+\setlength{\mtcindent}{12pt}
+\renewcommand{\mtctitle}{}
+\mtcsetrules{minitoc}{off}
+\mtcsetfont{minitoc}{section}{\normalfont\small}
+\mtcsetfont{minitoc}{subsection}{\normalfont\small}
+\mtcsettitlefont{minitoc}{\normalfont}
+\pagestyle{fancy}
+\fancyhf{}
+\renewcommand{\chaptermark}[1]{\markboth{\thechapter\ \MakeUppercase{#1}}{}}
+\fancyhead[R]{\small\leftmark\quad\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+\fancypagestyle{plain}{\fancyhf{}\fancyfoot[C]{\small\textbf{\thepage}}\renewcommand{\headrulewidth}{0pt}}
+
+\newcommand{\key}[1]{\textbf{\texttt{#1}}}
+\newcommand{\file}[1]{\textbf{\texttt{#1}}}
 \newenvironment{shell}{\small\verbatim}{\endverbatim}
 \newcommand{\deck}[1]{{\small\verbatiminput{#1}}}
+\newcommand{\goals}{\section{Learning goals}}
+\newcommand{\background}{\section{Background}}
 
-\title{\Huge VESPAW\\[0.5em]\Large Tutorial\\[2em]
-\normalsize Hands-on examples with runnable, checked input decks}
+\title{\Huge\bfseries VESPAW\\[0.6em]\LARGE Hands-on tutorial\\[2em]
+\normalsize Variational electronic structure with projector augmented waves}
 \author{Mohsen Sotoudeh}
-\date{Version of \today}
+\date{Version 1.0.0}
 
 \begin{document}
+\dominitoc
 \frontmatter
 \maketitle
 \tableofcontents
 \mainmatter
 
 % =====================================================================
-\chapter*{How to use this tutorial}
-\addcontentsline{toc}{chapter}{How to use this tutorial}
+\chapter*{About this tutorial}
+\addcontentsline{toc}{chapter}{About this tutorial}
+\markboth{ABOUT THIS TUTORIAL}{}
 % =====================================================================
 
-Every example in this tutorial lives in a directory
-\file{examples/tutorial/NN\_name/} and is run by
+This tutorial is meant to be worked through at the computer. Each
+chapter is a small project: you set up a calculation, run it, watch it,
+check whether the result can be trusted, and analyze it. The physics and
+the numerical methods behind every step are explained in the companion
+book \emph{VESPAW: Theory and methods} (\file{doc/theory.pdf}). Every
+input keyword is described in the input manual (\file{doc/manual.pdf}).
+I recommend keeping both at hand.
+
+\paragraph{How to approach the exercises.} Do not only run the
+examples, but read the input files block by block before you start
+them, and predict what will happen. After each run, look at the output
+and ask whether the result is plausible: Is the energy converged? Do the
+forces vanish where they should? Are the magnetic moments and the band
+gap reasonable? Most errors in practice are not caused by the program
+but by input that was not thought through.
+
+\paragraph{The examples are checked.} Every example lives in a
+directory \file{examples/tutorial/NN\_name/}. Its input files are
+\emph{templates}: words such as \texttt{@PSIDYN@} are placeholders,
+and the file \file{case.json} lists the runs of the example and what
+each placeholder becomes. The script
 \begin{shell}
 python3 doc/src/tutorial/check_examples.py             # all examples
 python3 doc/src/tutorial/check_examples.py 02_si       # one example
-python3 doc/src/tutorial/check_examples.py 02_si:scf   # one run of it
+python3 doc/src/tutorial/check_examples.py 02_si:scf   # one run
 \end{shell}
-The input files in these directories are \emph{templates}: words such
-as \texttt{@PSIDYN@} or \texttt{@LUNIT@} are placeholders. The file
-\file{case.json} lists the runs of an example and what each placeholder
-becomes in each run. The checker writes the actual inputs into
-\file{examples/tutorial/NN\_name/work/RUN/} and runs them there. After a
-run you find in that directory exactly the input that was used, the report
-(\file{.prot}), the detailed protocol (\file{.log}) and all other output.
-Copy it to start your own calculation. VESPAW reports energies in eV,
-lengths in \AA, forces in eV/\AA{} and stress in GPa.
+writes the actual input of each run into
+\file{examples/tutorial/NN\_name/work/RUN/}, runs it there, and compares
+the result with the numbers printed in this tutorial. If a later version
+of the code no longer reproduces them, the script reports
+\texttt{FAIL}. The numbers were obtained on an Apple M-series laptop
+with 8 threads, so timings are indicative only.
 
-The checker also compares the results with the values quoted in this
-tutorial and reports \texttt{PASS} or \texttt{FAIL}. If the code changes
-so that an example no longer gives the numbers printed here, the checker
-says so. The numbers in this tutorial were obtained on an Apple M-series
-laptop (8 threads); timings are indicative.
+\paragraph{Units.} VESPAW reports energies in eV, lengths in \AA,
+forces in eV/\AA{} and stress in GPa. Internally, and in the detailed
+protocol, it uses Hartree atomic units.
 
-The theory behind all examples is in the companion book
-\emph{VESPAW: Theory and Methods} (\file{doc/theory.pdf}); every
-input keyword is described in the input manual \file{doc/manual.pdf}.
+\paragraph{How to organize your calculations.} Keep one directory per
+physical system, and below it one directory per calculation, for
+example \file{nio/pbe\_afm/}, \file{nio/pbeu\_afm/},
+\file{nio/pbe0r\_afm/}. A calculation directory holds exactly one
+control file and one structure file with the same root name, and
+everything the program writes. When a calculation continues another
+one, copy the restart file into a new directory instead of overwriting
+the old one. After a few weeks you will be glad to know which output
+belongs to which input.
 
 % =====================================================================
-\chapter{Installation}
+\part{Preparation}
 % =====================================================================
+
+% =====================================================================
+\chapter{Installation and first run}
+\minitoc
+% =====================================================================
+
+\goals
+\begin{itemize}
+\item Install VESPAW and check the installation
+\item Run the test suite
+\item Start, follow and stop a calculation
+\end{itemize}
 
 \section{One-step installation}
 
@@ -66,17 +121,20 @@ git clone https://github.com/m-sotoudeh/VESPAW.git && cd VESPAW
 export PATH="$HOME/.vespaw/bin:$PATH"
 vespaw doctor
 \end{shell}
-\file{install.sh} finds or installs what VESPAW needs (Fortran compiler,
-BLAS/LAPACK, FFTW, HDF5, MPI, Python) without administrator rights: on
-macOS with Homebrew it uses Homebrew, otherwise a private conda-forge
-environment in \file{\textasciitilde/.vespaw}; on clusters, load your
-modules and run \texttt{./install.sh --system}. It builds the serial and,
-if MPI works, the parallel version, and runs a short check.
-\texttt{vespaw doctor} reports the state of the installation.
+\file{install.sh} finds or installs everything VESPAW needs, namely a
+Fortran compiler, BLAS/LAPACK, FFTW, HDF5, MPI and Python, without
+administrator rights. On macOS with Homebrew it uses Homebrew, otherwise
+a private conda-forge environment in \file{\textasciitilde/.vespaw}. On
+a cluster, load the modules of your site and run
+\texttt{./install.sh --system}. The script builds the serial and, if MPI
+works, the parallel version, and runs a short check. Put the
+\texttt{export} line into your shell start-up file. \texttt{vespaw
+doctor} reports the state of the installation; run it whenever
+something seems wrong.
 
 \section{Building by hand}
 
-The build uses a parameter file for the toolchain, in \file{arch/}:
+The build reads a parameter file for the toolchain from \file{arch/}:
 \begin{shell}
 ./configure --with-parmfile=arch/parms.arm64     # Apple Silicon
 make fast_new             # -> bin/<arch>/vespaw_fast.x
@@ -86,141 +144,205 @@ make tools scripts        # analysis tools and the vespaw dispatcher
 Put \file{bin/<arch>/} on your \texttt{PATH}. Options and known build
 problems are listed in \file{doc/INSTALL.md}.
 
-\section{Testing the build}
+\section{Testing the installation}
 
 \begin{shell}
-python3 testsuite/run.py                  # the full test suite
-python3 doc/src/tutorial/check_examples.py 02_si:scf
+python3 testsuite/run.py
 \end{shell}
-The test suite runs every optimizer on a set of systems and checks
-energies, gaps, forces and stress against reference values and against
-each other; all cases should report \texttt{PASS}.
+The test suite runs every optimizer on a set of physical systems and
+compares energies, band gaps, forces and stress with reference values
+and with each other. All cases should report \texttt{PASS}; cases
+listed as \texttt{KNOWN} document open problems and do not count. The
+suite takes a few hours. While it runs, continue with the next section.
 
-\section{Running}
+\section{Starting, following and stopping a calculation}
 
 A calculation needs a control file (\file{.cntl}) and a structure file
-(\file{.strc}) with the same stem:
+(\file{.strc}) with the same root name. It is started with
 \begin{shell}
-vespaw si.cntl                              # serial, OpenMP threads
-OMP_NUM_THREADS=8 vespaw si.cntl
-OPENBLAS_NUM_THREADS=1 mpirun -np 4 vespaw si.cntl   # MPI
+vespaw si.cntl > out 2>&1 &
+\end{shell}
+from the directory of the input files. The redirection collects
+standard output and error messages in the file \file{out}, and the
+\texttt{\&} puts the job into the background, so that the shell stays
+free. More threads, or several MPI tasks, are requested with
+\begin{shell}
+OMP_NUM_THREADS=8 vespaw si.cntl > out 2>&1 &
+OPENBLAS_NUM_THREADS=1 mpirun -np 4 vespaw si.cntl > out 2>&1 &
 \end{shell}
 
+\paragraph{Following the progress.} The command
+\texttt{tail -f out} shows a table with one line per iteration: the
+energy, its change, the residual and the time. For a converging
+calculation the energy changes become smaller and the residual drops
+by orders of magnitude.
+
+\paragraph{Stopping a calculation.} A calculation stops on its own when
+it has converged or when it has done the number of steps requested. To
+stop it earlier in an orderly way, create the exit file
+\begin{shell}
+touch si.exit
+\end{shell}
+The program checks for this file in every iteration. When it finds it,
+it finishes the iteration, writes the restart file and the report, and
+stops. A calculation stopped this way can be continued later. Killing
+the process (\texttt{kill} or Ctrl-C) stops it immediately, without
+writing anything.
+
+\paragraph{After the calculation.} The program writes the report
+\file{si.prot}, the detailed protocol \file{si.log}, the restart file
+\file{si.rstrt} and, depending on the input, further files
+(chapter~\ref{chap:output}). Always open the report first.
+
 % =====================================================================
-\chapter{Input basics}
+\chapter{The input files}
+\minitoc
 % =====================================================================
 
-\section{Two files, blocks and keywords}
+\goals
+\begin{itemize}
+\item Understand the structure of the two input files
+\item Choose PAW setups
+\item Know which numerical parameters must be converged
+\end{itemize}
 
-Input files consist of nested blocks. A block starts with
-\texttt{!NAME} and ends with \texttt{!END}; the file ends with
-\texttt{!EOB}. Keywords are written \texttt{KEY=value}; strings are in
-single quotes, logicals are \texttt{T} or \texttt{F}.
+\background
+The plane-wave cutoff and the $k$-point sampling are discussed in the
+chapter ``Plane waves and Brillouin-zone sampling'' of the theory book,
+and the PAW setups in the chapter ``The projector augmented-wave
+method''.
+
+\section{Blocks and keywords}
+
+Both input files consist of nested blocks. A block starts with
+\texttt{!NAME} and ends with \texttt{!END}, and the file ends with
+\texttt{!EOB}. Inside a block, keywords are written
+\texttt{KEY=value}; strings are enclosed in single quotes, and logical
+values are written \texttt{T} or \texttt{F}. Lines beginning with
+\texttt{\#} are comments.
 
 \paragraph{The control file} (\file{.cntl}) says \emph{what to do}:
 \begin{itemize}
-\item \key{!GENERIC}: number of steps \key{NSTEP}, time step \key{DT},
-  \key{START=T} (start from scratch) or \key{F} (continue from the
-  restart file), \key{FORCES=T}, \key{STRESS=T} (print them at the end).
-\item \key{!FOURIER}: plane-wave cutoff \key{EPWPSI} in Rydberg and
-  \key{CDUAL} (density cutoff = \key{CDUAL}$\times$\key{EPWPSI}).
-\item \key{!DFT}: the functional, by name or number, e.g.\
-  \key{TYPE='PBE'} or \key{TYPE='PBEsol'} (the VASP tags \key{'PE'},
-  \key{'PS'}, \dots\ also work; the list is in the manual); the
-  local-hybrid block \key{!NTBO} inside it.
-\item \key{!PSIDYN}: how the electrons are optimized
-  (\key{OPTIMIZER}, \key{MIXER}, convergence criteria).
-\item \key{!MERMIN}: electronic temperature (metals).
-\item \key{!RDYN}, \key{!CELL}: motion of atoms and cell.
+\item \key{!GENERIC}: the number of steps \key{NSTEP}, the time step
+  \key{DT}, and \key{START=T} to start from scratch or \key{START=F} to
+  continue from the restart file. \key{FORCES=T} and \key{STRESS=T}
+  print forces and stress at the end.
+\item \key{!FOURIER}: the plane-wave cutoff \key{EPWPSI} in Rydberg,
+  and \key{CDUAL}, the ratio of the density cutoff to the wave-function
+  cutoff.
+\item \key{!DFT}: the density functional, e.g.\ \key{TYPE='PBE'} or
+  \key{TYPE='PBEsol'} (the VASP tags such as \key{'PE'} and \key{'PS'}
+  are accepted as well), and the block \key{!NTBO} for the local
+  hybrid functionals.
+\item \key{!PSIDYN}: how the electronic structure is optimized
+  (\key{OPTIMIZER}, \key{MIXER} and the convergence criteria).
+\item \key{!MERMIN}: the electronic temperature, for metals.
+\item \key{!RDYN} and \key{!CELL}: the motion of the atoms and of the
+  cell.
 \end{itemize}
 
-\paragraph{The structure file} (\file{.strc}) says \emph{what the
-system is}:
+\paragraph{The structure file} (\file{.strc}) says \emph{what the system
+is}:
 \begin{itemize}
-\item \key{!GENERIC LUNIT[AA]}: length unit of all coordinates, here
-  \AA{}ngstr\"om (\key{LUNIT[AA]=1.0}).
-\item \key{!LATTICE T=}: the three lattice vectors (columns of
-  $T$, in units of \key{LUNIT}).
-\item \key{!KPOINTS DIV=}: the $k$-point mesh; add \key{SYMMETRY=T} to
-  reduce it to its irreducible wedge using the space group.
-\item \key{!OCCUPATIONS}: \key{NSPIN}, number of empty bands \key{EMPTY},
-  total spin \key{SPIN[HBAR]}, charge.
-\item \key{!SPECIES}: one block per element with the PAW setup
-  (\key{!AUGMENT}) and, for hybrids, the local-orbital settings
+\item \key{!GENERIC LUNIT[AA]}: the length unit of all coordinates.
+  With \key{LUNIT[AA]=1.0} all lengths are given in \AA.
+\item \key{!LATTICE T=}: the three lattice vectors, in units of
+  \key{LUNIT}.
+\item \key{!KPOINTS DIV=}: the $k$-point mesh. \key{SYMMETRY=T} reduces
+  it to the irreducible wedge of the Brillouin zone.
+\item \key{!OCCUPATIONS}: the number of spin directions \key{NSPIN},
+  the number of empty bands \key{EMPTY}, the total spin \key{SPIN[HBAR]}
+  and the charge.
+\item \key{!SPECIES}: one block per element, with the PAW setup
+  (\key{!AUGMENT}) and, for hybrid functionals, the local orbitals
   (\key{!NTBO}).
-\item \key{!ATOM NAME= R=}: atoms and positions.
+\item \key{!ATOM NAME= R=}: the atoms and their positions.
 \end{itemize}
 
-\paragraph{Switching blocks off.} Renaming a block (e.g.\
-\texttt{!ORBPOT} $\to$ \texttt{!ORBPOT\_OFF}) makes the program ignore
-it. \texttt{READ=F} inside a block also switches it off; this is easy to
-do by accident.
+\paragraph{Switching blocks off.} Renaming a block, for example
+\texttt{!ORBPOT} into \texttt{!ORBPOT\_OFF}, makes the program ignore
+it. The same happens with \texttt{READ=F} inside a block, which is easily
+set by accident.
 
 \section{Choosing setups}
 
 The directory \file{potentials} contains a species block for every
-element. Copy the block of each element into the structure file.
-\file{potentials/AUDIT.md} lists which setups passed the quality checks,
-which are replaced, and how accurate they are in solids. Read it before
-choosing a setup for a production calculation. When a setup is built,
-the program prints a ghost test and a suggested cutoff (search the output
-for \texttt{GHOST TEST} and \texttt{SUGGESTED ENMAX}).
+element. Copy the block of each element into the structure file. The
+file \file{potentials/AUDIT.md} lists which setups passed the quality
+checks and how accurate they are in solids. Read it before you choose a
+setup for a production calculation. When a setup is constructed, the
+program performs a test for ghost states and suggests a cutoff; search
+the detailed protocol for \texttt{GHOST TEST} and
+\texttt{SUGGESTED ENMAX}.
 
-\section{Convergence}
+\section{What must be converged}
 
-Two parameters must always be converged: the cutoff \key{EPWPSI} and
-the $k$-point mesh. Converge the quantity you are interested in, not
-only the total energy. Example~1 shows that forces can require a much
-higher cutoff than the energy suggests, and Example~3 shows how the
-energy of a metal oscillates with the $k$-point mesh.
+Two numerical parameters must be converged in every project: the
+plane-wave cutoff \key{EPWPSI} and the $k$-point mesh. Converge the
+quantity you are interested in, and not only the total energy. The
+first exercise shows that forces may require a much higher cutoff than
+the energy, and the third that the energy of a metal oscillates with
+the $k$-point mesh.
 
 % =====================================================================
-\chapter{Example 1: a molecule (H\texorpdfstring{$_2$}{2}O)}
+\part{Exercises}
 % =====================================================================
 
-\textbf{Directory:} \file{examples/01\_h2o}. \textbf{You learn:} setting
-up a molecule in a box, converging the cutoff with forces, relaxing a
-geometry.
+% =====================================================================
+\chapter{Structure of the water molecule}
+% =====================================================================
+\minitoc
 
-\section{Input}
+\goals
+\begin{itemize}
+\item Set up a molecule in a periodic box
+\item Converge the cutoff with forces
+\item Relax the atomic structure
+\end{itemize}
 
-The molecule sits in a cubic box of 10~\AA{} with $\Gamma$-point
-sampling. It starts from a distorted geometry (O--H 1.00~\AA, angle
-110$^\circ$).
+\background
+A molecule is calculated in a box that is large enough to separate it
+from its periodic images, with $\Gamma$-point sampling. The optimization
+of the electrons is described in the chapter ``Self-consistency: the
+variational optimizer'' of the theory book, the relaxation of the atoms
+in the chapter ``Forces, stress and molecular dynamics''.
+
+\section{The input files}
+
+The directory is \file{examples/tutorial/01\_h2o}. The molecule sits in
+a cubic box of 10~\AA. It starts from a distorted geometry, with O--H
+bonds of 1.00~\AA{} and a bond angle of 110$^\circ$:
 \deck{../../../examples/tutorial/01_h2o/h2o.strc}
-The control file:
+The control file is
 \deck{../../../examples/tutorial/01_h2o/h2o.cntl}
-The run \texttt{scf} uses Davidson with the variational optimizer:
+In the run \texttt{scf}, the placeholder \texttt{@PSIDYN@} becomes
 \begin{verbatim}
 !PSIDYN OPTIMIZER='DAV' MIXER='VARIATIONAL' MIXG0SQ=0.05 SAFEORTHO=T STOP=T
 \end{verbatim}
-\key{MIXG0SQ} sets the Kerker preconditioner. Its default (1.5) is made
-for solids; for molecules and slabs with a lot of vacuum use a small
-value (0.05--0.1), otherwise the variational optimizer stalls (see
-\file{doc/KNOWN\_ISSUES.md}). Pulay mixing (\key{MIXER='PULAY'}) is a
-faster alternative for molecules.
+The block-Davidson eigensolver determines the eigenstates, and the
+variational optimizer updates the Hamiltonian. \key{MIXG0SQ} controls the
+Kerker preconditioner. Its default of 1.5 is made for solids. For
+molecules and slabs with much vacuum, a small value of 0.05--0.1 is
+needed, otherwise the optimizer stalls.
 
-\section{Results}
+\section{Running and checking the calculation}
 
 \begin{shell}
 python3 doc/src/tutorial/check_examples.py 01_h2o
     scf: E = -471.41787880 eV, 249 it, gap 5.8369 eV
     relax: E = -471.48491560 eV, 446 it, gap 5.9828 eV
 \end{shell}
-The relaxed geometry (in \file{work/relax/h2o.strc\_out}) has O--H
-$=0.971$~\AA{} and H--O--H $=104.6^\circ$, in agreement with PBE
-(0.970~\AA, 104.2$^\circ$).
-
-\paragraph{The cutoff lesson.} At 30~Ry the same relaxation gives
-O--H $=1.007$~\AA{} and $102.0^\circ$, a bond 4\% too long. At the PBE
-geometry the forces are 2.6~eV/\AA{} at 30~Ry and 0.05~eV/\AA{} at 60~Ry.
-Oxygen needs a high cutoff; converge it with forces, not only energies.
+Open the report \file{work/scf/h2o.prot}. Its section on the
+self-consistency shows how the energy approached the minimum, and the
+section on the energies gives the total energy and its contributions.
+The gap between the highest occupied and the lowest unoccupied orbital
+is 5.8~eV.
 
 \section{The relaxation}
 
-The run \texttt{relax} has two stages. Stage 1 converges the electrons
-(as \texttt{scf}); stage 2 continues from the restart file
-(\key{START=F}) and relaxes the atoms by damped dynamics of wave
+The run \texttt{relax} has two stages. The first converges the
+electrons as in \texttt{scf}. The second continues from the restart
+file (\key{START=F}) and relaxes the atoms by damped dynamics of wave
 functions and atoms together:
 \begin{verbatim}
 !PSIDYN STOP=T FRIC=0.02 SAFEORTHO=T
@@ -230,30 +352,89 @@ functions and atoms together:
   !AUTO FRIC(-)=0.3 FACT(-)=0.97 FRIC(+)=0.3 FACT(+)=1. MINFRIC=0.05 !END
 !END
 \end{verbatim}
-The \key{!AUTO} blocks (``autopilot'') lower the friction while the
-energy decreases and stop the run when it has converged.
-\key{FORCES=T} prints the final forces (in eV/\AA, also in section 07 of
-the \file{.prot} report):
+The \key{!AUTO} blocks act as an autopilot for the friction. As long as
+the energy decreases, the friction is reduced by the factor
+\key{FACT(-)} in every step, down to \key{MINFRIC}, so that the system
+moves faster towards the minimum. When the energy rises, the friction
+is set to \key{FRIC(+)}. The run stops when it has converged.
+\key{FORCES=T} prints the final forces, in eV/\AA, both in the output
+and in the report. At the end of the relaxation they are below
+0.05~eV/\AA.
+
+The relaxed structure is written to \file{work/relax/h2o.strc\_out}. It
+has O--H bonds of 0.971~\AA{} and a bond angle of $104.6^\circ$, in
+agreement with other PBE calculations (0.970~\AA, $104.2^\circ$).
+
+\subsection*{The same relaxation with L-BFGS}
+
+Damped dynamics moves atoms and wave functions together. The run
+\texttt{relax\_lbfgs} instead converges the electrons at each geometry
+and then takes a quasi-Newton (L-BFGS) step, starting directly from the
+distorted structure:
 \begin{verbatim}
-FINAL FORCES [EV/AA]
-FORCE O_1   ...
+!PSIDYN OPTIMIZER='DAV' MIXER='PULAY' MIXG0SQ=0.05 SAFEORTHO=T STOP=T !END
+!RDYN OPTIMIZER='LBFGS' FMAX[EV/AA]=0.01 !END
 \end{verbatim}
-They are below 0.05~eV/\AA{} at the end of the relaxation.
+\begin{shell}
+    relax_lbfgs: E = -471.48507846 eV, 228 it, gap 5.9832 eV
+\end{shell}
+The log \file{work/relax\_lbfgs/h2o.log} lists one line per geometry
+(lines starting with \texttt{L-BFGS}): the number of SCF iterations, the
+energy and the largest force. Seven geometries bring the largest force
+to 0.004~eV/\AA. The bonds are 0.972~\AA{} and the angle is
+$104.0^\circ$; the energy is 0.16~meV below that of the damped run,
+which the autopilot stops at forces of 0.07~eV/\AA. A molecule in a box
+is relaxed with Pulay mixing: the variational optimizer leaves an error
+of about $10^{-5}$~H in the vacuum that stalls L-BFGS near
+0.05~eV/\AA. With \key{!CELL MOVE=T} the same optimizer also relaxes
+the unit cell, optionally under a pressure \key{P[GPA]} or a stress
+tensor \key{STRESS[GPA]}.
+
+\section{The cutoff lesson}
+
+With a cutoff of 30~Ry, the same relaxation gives O--H bonds of
+1.007~\AA{} and a bond angle of $102.0^\circ$, that is a bond 4\% too
+long, although the total energy looks reasonable. At the PBE geometry
+the forces are 2.6~eV/\AA{} at 30~Ry and 0.05~eV/\AA{} at 60~Ry. Oxygen
+needs a high cutoff. Converge the cutoff with the forces.
+
+\section{Things to try}
+\begin{itemize}
+\item Repeat the relaxation at 40 and 50~Ry and plot the O--H bond
+  length against the cutoff.
+\item Reduce the box to 7~\AA{} and compare the energy. How large must
+  the box be?
+\item Stop a running relaxation with the exit file, and continue it
+  from the restart file with \key{START=F}.
+\end{itemize}
 
 % =====================================================================
-\chapter{Example 2: a semiconductor (Si)}
+\chapter{Silicon: energy, band gap and equation of state}
 % =====================================================================
+\minitoc
 
-\textbf{Directory:} \file{examples/02\_si}. \textbf{You learn:} total
-energy, band gap, equation of state, forces and stress.
+\goals
+\begin{itemize}
+\item Calculate the total energy and the band gap of a semiconductor
+\item Determine the lattice constant and the bulk modulus
+\item Calculate forces and stress
+\end{itemize}
 
-\section{Input}
+\background
+Bloch states and the sampling of the Brillouin zone are discussed in
+the chapter ``Plane waves and Brillouin-zone sampling'' of the theory
+book, forces and stress in the chapter ``Forces, stress and molecular
+dynamics''.
+
+\section{The input files}
+
+The directory is \file{examples/tutorial/02\_si}. The primitive cell of
+diamond Si contains two atoms:
 \deck{../../../examples/tutorial/02_si/si.strc}
 \deck{../../../examples/tutorial/02_si/si.cntl}
-The primitive cell of diamond Si has two atoms. The placeholders are the
-cutoff (\texttt{@EPW@}), the lattice scale (\texttt{@LUNIT@}), the
-position of the second atom (\texttt{@X2@}) and extra output
-(\texttt{@OUTPUT@}).
+The placeholders are the cutoff (\texttt{@EPW@}), a scale factor of the
+lattice (\texttt{@LUNIT@}), the position of the second atom
+(\texttt{@X2@}) and additional output (\texttt{@OUTPUT@}).
 
 \section{Energy and band gap}
 
@@ -261,20 +442,20 @@ position of the second atom (\texttt{@X2@}) and extra output
 python3 doc/src/tutorial/check_examples.py 02_si:scf
     scf: E = -216.95911283 eV, 13 it, gap 0.7097 eV
 \end{shell}
-The variational optimizer converges in 13 iterations. The Kohn--Sham gap
-of 0.71~eV on the $6\times6\times6$ mesh is the smallest gap between the
-$k$-points of the mesh (the true PBE gap of Si is about 0.6~eV, between
-$\Gamma$ and a point near X that the mesh does not contain). Section 05b
-of the \file{.prot} report lists the band energies and occupations at
-every $k$-point.
+The calculation converges in 13 iterations. The band gap of 0.71~eV is
+the smallest gap between the $k$-points of the $6\times6\times6$ mesh.
+The PBE gap of Si is about 0.6~eV. It lies between $\Gamma$ and a point
+near X, which this mesh does not contain. The report lists the band
+energies and occupations at every $k$-point; look up the highest
+occupied and the lowest empty state.
 
 \section{Equation of state}
 
-The runs \texttt{eos\_0.97} \dots\ \texttt{eos\_1.03} scale the lattice
-by \texttt{@LUNIT@} at 40~Ry:
+The runs \texttt{eos\_0.97} to \texttt{eos\_1.03} scale the lattice
+with \texttt{@LUNIT@}, at a cutoff of 40~Ry:
 \begin{center}
 \begin{tabular}{cc}\toprule
-$a$ [\AA] & $E$ [eV] \\ \midrule
+$a$ (\AA) & $E$ (eV) \\ \midrule
 5.305 & $-216.86290$ \\
 5.387 & $-216.94416$ \\
 5.469 & $-216.97061$ \\
@@ -282,16 +463,17 @@ $a$ [\AA] & $E$ [eV] \\ \midrule
 5.633 & $-216.88874$ \\ \bottomrule
 \end{tabular}
 \end{center}
-A cubic fit of $E(V)$ gives $a_0=5.472$~\AA{} and $B=93$~GPa (all-electron
-PBE: 5.469~\AA, 89~GPa; experiment: 5.431~\AA). A Birch--Murnaghan fit
-is available with \file{vespaw\_murnaghan.x}. Energy--volume curves
-need a converged cutoff: at fixed cutoff the number of plane waves
+A cubic fit of $E(V)$ gives $a_0=5.472$~\AA{} and $B=93$~GPa. The
+all-electron PBE values are 5.469~\AA{} and 89~GPa, and experiment gives
+5.431~\AA. A Birch--Murnaghan fit is done by the tool
+\file{vespaw\_murnaghan.x}. An energy--volume curve needs a well
+converged cutoff, because at a fixed cutoff the number of plane waves
 changes with the volume (Pulay stress).
 
 \section{Forces and stress}
 
-The run \texttt{forces} displaces the second atom by 0.05~\AA{} along $x$
-and sets \key{FORCES=T STRESS=T}:
+The run \texttt{forces} displaces the second atom by 0.05~\AA{} along
+$x$ and requests \key{FORCES=T STRESS=T}:
 \begin{verbatim}
 FORCE SI1   0.6907426272   -0.0000290266   -0.0000008242
 FORCE SI2  -0.6907157157    0.0000335846   -0.0000830316
@@ -300,263 +482,389 @@ STRESS     -0.0003627     2.3652870    -2.0113901   ...
 STRESS      0.0001752    -2.0113887     2.3651746   ...
 PRESSURE[GPA]      2.3092391  VOLUME[AA^3]      40.02575175
 \end{verbatim}
-The forces (eV/\AA) are equal and opposite, as they must be. The stress
-is $\sigma=-(1/V)\,dE/d\epsilon$ in GPa, positive when the cell wants to
-expand. The displacement along $x$ also produces a shear stress
-$\sigma_{yz}$: in diamond, an internal displacement couples to the shear
-strain. The test case \file{testsuite/si\_forces} checks forces
-and stress against finite differences of the energy.
+The forces, in eV/\AA, are equal and opposite, as they must be. The
+stress $\sigma=-(1/V)\,dE/d\epsilon$ is given in GPa and is positive
+when the cell wants to expand. The displacement along $x$ also produces
+a shear stress $\sigma_{yz}$, because in diamond an internal
+displacement couples to a shear strain. The test case
+\file{testsuite/si\_forces} checks forces and stress against finite
+differences of the energy.
+
+\section{Things to try}
+\begin{itemize}
+\item Converge the band gap with the $k$-point mesh. Which mesh
+  contains the conduction-band minimum?
+\item Repeat the equation of state at 25~Ry and compare the lattice
+  constant.
+\item Check the force on SI2 by a finite difference of two energies.
+\end{itemize}
 
 % =====================================================================
-\chapter{Example 3: a metal (Al)}
+\chapter{Aluminium: a metal}
 % =====================================================================
+\minitoc
 
-\textbf{Directory:} \file{examples/03\_al}. \textbf{You learn:} electronic
-temperature and $k$-point convergence of a metal.
+\goals
+\begin{itemize}
+\item Describe a metal with an electronic temperature
+\item Converge the $k$-point mesh of a metal
+\end{itemize}
 
+\background
+Fermi occupations and the free energy are discussed in the section
+``Finite temperature'' of the theory book.
+
+\section{The input files}
+
+The directory is \file{examples/tutorial/03\_al}:
 \deck{../../../examples/tutorial/03_al/al.strc}
 \deck{../../../examples/tutorial/03_al/al.cntl}
-A metal has partially filled bands. \key{!MERMIN T[K]=1000.} gives the
-electrons a temperature, i.e.\ Fermi occupations; the program minimizes
-the free energy $A=E-TS$. The runs vary the $k$-point mesh:
+A metal has partially filled bands. With \key{!MERMIN T[K]=1000.} the
+electrons have a temperature, so that the occupations follow the Fermi
+function, and the program minimizes the free energy $A=E-TS$.
+
+\section{$k$-point convergence}
+
+The runs vary the $k$-point mesh:
 \begin{center}
-\begin{tabular}{ccc}\toprule
-mesh & $A$ [eV], $T=1000$~K & \\ \midrule
-$4^3$ & $-57.02980$ & \\
-$6^3$ & $-57.36561$ & \\
-$8^3$ & $-57.29449$ & \\
-$12^3$ & $-57.30689$ & \\
-$12^3$, $T=300$~K & $-57.30277$ & \\ \bottomrule
+\begin{tabular}{lc}\toprule
+mesh & $A$ (eV) \\ \midrule
+$4^3$, 1000~K & $-57.02980$ \\
+$6^3$, 1000~K & $-57.36561$ \\
+$8^3$, 1000~K & $-57.29449$ \\
+$12^3$, 1000~K & $-57.30689$ \\
+$12^3$, 300~K & $-57.30277$ \\ \bottomrule
 \end{tabular}
 \end{center}
-The energy does not converge monotonically: the $6^3$ mesh happens to be
-59~meV too low. Only the difference between successive dense meshes tells
-you whether you are converged ($8^3\to12^3$: 12~meV). A lower
-temperature needs a denser mesh.
+The energy does not converge monotonically. The $6^3$ mesh happens to
+be 59~meV too low, which could easily be mistaken for convergence. Only
+the difference between successive dense meshes tells whether the
+calculation is converged ($8^3\to12^3$: 12~meV). A lower temperature
+requires a denser mesh.
+
+\section{Things to try}
+\begin{itemize}
+\item Repeat the $8^3$ calculation with \key{SYMMETRY=T} in the
+  \key{!KPOINTS} block and compare energy and time.
+\item Plot the free energy, the energy and the entropy term against the
+  temperature.
+\end{itemize}
 
 % =====================================================================
-\chapter{Example 4: a magnet (NiO)}
+\chapter{Nickel oxide: an antiferromagnet}
 % =====================================================================
+\minitoc
 
-\textbf{Directory:} \file{examples/04\_nio}. \textbf{You learn:}
-antiferromagnetic order, seeding the spin state, complete setups.
+\goals
+\begin{itemize}
+\item Calculate an antiferromagnetic transition-metal oxide
+\item Prepare a spin order with an orbital potential
+\item Recognize incomplete setups
+\end{itemize}
 
+\background
+Spin-polarized density functionals are discussed in the section
+``Spin'' of the theory book, the requirements on the setups in
+``Quality checks''.
+
+\section{The input files}
+
+The directory is \file{examples/tutorial/04\_nio}:
 \deck{../../../examples/tutorial/04_nio/nio.strc}
-NiO orders antiferromagnetically: ferromagnetic (111) planes of Ni with
-alternating spin. The cell contains two Ni atoms, \texttt{NI1} (spin up)
-and \texttt{NI2} (spin down). The block
+NiO orders antiferromagnetically, with ferromagnetic (111) planes of Ni
+whose spins alternate from plane to plane. The cell contains two Ni
+atoms, \texttt{NI1} with spin up and \texttt{NI2} with spin down. A
+calculation that starts from random wave functions does not know about
+this order. The block
 \begin{verbatim}
 !ORBPOT
   !POT  ATOM='NI1' VALUE=+0.1 TYPE='D' S=1 RC=2. !END
   !POT  ATOM='NI2' VALUE=-0.1 TYPE='D' S=1 RC=2. !END
 !END
 \end{verbatim}
-adds a small spin-dependent potential on the Ni $d$ orbitals that pushes
-the system into the desired spin order. It is used only in the first
-stage and then switched off by renaming it (\texttt{!ORBPOT\_OFF}); the
-placeholder \texttt{@ORBPOT@} does exactly this.
+therefore adds a small spin-dependent potential on the Ni $d$ orbitals,
+which drives the system into the desired spin order. With \key{S=1}
+the potential acts on the spin; without \key{S} it would act on the
+charge. The orbital potential is used only in the first stage and is
+then switched off by renaming the block into \texttt{!ORBPOT\_OFF},
+which the placeholder \texttt{@ORBPOT@} does.
+
+\section{Running and checking the calculation}
 
 \begin{shell}
 python3 doc/src/tutorial/check_examples.py 04_nio
     dav_var: E = -3030.79719315 eV, 274 it, gap 1.4979 eV
     dav_coldseed: E = -3030.79713862 eV, 82 it, gap 1.5002 eV
 \end{shell}
-\texttt{dav\_var} seeds the spin order with friction dynamics and the
-orbital potential, then converges with Davidson; \texttt{dav\_coldseed}
-seeds and converges with Davidson directly. Both reach the same state.
-The \file{.prot} report lists the magnetic moments: about
-$\pm1.3~\mu_B$ in the Ni spheres, zero in total. The PBE gap of 1.5~eV is
-far below the experimental 4.3~eV; see
-Example~5 for hybrids.
+In \texttt{dav\_var}, friction dynamics with the orbital potential
+prepares the spin order, and the Davidson eigensolver with the
+variational optimizer converges it. In \texttt{dav\_coldseed}, the
+Davidson eigensolver does both. Both runs reach the same state. Check
+the magnetic moments in the report: about $\pm1.3~\mu_B$ in the Ni
+spheres and zero in total. The PBE band gap of 1.5~eV is far below the
+experimental value of 4.3~eV, which the next exercise addresses.
 
-\paragraph{Complete setups.} The Ni setup has two partial waves per
-angular momentum (\key{NPRO=2 2 2}). With a single $s$ projector the
-calculation can collapse into an unphysical state far below the ground
-state; the setup generator warns about this (\texttt{INCOMPLETE SETUP}).
+\section{Complete setups}
+
+The Ni setup has two partial waves per angular momentum
+(\key{NPRO=2 2 2}). With a single $s$ projector the calculation can
+collapse into an unphysical state far below the ground state. The setup
+construction warns about this (\texttt{INCOMPLETE SETUP}).
+
+\section{Things to try}
+\begin{itemize}
+\item Start the ferromagnetic state, by giving both Ni atoms the same
+  orbital potential, and compare the energy with the antiferromagnet.
+\item Add a Hubbard correction to the Ni $d$ shell and follow the band
+  gap.
+\end{itemize}
 
 % =====================================================================
-\chapter{Example 5: hybrid functionals (MgO)}
+\chapter{Magnesium oxide: local hybrid functionals}
 % =====================================================================
+\minitoc
 
-\textbf{Directory:} \file{examples/05\_mgo\_hybrid}. \textbf{You learn:}
-the local hybrids \texttt{PBE0r} and \texttt{PBE-SL0r}.
+\goals
+\begin{itemize}
+\item Use the local hybrid functionals PBE0r and PBE-SL0r
+\item Understand the local orbitals of the hybrid functionals
+\end{itemize}
 
+\background
+The local hybrid functionals are described in the chapter ``Local
+hybrid functionals'' of the theory book.
+
+\section{The input files}
+
+The directory is \file{examples/tutorial/05\_mgo\_hybrid}:
 \deck{../../../examples/tutorial/05_mgo_hybrid/mgo.cntl}
-The placeholder \texttt{@NTBO@} is empty for PBE, and for the hybrids
+The placeholder \texttt{@NTBO@} is empty for PBE. For the hybrids it
+becomes
 \begin{verbatim}
 # PBE0r
 !NTBO MODUS='HYBRID' HFWEIGHT=0.25 K2=-0.25 SCALERCUT=2. !END
 # PBE-SL0r
 !NTBO MODUS='HYBRID' HFWEIGHT=0.25 DCTYPE='SCANL' K2=-0.25 SCALERCUT=2. !END
 \end{verbatim}
-\key{HFWEIGHT} is the fraction of exact exchange. \texttt{PBE0r} replaces
-part of the onsite PBE exchange of the local orbitals by exact exchange;
-\texttt{PBE-SL0r} in addition uses SCAN-L instead of PBE for that onsite
-exchange (\key{DCTYPE='SCANL'}), with PBE everywhere else. A third local
-hybrid, \texttt{SCAN0r}, uses SCAN everywhere (\key{TYPE='SCAN'
-TSCANDELOC=T}); it is still experimental. The local orbitals are
-defined per species in the structure file:
+\key{HFWEIGHT} is the fraction of exact exchange. PBE0r replaces this
+fraction of the onsite PBE exchange of the local orbitals by exact
+exchange. PBE-SL0r uses PBE as well, but replaces the onsite exchange
+by SCAN-L exchange (\key{DCTYPE='SCANL'}) before part of it is replaced
+by exact exchange. A third local hybrid, SCAN0r, uses SCAN everywhere
+(\key{TYPE='SCAN' TSCANDELOC=T}); it is still experimental. The local
+orbitals are defined per species in the structure file:
 \deck{../../../examples/tutorial/05_mgo_hybrid/mgo.strc}
 \key{NOFL} gives the number of local orbitals per angular momentum,
-\key{LHFWEIGHT} a species-specific exchange fraction, \key{CV=T} includes
-core--valence exchange.
+\key{LHFWEIGHT} a species-dependent fraction of exact exchange, and
+\key{CV=T} includes the exchange between core and valence electrons.
+
+\section{Results}
+
 \begin{center}
 \begin{tabular}{lc}\toprule
-functional & gap [eV] \\ \midrule
+functional & band gap (eV) \\ \midrule
 PBE & 4.326 \\ PBE0r & 4.034 \\ PBE-SL0r & 4.116 \\ \bottomrule
 \end{tabular}
 \end{center}
-The local hybrids act only on the orbitals of the atoms (onsite). For
-MgO, a closed-shell oxide, the correction is small; for oxides with open
-$d$ shells (NiO, manganites) it is large. Take band gaps of hybrid
-calculations from Davidson, not from RMM-DIIS, which can miss the lowest
-empty band with hybrids.
+The local hybrids act only on the orbitals of the atoms. For MgO, a
+closed-shell oxide, the correction is small. For oxides with open $d$
+shells, such as NiO and the manganites, it is large.
+
+\section{Things to try}
+\begin{itemize}
+\item Calculate NiO with PBE0r and compare band gap and magnetic
+  moments with PBE.
+\item Vary \key{HFWEIGHT} between 0.1 and 0.25 and follow the band gap.
+\end{itemize}
 
 % =====================================================================
-\chapter{Example 6: molecular dynamics (Si\texorpdfstring{$_8$}{8})}
+\chapter{Molecular dynamics of silicon}
 % =====================================================================
+\minitoc
 
-\textbf{Directory:} \file{examples/06\_md}. \textbf{You learn:}
-Car--Parrinello molecular dynamics with a thermostat, and a pitfall of
-small cells.
+\goals
+\begin{itemize}
+\item Run Car--Parrinello molecular dynamics with a thermostat
+\item Check energy conservation and adiabaticity
+\item Recognize the pitfall of small cells
+\end{itemize}
 
+\background
+Car--Parrinello dynamics, the Verlet algorithm and the Nos\'e
+thermostat are described in the chapters ``Eigensolvers and dynamics''
+and ``Forces, stress and molecular dynamics'' of the theory book.
+
+\section{The input files}
+
+The directory is \file{examples/tutorial/06\_md}:
 \deck{../../../examples/tutorial/06_md/si8.cntl}
-Stage 1 converges the electrons. Stage 2 runs Car--Parrinello dynamics
-without friction on the wave functions (\key{FRIC=0.}), with time step
-\key{DT=10.0}~a.u.\ (0.24~fs), random initial velocities for 2000~K
-(\key{RANDOM[K]}; equipartition quickly halves the temperature) and a
-Nos\'e thermostat at 1000~K:
+The first stage converges the electrons. The second stage runs
+Car--Parrinello dynamics without friction on the wave functions
+(\key{FRIC=0.}), with a time step \key{DT=10.0}~a.u.\ (0.24~fs),
+random initial velocities for 2000~K (\key{RANDOM[K]}; equipartition
+halves this temperature quickly) and a Nos\'e thermostat at 1000~K:
 \begin{verbatim}
 !RDYN STOP=T RANDOM[K]=2000.
   !THERMOSTAT T[K]=1000. FREQ[THZ]=10. !END
 !END
 \end{verbatim}
-The detailed protocol (\file{.log}) prints a line per step, in atomic
-units (Hartree):
+
+\section{Checking the dynamics}
+
+The detailed protocol (\file{.log}) contains one line per time step,
+in Hartree atomic units:
 \begin{verbatim}
     NFI  T[PSEC] T[K]  EKIN(PSI)       E(RHO)        ECONS   ANNEE   ANNER
 !>   100   0.02419   696   0.00229    -31.82720    -31.77515 0.00000 0.00143
 !>   500   0.12094  1160   0.00394    -31.83888    -31.77518 0.00000 0.00307
 \end{verbatim}
-with time, ionic temperature, fictitious kinetic energy of the wave
-functions \texttt{EKIN(PSI)}, the potential energy \texttt{E(RHO)} and the
-conserved energy \texttt{ECONS}. \texttt{ECONS} must stay constant; here it
-changes by $3\times10^{-5}$~H (0.8~meV) in 400 steps. \texttt{EKIN(PSI)} must stay
-small compared with the ionic kinetic energy (adiabaticity).
+The columns are the time, the temperature of the atoms, the fictitious
+kinetic energy of the wave functions \texttt{EKIN(PSI)}, the potential
+energy \texttt{E(RHO)} and the conserved energy \texttt{ECONS}. Two
+checks are essential. First, \texttt{ECONS} must stay constant; here it
+changes by $3\times10^{-5}$~H, that is 0.8~meV, in 400 steps. Second,
+\texttt{EKIN(PSI)} must remain small compared with the kinetic energy of
+the atoms; otherwise the electrons no longer follow the atoms
+adiabatically.
 
-\paragraph{The small-cell pitfall.} With $\Gamma$-point sampling only,
-the same run lets the energy fall by 6.8~eV below that of diamond: in an
-8-atom cell sampled at $\Gamma$ alone, distorted structures are lower in
-energy than diamond. With a $2\times2\times2$ mesh diamond is correctly
-lower by 4.4~eV. For MD, use a cell large enough for $\Gamma$-point
+\section{The small-cell pitfall}
+
+With the $\Gamma$ point alone, the same run lets the energy fall
+6.8~eV below that of diamond. In a cell with only 8 atoms sampled at
+$\Gamma$, distorted structures are lower in energy than diamond. With a
+$2\times2\times2$ mesh diamond is correctly lower, by 4.4~eV. For
+molecular dynamics, use a cell that is large enough for $\Gamma$-point
 sampling, or a $k$-point mesh.
+
+\section{Things to try}
+\begin{itemize}
+\item Double the time step and follow \texttt{ECONS} and
+  \texttt{EKIN(PSI)}.
+\item Plot the temperature against time and estimate how long the
+  thermostat needs to equilibrate the system.
+\end{itemize}
+
+% =====================================================================
+\part{Reference}
+% =====================================================================
 
 % =====================================================================
 \chapter{Choosing the optimizer and troubleshooting}
 % =====================================================================
+\minitoc
 
 \section{Which optimizer?}
 
 \begin{center}
-\begin{tabular}{p{3.2cm}p{11cm}}\toprule
-\key{OPTIMIZER='DAV'} & block Davidson. Robust from any start; the
-  reference. Default choice for small and medium systems. \\
-\key{OPTIMIZER='RMM'} & RMM-DIIS with a Davidson warm-up. Fastest for
-  large systems (64 atoms and more). Not for band gaps with hybrids. \\
+\begin{tabular}{p{3.2cm}p{10.6cm}}\toprule
+\key{OPTIMIZER='DAV'} & block Davidson. Robust from any start, and the
+  reference. The default choice for small and medium systems. \\
+\key{OPTIMIZER='RMM'} & RMM-DIIS, after a few Davidson iterations.
+  Fastest for large systems of 64 atoms and more. \\
 \key{OPTIMIZER='CG'} & conjugate gradients, band by band. Reliable,
-  slower for many bands. \\
-dynamics (default) & damped Car--Parrinello dynamics
-  (\key{FRIC}, \key{!AUTO}). Slow but very robust; required for
-  molecular dynamics and convenient for relaxations. \\
+  but slower for many bands. \\
+dynamics (default) & damped Car--Parrinello dynamics (\key{FRIC},
+  \key{!AUTO}). Slow but very robust, required for molecular dynamics
+  and convenient for relaxations. \\
 \key{OPTIMIZER='EDFT'} & direct joint minimization of orbitals and
-  occupations (Route~2). Experimental. \\ \bottomrule
+  occupations (route~2). Experimental. \\ \bottomrule
 \end{tabular}
 \end{center}
-With the eigensolvers the mixer is \key{MIXER='VARIATIONAL'} (default):
-every accepted energy is an upper bound of the ground-state energy and
-decreases monotonically. \key{MIXER='PULAY'} and \key{'ANDERSON'} are
-classical density mixing. Convergence is controlled by \key{EDIFF}
-(energy change, default $2.7\times10^{-5}$~eV) and \key{MIXTOL} (residual).
+With the eigensolvers the mixer is \key{MIXER='VARIATIONAL'}, the
+default: every accepted energy is an upper bound of the ground-state
+energy, and the accepted energies do not increase beyond the tolerance
+of the eigensolver. \key{MIXER='PULAY'} and \key{MIXER='ANDERSON'}
+select conventional density mixing. Convergence is controlled by
+\key{EDIFF}, the energy change (default $2.7\times10^{-5}$~eV), and
+\key{MIXTOL}, the residual.
 
 \section{Troubleshooting}
 
-\paragraph{The SCF does not converge.}
+\paragraph{The self-consistency does not converge.}
 \begin{itemize}
 \item Molecules and slabs: reduce \key{MIXG0SQ} to 0.05--0.1.
 \item Metals: set an electronic temperature (\key{!MERMIN}).
-\item Magnetic systems: seed the spin order (\key{!ORBPOT}, Example~4),
-  or start with a few steps of damped dynamics.
-\item Compare with damped dynamics. If the variational optimizer finds
-  an energy \emph{below} the dynamics result without converging, the
-  potential is not the derivative of the energy; that is a bug worth
-  reporting.
+\item Magnetic systems: prepare the spin order with \key{!ORBPOT}, or
+  start with a few steps of damped dynamics.
+\item Large cells with hundreds of atoms, started from random wave
+  functions: the variational optimizer can stall far above the minimum
+  (see \file{doc/KNOWN\_ISSUES.md}). Use damped dynamics for such cells.
+\item Compare with damped dynamics. If the variational optimizer
+  reaches an energy \emph{below} the result of damped dynamics without
+  converging, the potential is not the derivative of the energy. Please
+  report this as a bug.
 \end{itemize}
 
-\paragraph{The energy is far too low.} A collapse into an unphysical
-state: check the setup output for \texttt{INCOMPLETE SETUP} or
-\texttt{GHOST}, use complete setups (two projectors per angular
-momentum), and look for very deep eigenvalues.
+\paragraph{The energy is far too low.} This indicates a collapse into
+an unphysical state. Check the setup construction for
+\texttt{INCOMPLETE SETUP} or \texttt{GHOST}, use complete setups with
+two projectors per angular momentum, and look for very deep
+eigenvalues.
 
-\paragraph{Wrong structure.} Converge the cutoff with forces
-(Example~1) and the $k$-points (Example~3); for $3d$ metals read the
-accuracy notes in \file{potentials/AUDIT.md}.
+\paragraph{The structure is wrong.} Converge the cutoff with the forces
+(chapter on water) and the $k$-points (chapter on aluminium). For $3d$
+metals, read the accuracy notes in \file{potentials/AUDIT.md}.
 
-\paragraph{Orthogonalization fails at the start.}
+\paragraph{The orthogonalization fails at the start.} The message
 \texttt{LOOP FOR ORTHOGONALIZATION IS NOT CONVERGED} in damped dynamics
-from random wave functions: start with a few Davidson steps, or with
-\key{SAFEORTHO=F}.
+from random wave functions is cured by a few Davidson steps at the
+start, or by \key{SAFEORTHO=F}.
 
 % =====================================================================
-\chapter{Output and analysis}
+\chapter{Output and analysis}\label{chap:output}
 % =====================================================================
+\minitoc
 
-\section{Files}
+\section{The output files}
 
 \begin{center}
 \begin{tabular}{ll}\toprule
-\file{.prot} & report: input, system, model, SCF history, energies,
-  $k$-points and occupations, \\ & atomic charges and moments, forces, stress, timing \\
-\file{.log} & detailed protocol: setup construction, per-step reports \\
-standard output & live table of iterations and the final energy \\
+\file{.prot} & report: input, system, model, self-consistency, energies, \\
+ & $k$-points and occupations, atomic charges and moments, \\
+ & forces, stress, timing \\
+\file{.log} & detailed protocol: setup construction, one line per step \\
+standard output & table of the iterations and the final energy \\
 \file{results.h5} & numerical results (with \texttt{!HDF5OUT}) \\
 \file{.rstrt} & restart file (wave functions, positions) for \key{START=F} \\
 \file{.strc\_out} & final structure \\
 \file{.pdos} & projections for the density of states \\
-\file{.tra} & trajectories (MD, relaxation) \\ \bottomrule
+\file{.tra} & trajectories of molecular dynamics and relaxations \\ \bottomrule
 \end{tabular}
 \end{center}
 
 \section{Density of states}
 
-The DOS tool reads the \file{.pdos} file. For Si
-(\file{examples/02\_si/si.dcntl}):
+The density of states is calculated by a separate tool from the
+\file{.pdos} file. For Si the input is
+\file{examples/tutorial/02\_si/si.dcntl}:
 \deck{../../../examples/tutorial/02_si/si.dcntl}
 \begin{shell}
 cd examples/tutorial/02_si/work/scf
 vespaw_dos.x ../../si.dcntl
 \end{shell}
-writes \file{dos\_total.dos}, \file{dos\_si\_s.dos} and
-\file{dos\_si\_p.dos} (energy in eV, DOS, integrated DOS). Weights can be
-atoms and angular momenta (\key{TYPE='S','P','D'}) or single orbitals
-(\key{!ORB}, e.g.\ $e_g$ and $t_{2g}$); see \file{doc/manual.pdf},
-``The Density of States Analysis Tool''.
+The tool writes \file{dos\_total.dos}, \file{dos\_si\_s.dos} and
+\file{dos\_si\_p.dos}, each with the energy in eV, the density of
+states and its integral. The density of states can be resolved into
+atoms and angular momenta (\key{TYPE='S','P','D'}) or into single
+orbitals (\key{!ORB}, for example $e_g$ and $t_{2g}$); see the section
+``The Density of States Analysis Tool'' of the manual.
 
 \section{HDF5 and Python}
 
 With \texttt{!HDF5OUT READ=T FILE='results.h5' !END} in the
-\key{!CONTROL} block the program writes energy, forces, eigenvalues and
-provenance to an HDF5 file. The Python package reads it:
+\key{!CONTROL} block, the program writes the energy, the forces, the
+eigenvalues and information on the run to an HDF5 file. The Python
+package reads it:
 \begin{shell}
 pip install -e python/
-export PATH="$HOME/.vespaw/bin:$PATH"     # after install.sh
 \end{shell}
 \begin{verbatim}
 from vespaw import Calculation
 r = Calculation("si.cntl").run()
 print(r.energy, r.gap, r.forces)   # eV, eV, eV/Angstrom
 \end{verbatim}
-For the Si example this prints $E=-216.95911$~eV and a gap of
-0.7097~eV. A YAML input front end is described in
+For the Si example this prints $E=-216.95911$~eV and a band gap of
+0.7097~eV. An input front end in YAML is described in
 \file{doc/USAGE.md}.
 
 \end{document}

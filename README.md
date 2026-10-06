@@ -39,6 +39,9 @@ mistaken for a converged one.
 - **Physics**: collinear and non-collinear spin, spin–orbit coupling,
   finite electron temperature, dipole correction, forces and stress,
   Car–Parrinello molecular dynamics, space-group symmetry.
+- **Geometry optimization**: damped dynamics or L-BFGS
+  (`!RDYN OPTIMIZER='LBFGS'`) for the atoms, jointly with the unit cell
+  under an external pressure or a general stress tensor.
 - **Output**: a structured report `<name>.prot` (input, system, model,
   SCF history, energies, k-points and occupations, atomic charges and
   moments, forces, stress, timing) in eV, Å and GPa; results in

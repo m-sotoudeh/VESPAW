@@ -1,0 +1,95 @@
+{
+  "description": "L-BFGS geometry optimization (!RDYN OPTIMIZER='LBFGS', joint with !CELL MOVE=T) on Si diamond (PBE, 4x4x4 k, 25 Ry), DAV+VARIATIONAL electrons. lbfgs_atoms: SI2 displaced by 0.05 AA along x relaxes back to the ideal structure (energy must agree with a static run of the ideal structure shifted rigidly to where L-BFGS leaves it: the shift costs 0.9 ueV of egg-box energy at 25 Ry). lbfgs_cell: same displacement in a lattice stretched by 2%, atoms and cell together (P=0). lbfgs_stress: ideal Si under P[GPA]=1 plus a uniaxial STRESS[GPA]=1 along x; the printed stress must equal P*1+STRESS=diag(2,1,1) GPa",
+  "inputs": [
+    "si.cntl",
+    "si.strc"
+  ],
+  "timeout": 900,
+  "defaults": {
+    "@NSTEP@": "400",
+    "@LUNIT@": "1.0",
+    "@X2@": "1.4075000000",
+    "@RDYN@": "!RDYN OPTIMIZER='LBFGS' FMAX[EV/AA]=0.001 !END",
+    "@CELL@": "",
+    "@X1@": "0.0000000000"
+  },
+  "runs": {
+    "ideal": {
+      "subs": {
+        "@X1@": "0.0249930251",
+        "@X2@": "1.3825012708",
+        "@RDYN@": ""
+      }
+    },
+    "lbfgs_atoms": {
+      "subs": {}
+    },
+    "lbfgs_cell": {
+      "subs": {
+        "@LUNIT@": "1.02",
+        "@CELL@": "!CELL MOVE=T SMAX[GPA]=0.01 !END"
+      }
+    },
+    "lbfgs_stress": {
+      "subs": {
+        "@X2@": "1.3575000000",
+        "@CELL@": "!CELL MOVE=T SMAX[GPA]=0.01 P[GPA]=1.0\n        STRESS[GPA]=1.0 0.0 0.0  0.0 0.0 0.0  0.0 0.0 0.0 !END"
+      }
+    }
+  },
+  "checks": [
+    {
+      "run": "lbfgs_atoms",
+      "quantity": "energy",
+      "value": -7.967074661,
+      "tol": 1e-08,
+      "reference": "2026-10-06, 4 geometries / 42 SCF iterations; constant-friction CP-PAW relaxation (PSIDYN FRIC=0.05, RDYN FRIC=0.02, 5000 steps) -216.79514576 eV, SI2-SI1 1.357498 vs 1.357508 AA; RMM, CG and DAV+PULAY agree to 2e-8 eV"
+    },
+    {
+      "run": "lbfgs_cell",
+      "quantity": "energy",
+      "value": -7.967430788,
+      "tol": 2e-08,
+      "reference": "2026-10-06, 7 geometries / 72 SCF iterations, V=41.20565 AA^3; Parrinello-Rahman friction relaxation (CELL FRIC=0.1, 6000 steps) -216.80483330 eV, V=41.20522 AA^3"
+    },
+    {
+      "run": "lbfgs_cell",
+      "quantity": "pressure_gpa",
+      "value": 0.0,
+      "tol": 0.01,
+      "reference": "target P=0, SMAX[GPA]=0.01"
+    },
+    {
+      "run": "lbfgs_stress",
+      "quantity": "pressure_gpa",
+      "value": 1.3333333,
+      "tol": 0.01,
+      "reference": "target P*1+STRESS=diag(2,1,1) GPa, trace/3=4/3"
+    },
+    {
+      "run": "lbfgs_stress",
+      "quantity": "dedeps:11",
+      "value": -0.0185948,
+      "tol": 0.0002,
+      "reference": "2026-10-06: sigma_xx=1.9956 GPa at V=40.6244 AA^3 (target 2 GPa; SMAX=0.01 GPa*V is 9e-5 H)"
+    },
+    {
+      "run": "lbfgs_stress",
+      "quantity": "dedeps:22",
+      "value": -0.0092722,
+      "tol": 0.0002,
+      "reference": "2026-10-06: sigma_yy=0.9951 GPa (target 1 GPa)"
+    }
+  ],
+  "agree": [
+    {
+      "runs": [
+        "ideal",
+        "lbfgs_atoms"
+      ],
+      "quantity": "energy",
+      "tol": 1e-08
+    }
+  ],
+  "known_issues": {}
+}

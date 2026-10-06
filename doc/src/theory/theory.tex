@@ -1,5 +1,10 @@
 \documentclass[11pt,a4paper,oneside]{book}
-\usepackage[margin=2.5cm]{geometry}
+\usepackage[margin=2.6cm,headheight=14pt]{geometry}
+\usepackage{cmbright}
+\usepackage[T1]{fontenc}
+\renewcommand{\ttdefault}{pcr}
+\usepackage{fancyhdr}
+\usepackage[nohints]{minitoc}
 \usepackage{amsmath,amssymb,bm}
 \usepackage{graphicx}
 \usepackage{booktabs}
@@ -16,18 +21,32 @@
 \newcommand{\pbezero}{PBE0r}
 \newcommand{\scanzero}{SCAN0r}
 \newcommand{\pbeslzero}{PBE-SL0r}
-\newcommand{\key}[1]{\texttt{#1}}
+\newcommand{\key}[1]{\textbf{\texttt{#1}}}
+\setcounter{minitocdepth}{2}
+\setlength{\mtcindent}{12pt}
+\renewcommand{\mtctitle}{}
+\mtcsetrules{minitoc}{off}
+\mtcsetfont{minitoc}{section}{\normalfont\small}
+\mtcsetfont{minitoc}{subsection}{\normalfont\small}
+\mtcsettitlefont{minitoc}{\normalfont}
+\pagestyle{fancy}
+\fancyhf{}
+\renewcommand{\chaptermark}[1]{\markboth{\thechapter\ \MakeUppercase{#1}}{}}
+\fancyhead[R]{\small\leftmark\quad\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+\fancypagestyle{plain}{\fancyhf{}\fancyfoot[C]{\small\textbf{\thepage}}\renewcommand{\headrulewidth}{0pt}}
 \newcommand{\bra}[1]{\langle #1|}
 \newcommand{\ket}[1]{|#1\rangle}
 \newcommand{\braket}[2]{\langle #1|#2\rangle}
 \newcommand{\pt}{\tilde p}
 
-\title{\Huge VESPAW\\[0.5em]\Large Theory and Methods\\[2em]
+\title{\Huge\bfseries VESPAW\\[0.6em]\LARGE Theory and methods\\[2em]
 \normalsize Variational electronic structure with projector augmented waves}
 \author{Mohsen Sotoudeh}
-\date{Version of \today}
+\date{Version 1.0.0}
 
 \begin{document}
+\dominitoc
 \frontmatter
 \maketitle
 \tableofcontents
@@ -35,58 +54,112 @@
 \mainmatter
 % =====================================================================
 \chapter{Introduction}
+\minitoc
 % =====================================================================
 
-VESPAW is a plane-wave electronic-structure code based on the projector
-augmented-wave (PAW) method~\cite{bloechl94_prb50_17953}. It is a fork of
-CP-PAW, the Car--Parrinello PAW code written by Peter E.~Bl\"ochl at
-Clausthal University of Technology. VESPAW keeps the PAW machinery,
-the setup generator, the Car--Parrinello dynamics and the input format of
-CP-PAW, and adds
+\section{Why another look at an old problem}
+
+A first-principles calculation of a material ends with a number, a
+total energy, a band gap, a magnetic moment. Whether this number means
+anything depends on a long chain of steps: the density functional, the
+basis set, the treatment of the atomic cores, the sampling of the
+Brillouin zone, and finally the iteration that makes the electronic
+structure self-consistent. Most of these steps are controlled by a few
+numbers that can be converged. The last one is different. A
+self-consistency cycle that has stalled, or that has settled in a
+metastable state, may report convergence just like one that has found
+the ground state, and nothing in the output tells the difference.
+
+For an experienced user who looks at every calculation, this is a
+nuisance. For the large sets of calculations that are now used to
+search for new materials for batteries, catalysts and other energy
+technologies, it is a real problem, because nobody looks at every
+calculation any more. The materials that matter most, transition-metal
+oxides with magnetic order, mixed valence and polarons, are exactly
+the ones where self-consistency is most delicate.
+
+VESPAW starts from this observation. Its central idea is to treat the
+effective Kohn--Sham Hamiltonian, and not the density, as the variable
+of the self-consistency problem, and to evaluate the energy for the
+actual state that each trial Hamiltonian produces. Every energy is then
+an upper bound of the ground-state energy, and the iteration accepts a
+step only if this bound does not increase. In this book I describe the
+physics and the numerical methods on which VESPAW rests, with the
+emphasis on how the Kohn--Sham equations are solved.
+
+\section{VESPAW and CP-PAW}
+
+VESPAW is a plane-wave code based on the projector augmented-wave (PAW)
+method~\cite{bloechl94_prb50_17953}. It is a fork of CP-PAW, the
+Car--Parrinello PAW code written by Peter E.~Bl\"ochl at Clausthal
+University of Technology. The PAW formalism, the construction of the
+setups, the Car--Parrinello dynamics, the local orbitals and the local
+hybrid functional \pbezero, and the input format all come from CP-PAW.
+VESPAW adds
 \begin{itemize}
-\item a \emph{variational} self-consistent-field (SCF) optimizer, whose
-  energies are upper bounds of the ground-state energy at every
-  iteration (Chapter~\ref{chap:variational});
-\item modern iterative eigensolvers (block Davidson, RMM-DIIS, conjugate
-  gradients) next to the original damped dynamics
-  (Chapter~\ref{chap:eigensolvers});
-\item local hybrid functionals of the \pbezero\ type and their
-  meta-GGA variants \pbeslzero\ and \scanzero, the SCAN family (SCAN-L and orbital-$\tau$
-  SCAN), and forces and stress for all of them
-  (Chapters~\ref{chap:dft}, \ref{chap:hybrids} and \ref{chap:forces});
-\item quality checks for PAW setups (ghost test, incompleteness warning,
-  kinetic-energy cutoff table), a rebuilt and audited setup library
-  (Chapter~\ref{chap:paw}), and a regression suite
-  (Chapter~\ref{chap:code}).
+\item a \emph{variational} self-consistency optimizer, whose energies
+  are upper bounds of the ground-state energy in every iteration
+  (chapter~\ref{chap:variational});
+\item iterative eigensolvers (block Davidson, RMM-DIIS, conjugate
+  gradients) next to the damped dynamics of CP-PAW
+  (chapter~\ref{chap:eigensolvers});
+\item functionals checked against libxc and VASP, the SCAN family
+  (SCAN-L and SCAN with the orbital kinetic-energy density), and the
+  local hybrids \pbeslzero\ and \scanzero, which build on \pbezero\
+  (chapters~\ref{chap:dft} and~\ref{chap:hybrids});
+\item quality checks for PAW setups, an audited setup library
+  (chapter~\ref{chap:paw}) and a regression suite
+  (chapter~\ref{chap:code}).
 \end{itemize}
 
 \paragraph{License.} CP-PAW is distributed under the GNU General Public
-License, version~3 (GPL-3.0), from its GitHub repository. VESPAW is a
-derivative of CP-PAW and is therefore distributed under the same license.
-The older notice ``(C) Copyright Clausthal University of Technology,
-licensed materials'' still found in the headers of the inherited source
-files predates the GPL release.
+License, version~3 (GPL-3.0). VESPAW is derived from CP-PAW and is
+distributed under the same license. The older notice ``(C) Copyright
+Clausthal University of Technology, licensed materials'' in the headers
+of the inherited source files predates the GPL release.
 
-\paragraph{How to read this book.} Chapters~\ref{chap:dft}--\ref{chap:paw}
-summarize the physics that VESPAW implements: density-functional theory,
-plane waves and the PAW method. Chapter~\ref{chap:hybrids} treats the local
-hybrid functionals. Chapters~\ref{chap:variational}
-and~\ref{chap:eigensolvers} describe how the Kohn--Sham equations are
-solved; this is where VESPAW differs most from other codes.
-Chapter~\ref{chap:forces} covers forces, stress and molecular dynamics,
-and Chapter~\ref{chap:code} the structure of the program. Input keywords
-are given in \key{typewriter} font; their complete description is in the
-input manual \texttt{doc/manual.tex}. Hartree atomic units are used
-throughout unless stated otherwise; cutoff energies are quoted in Rydberg,
-as in the input.
+\section{How to read this book}
+
+Chapters~\ref{chap:dft} to~\ref{chap:paw} summarize the physics that
+VESPAW implements: density-functional theory, plane waves and the PAW
+method. Chapter~\ref{chap:hybrids} treats the local hybrid functionals.
+Chapters~\ref{chap:variational} and~\ref{chap:eigensolvers} describe how
+the Kohn--Sham equations are solved, which is where VESPAW differs most
+from other codes. Chapter~\ref{chap:forces} covers forces, stress and
+molecular dynamics, and chapter~\ref{chap:code} the structure of the
+program. The hands-on tutorial (\texttt{doc/tutorial.pdf}) puts all of
+this into practice.
+
+Input keywords are written in \key{bold typewriter}; their complete
+description is in the input manual. Hartree atomic units are used
+throughout unless stated otherwise, while cutoff energies are given in
+Rydberg, as in the input. The program reports its results in eV, \AA{}
+and GPa.
 
 \paragraph{Pitfalls.} Many sections end with a short list of pitfalls.
-They record errors that were actually found in the code and fixed, so that
-the reader understands which quantities are delicate and how they are
-tested.
+They record errors that were actually found in the code and fixed. I
+have kept them, because they show which quantities are delicate and how
+they are tested.
 
 % =====================================================================
 \chapter{Density-functional theory}\label{chap:dft}
+\minitoc
+\section{Introduction}
+
+The electrons of a solid interact with each other, and their wave
+function depends on the coordinates of all of them at once. Already
+for a few dozen electrons such a wave function cannot even be stored,
+let alone calculated. Density-functional theory removes this obstacle
+in two steps. Hohenberg and Kohn showed that the ground-state energy is
+a functional of the electron density alone, a function of only three
+coordinates. Kohn and Sham then expressed this functional through a
+fictitious system of non-interacting electrons that has the same
+density. All the many-body physics is collected in one term, the
+exchange-correlation energy, and the art of density-functional theory
+lies in its approximation. This chapter summarizes the theory and the
+functionals implemented in VESPAW, with particular attention to how
+their parameters were checked against independent implementations.
+
 % =====================================================================
 
 \section{Kohn--Sham equations}
@@ -272,8 +345,28 @@ electron number. The electronic temperature is set in \key{!CONTROL!MERMIN
 T[K]}. It acts as a smearing parameter; the free energy $A$, not $E$, is
 the variational quantity.
 
+
+\section*{Further reading}
+The original work on the subject of this chapter is found in
+Refs.~\cite{HohenbergKohn1964,KohnSham1965,Mermin1965,perdew96_prl77_3865,sun15_prl115_036402}.
+
 % =====================================================================
 \chapter{Plane waves and Brillouin-zone sampling}\label{chap:planewaves}
+\minitoc
+\section{Introduction}
+
+Plane waves are the simplest basis set one can imagine. They are
+orthonormal, they do not depend on the positions of the atoms, and
+their completeness is controlled by a single number, the cutoff. The
+fast Fourier transform switches between real and reciprocal space at
+low cost, so that each term of the Hamiltonian can be applied where it
+is simplest. The price is that sharp features, such as the oscillations
+of the wave functions near a nucleus, would require an enormous number
+of plane waves. The PAW method of the next chapter removes this
+problem. Here we collect what the plane-wave description of a periodic
+solid involves: Bloch states, cutoffs, the grids for the density, and
+the sampling of the Brillouin zone.
+
 % =====================================================================
 
 \section{Bloch states and plane waves}
@@ -321,8 +414,29 @@ by packing two real bands into one complex array (``super wave
 functions''), which halves the number of FFTs. An alternative half-sphere
 storage (\key{GAMMASUPER}) is experimental and not yet correct.
 
+
+\section*{Further reading}
+The original work on the subject of this chapter is found in
+Refs.~\cite{Payne1992,MonkhorstPack1976}.
+
 % =====================================================================
 \chapter{The projector augmented-wave method}\label{chap:paw}
+\minitoc
+\section{Introduction}
+
+A wave function in a solid has two faces. Between the atoms, where the
+chemical bonds form, it is smooth. Close to a nucleus it oscillates
+rapidly, because it must be orthogonal to the core states. The classic
+electronic-structure methods have chosen one face. Pseudopotentials
+replace the atomic region by a smooth effective potential and lose the
+true wave function there. Augmented-wave methods keep it, but at the
+price of a basis set that depends on energy and on the atomic
+positions. The PAW method of Bl\"ochl unites both views through a linear
+transformation between smooth auxiliary wave functions, which are
+expanded in plane waves, and the true wave functions. This chapter
+describes the transformation, the construction of the PAW setups, and
+the checks that make a setup trustworthy.
+
 % =====================================================================
 
 \section{The PAW transformation}
@@ -457,8 +571,15 @@ the error grows with the augmentation radius; a semicore Cu setup with
 small radii reaches 0.5\% at a high cutoff. Accurate soft $3d$ setups are
 an open problem (see the audit).
 
+
+\section*{Further reading}
+The original work on the subject of this chapter is found in
+Refs.~\cite{bloechl94_prb50_17953,KresseJoubert1999}.
+
 % =====================================================================
 \chapter{Local hybrid functionals}\label{chap:hybrids}
+\minitoc
+\section*{Introduction}
 % =====================================================================
 
 Hybrid functionals admix a fraction $a_x$ of exact exchange and cure
@@ -586,8 +707,28 @@ is spin scaled, and by default contains exchange only (\key{TSCANCORR=T}
 adds SCAN correlation). Exchange-only spin scaling and the
 spin-polarized correlation of Chapter~\ref{chap:dft} apply as for SCAN.
 
+
+\section*{Further reading}
+The original work on the subject of this chapter is found in
+Refs.~\cite{adamo99_jcp110_6158,bloechl11_prb84_205101,sotoudeh17_prb95_235150}.
+
 % =====================================================================
 \chapter{Self-consistency: the variational optimizer}\label{chap:variational}
+\minitoc
+\section{Introduction}
+
+The Kohn--Sham equations are a fixed-point problem: the density
+determines the potential, and the potential determines the density. In
+almost every plane-wave code this problem is solved by mixing input and
+output densities until they agree, a procedure that works well in most
+cases and fails, when it fails, without warning. The theory, however,
+offers a minimum principle. This chapter shows how the self-consistency
+problem can be written as a minimization in which the effective
+Hamiltonian is the variable, and every energy is that of an actual
+state. It describes the structure of this Hamiltonian space, including
+a gauge mode that is specific to the PAW method, and the line search
+that turns it into a robust algorithm.
+
 % =====================================================================
 
 \section{The problem with density mixing}
@@ -726,8 +867,26 @@ optimizer finding energies \emph{below} the self-consistent state without
 converging. The regression suite (Chapter~\ref{chap:code}) applies this
 test to every case.
 
+
+\section*{Further reading}
+The original work on the subject of this chapter is found in
+Refs.~\cite{Gonze1996,MarzariVanderbiltPayne1997,FreysoldtBoeckNeugebauer2009,VariationalDraft}.
+
 % =====================================================================
 \chapter{Eigensolvers and dynamics}\label{chap:eigensolvers}
+\minitoc
+\section{Introduction}
+
+Most of the computing time of a calculation is spent in finding the
+lowest eigenstates of the Hamiltonian. For a few hundred bands in a
+basis of tens of thousands of plane waves, a direct diagonalization is
+out of the question. Iterative methods instead improve a set of trial
+wave functions, using only the action of the Hamiltonian on them. In
+the original Car--Parrinello approach this is done by a fictitious
+dynamics of the wave functions. This chapter describes the iterative
+eigensolvers of VESPAW and the damped dynamics of CP-PAW, and what each
+of them requires to return reliable, orthonormal eigenstates.
+
 % =====================================================================
 
 For Route~1 the eigenstates of $\tilde H[\vth]$ must be found at every
@@ -793,8 +952,26 @@ self-consistent state for any functional, and serves as the reference
 in the consistency test. \key{SAFEORTHO=T} orthogonalizes such that the
 energy is conserved; it should not be used with variable occupations.
 
+
+\section*{Further reading}
+The original work on the subject of this chapter is found in
+Refs.~\cite{Davidson1975,WoodZunger1985,KresseFurthmuller1996PRB,Payne1992,CarParrinello1985}.
+
 % =====================================================================
 \chapter{Forces, stress and molecular dynamics}\label{chap:forces}
+\minitoc
+\section{Introduction}
+
+Once the electrons are in their ground state, the atoms feel forces and
+the cell feels a stress. These derivatives of the energy are what makes
+structure optimization and molecular dynamics possible. In a
+variational theory they follow from the explicit dependence of the
+energy on the atomic positions, but in the PAW method this dependence
+hides in many places: the projector functions, the compensation charges
+and the overlap operator all move with the atoms. This chapter collects
+the expressions for forces and stress and describes the equations of
+motion for the atoms.
+
 % =====================================================================
 
 \section{Forces}
@@ -867,8 +1044,21 @@ in Car--Parrinello MD, on the wave functions~\cite{Bloechl2002}
 (\key{!PSIDYN!THERMOSTAT}), which removes the heat that leaks from the
 ions into the fictitious electronic motion.
 
+
+\section*{Further reading}
+The original work on the subject of this chapter is found in
+Refs.~\cite{NielsenMartin1985,Nose1984,BloechlParrinello1992,Bloechl2002}.
+
 % =====================================================================
 \chapter{Structure of the code}\label{chap:code}
+\minitoc
+\section{Introduction}
+
+This chapter is written for those who want to read the source code,
+change it, or add to it. It gives an overview of the source files,
+follows one self-consistency step through the program, and describes
+how a new functional or a new optimizer is added and tested.
+
 % =====================================================================
 
 \section{Source files}

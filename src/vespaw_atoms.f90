@@ -375,6 +375,7 @@ END MODULE ATOMS_MODULE
       REAL(8)        :: CELLFRIC(3,3)
       REAL(8)        :: RBAS(3,3)
       REAL(8)        :: SVAR
+      LOGICAL(4)     :: TLBFGS
 !     **************************************************************************
                               CALL TRACE$PUSH('ATOMS$PROPAGATE')
 !!$PRINT*,'FORCES FROM ATOMS$PROPAGATE',MAXVAL(ABS(FORCE))
@@ -462,6 +463,18 @@ PRINT*,'ATOMS: OPT.FRICTION ',SVAR,AOPT1AV,AOPT2AV,MIXAOPT
         CALL CELL$GETR8A('T(0)',9,RBAS)
         CALL CONSTRAINTS$SETREFERENCE(RBAS,NAT,R0,RM,REDRMASS,DELT)
         TCONSTRAINTREFERENCE=.TRUE.
+      END IF
+!
+!     ==========================================================================
+!     ==  L-BFGS (!RDYN OPTIMIZER='LBFGS'): THE NEXT POSITIONS WERE PROPOSED   ==
+!     ==  BY RELAX$STEP. RM=RP: NO VELOCITY, SO NO KINETIC ENERGY AND NO       ==
+!     ==  KINETIC STRESS.                                                     ==
+!     ==========================================================================
+      CALL RELAX$GETL4('ATOMS',TLBFGS)
+      IF(TLBFGS) THEN
+        CALL RELAX$GETR8A('RP',3*NAT,RP)
+        RM(:,:)=RP(:,:)
+        CALL TRACE$POP ;RETURN
       END IF
 ! 
 !     == PRECONDITIONING =======================================================
@@ -780,8 +793,6 @@ ENDDO
 !     == MAP NEW COORDINATES INTO THE NEXT UNIT CELL                  ==
 !     ==================================================================
       CALL CELL$GETL4('MOVE',TSTRESS)
-PRINT*,'WARNING FROM ATOMS$CONSTRAINTS: TSTRESS SET TO FALSE'
-!TSTRESS=.FALSE.
       IF(TSTRESS) THEN
         CALL CELL$GETR8A('MAPTOCELL',9,MAPTOCELL)
         DO IAT=1,NAT
@@ -2445,4 +2456,637 @@ PRINT*,'WARNING FROM ATOMS$CONSTRAINTS: TSTRESS SET TO FALSE'
       ENDDO
       WRITE(*,FMT='("CHECK ",2E10.2,A)')SUM1,SUM2,TRIM(STRING)
       RETURN
+      END
+!
+!........1.........2.........3.........4.........5.........6.........7.........8
+MODULE RELAX_MODULE
+!*******************************************************************************
+!**                                                                           **
+!**  NAME: RELAX                                                              **
+!**                                                                           **
+!**  PURPOSE: L-BFGS GEOMETRY OPTIMIZATION OF THE ATOMIC POSITIONS            **
+!**    (!RDYN OPTIMIZER='LBFGS') AND, JOINTLY, OF THE UNIT CELL (!CELL        **
+!**    MOVE=T, OR !CELL OPTIMIZER='LBFGS' ALONE FOR THE CELL AT FIXED         **
+!**    FRACTIONAL COORDINATES).                                               **
+!**                                                                           **
+!**  THE OPTIMIZER LIVES INSIDE THE TIME-STEP LOOP: A STEP IS TAKEN ONLY      **
+!**  WHEN THE SCF HAS CONVERGED AT THE CURRENT GEOMETRY (OR AFTER NSCFMAX     **
+!**  ITERATIONS); OTHERWISE ATOMS AND CELL STAY WHERE THEY ARE. THE           **
+!**  ELECTRONS MUST THEREFORE BE OPTIMIZED (PSIDYN OPTIMIZER='DAV','RMM' OR   **
+!**  'CG'), NOT PROPAGATED CAR-PARRINELLO STYLE.                              **
+!**                                                                           **
+!**  VARIABLES: WITH THE DEFORMATION F=T0*TREF^(-1) OF THE CELL T0 RELATIVE   **
+!**  TO THE REFERENCE CELL TREF OF THE STRUCTURE INPUT,                       **
+!**    X = ( U_1..U_NAT , L*(F-1) ),    U=F^(-1)*R (UNDEFORMED POSITIONS)     **
+!**  WITH THE GENERALIZED FORCES                                              **
+!**    F^T*FORCE_I  AND  [S-V*(P*1+STRESS)]*F^(-T)/L ,                        **
+!**  S=-DE/DEPSILON THE INTERNAL STRESS [H] AND P, STRESS FROM !CELL. THE    **
+!**  CELL IS CONVERGED WHEN THE PRINTED STRESS S/V EQUALS P*1+STRESS. FOR     **
+!**  P ALONE THE FORCES ARE -DH/DX OF THE ENTHALPY H=E+PV. A NONHYDROSTATIC   **
+!**  CAUCHY STRESS HAS NO EXACT POTENTIAL AT FINITE STRAIN; THE ENERGY TEST   **
+!**  BELOW THEREFORE USES THE CHANGE OF H RELATIVE TO THE LAST ACCEPTED       **
+!**  POINT A, DH=E-E_A+P*(V-V_A)+V_A*SUM_IJ STRESS_IJ*(F*F_A^(-1)-1)_IJ,      **
+!**  WHOSE GRADIENT AT A IS EXACTLY THE GENERALIZED FORCE.                    **
+!**  THE LENGTH L=SQRT(3*B0*VREF/HESSIAN) MAKES THE FIRST STEP OF A          **
+!**  HYDROSTATIC STRAIN EXACT FOR A BULK MODULUS B0 (A STRAIN EPS*1 RAISES    **
+!**  THE STRESS BY 3*B0*EPS); SHEAR AND UNIAXIAL MODES ARE SOFTER AND START   **
+!**  WITH SHORTER STEPS. ATOMS AND CELL THUS START WITH BALANCED STEPS.       **
+!**                                                                           **
+!**  SCF ACCURACY: AN L-BFGS STEP NEAR THE MINIMUM LOWERS THE ENERGY BY ONLY   **
+!**  ABOUT F**2/(2*HESSIAN); WITH THE DEFAULT EDIFF=1E-6 H THE SCF NOISE WAS   **
+!**  OF THE SAME SIZE (H2O AT 0.05 EV/AA), AND THE ENERGY TEST AND THE         **
+!**  CURVATURE PAIRS TURNED INTO NOISE. AFTER EVERY STEP THE SCF TOLERANCES    **
+!**  EDIFF AND MIXTOL ARE THEREFORE TIGHTENED TO 1% OF THE PREDICTED ENERGY    **
+!**  DECREASE (NOT BELOW EDIFFMIN, NEVER LOOSER THAN THE INPUT), AND ERISE     **
+!**  FOLLOWS AS 10*EDIFF.                                                      **
+!**                                                                           **
+!**  SAFEGUARDS: (1) A STEP WITH DH>ERISE IS HALVED BACK TOWARDS THE LAST     **
+!**  ACCEPTED POINT (AT MOST NBACKMAX TIMES); (2) A PAIR WITHOUT POSITIVE     **
+!**  CURVATURE IS NOT STORED AND THE HISTORY IS CLEARED; (3) A DIRECTION      **
+!**  THAT IS NOT DOWNHILL IS REPLACED BY STEEPEST DESCENT; (4) TRUST RADIUS:  **
+!**  NO ATOM MOVES MORE THAN TRUST AND NO ELEMENT OF F CHANGES BY MORE THAN   **
+!**  MAXSTRAIN*TRUST/MAXSTEP PER STEP. TRUST STARTS AT MAXSTEP, IS HALVED AT  **
+!**  EVERY BACKTRACK AND DOUBLES (UP TO MAXSTEP) AFTER A STEP THAT LOWERED H; **
+!**  WITHOUT THIS, A STEP FROM NOISY CURVATURE PAIRS RIGHT AFTER GIVING UP    **
+!**  BACKTRACKING WENT THE FULL 0.2 AA AND RAISED THE FORCES OF H2O FROM      **
+!**  0.08 TO 4.8 EV/AA.                                                       **
+!**                                                                           **
+!*******************************************************************************
+LOGICAL(4)   :: TINI=.FALSE.
+LOGICAL(4)   :: TATOMS=.FALSE.       ! !RDYN OPTIMIZER='LBFGS'
+CHARACTER(8) :: CELLOPT=' '          ! !CELL OPTIMIZER (' ' IF NOT SPECIFIED)
+LOGICAL(4)   :: TCELL=.FALSE.        ! CELL IS OPTIMIZED (SET IN RELAX_INITIALIZE)
+LOGICAL(4)   :: TON=.FALSE.          ! TATOMS.OR.TCELL
+!== PARAMETERS (ATOMIC UNITS; DEFAULTS SET FROM !RDYN/!CELL IN READIN) ========
+REAL(8)      :: FTOL=1.9447D-4       ! LARGEST FORCE [H/BOHR] (0.01 EV/AA)
+REAL(8)      :: STOL=3.3989D-6       ! LARGEST STRESS RESIDUAL [H/BOHR**3] (0.1 GPA)
+REAL(8)      :: MAXSTEP=0.37795D0    ! TRUST RADIUS FOR AN ATOM [BOHR] (0.2 AA)
+REAL(8)      :: MAXSTRAIN=0.05D0     ! TRUST RADIUS FOR AN ELEMENT OF F
+REAL(8)      :: TRUST=-1.D0          ! ACTUAL TRUST RADIUS [BOHR] (<0: NOT YET SET)
+REAL(8)      :: HESSIAN=0.72036D0    ! INITIAL HESSIAN [H/BOHR**2] (70 EV/AA**2)
+REAL(8)      :: B0=3.3989D-3         ! BULK MODULUS FOR THE CELL SCALE (100 GPA)
+REAL(8)      :: ERISE=1.D-6          ! [H] TOLERATED RISE OF H (SCF NOISE), =10*EDIFF
+REAL(8)      :: EDIFFMIN=1.D-9       ! [H] TIGHTEST SCF ENERGY TOLERANCE IMPOSED
+REAL(8)      :: EDIFFUSER=1.D-6      ! [H] !PSIDYN:EDIFF OF THE INPUT
+REAL(8)      :: MIXTOLUSER=1.D-8     ! !PSIDYN:MIXTOL OF THE INPUT
+INTEGER(4)   :: NMEMX=10             ! #(PAIRS IN THE L-BFGS HISTORY)
+INTEGER(4)   :: NSCFMAX=60           ! #(SCF ITERATIONS AFTER WHICH A STEP IS FORCED)
+INTEGER(4)   :: NSCFMIN=2            ! #(SCF ITERATIONS AT A NEW GEOMETRY BEFORE A STEP)
+INTEGER(4)   :: NBACKMAX=4           ! #(CONSECUTIVE BACKTRACKS BEFORE GIVING UP)
+!== STATE =====================================================================
+INTEGER(4)   :: NX=0                 ! #(VARIABLES)
+INTEGER(4)   :: NAT=0
+INTEGER(4)   :: NMEM=0               ! #(PAIRS IN THE HISTORY)
+INTEGER(4)   :: NSCF=0               ! #(SCF ITERATIONS AT THE CURRENT GEOMETRY)
+INTEGER(4)   :: NGEO=0               ! #(GEOMETRIES EVALUATED)
+INTEGER(4)   :: NBACK=0              ! #(CONSECUTIVE BACKTRACKS)
+LOGICAL(4)   :: TPREV=.FALSE.        ! XPREV,GPREV,HPREV ARE SET
+LOGICAL(4)   :: TDONE=.FALSE.        ! CONVERGED: NO FURTHER STEPS
+REAL(8)      :: EPREV=0.D0           ! ENERGY AT THE LAST ACCEPTED POINT
+REAL(8)      :: VPREV=0.D0           ! ITS VOLUME
+REAL(8)      :: FPREVINV(3,3)        ! ITS INVERSE DEFORMATION F^(-1)
+REAL(8)      :: CELLSCALE=1.D0       ! L [BOHR]
+REAL(8)      :: TREF(3,3)
+REAL(8)      :: TREFINV(3,3)
+REAL(8)      :: VREF
+REAL(8)   ,ALLOCATABLE :: XPREV(:)   ! LAST ACCEPTED POINT
+REAL(8)   ,ALLOCATABLE :: GPREV(:)   ! ITS GENERALIZED FORCE
+REAL(8)   ,ALLOCATABLE :: YK(:,:)    ! L-BFGS HISTORY (FORCE CHANGES)
+REAL(8)   ,ALLOCATABLE :: SK(:,:)    ! L-BFGS HISTORY (STEPS)
+REAL(8)   ,ALLOCATABLE :: RNEW(:,:)  ! NEXT POSITIONS IN THE FRAME OF THE CURRENT CELL
+LOGICAL(4)   :: TPROPOSED=.FALSE.    ! RNEW BELONGS TO THIS TIME STEP
+END MODULE RELAX_MODULE
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE RELAX$SETL4(ID,VAL)
+      USE RELAX_MODULE
+      IMPLICIT NONE
+      CHARACTER(*),INTENT(IN) :: ID
+      LOGICAL(4)  ,INTENT(IN) :: VAL
+!     **************************************************************************
+      IF(ID.EQ.'ATOMS') THEN
+        TATOMS=VAL
+      ELSE
+        CALL ERROR$MSG('ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID',ID)
+        CALL ERROR$STOP('RELAX$SETL4')
+      END IF
+      RETURN
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE RELAX$SETCH(ID,VAL)
+      USE RELAX_MODULE
+      IMPLICIT NONE
+      CHARACTER(*),INTENT(IN) :: ID
+      CHARACTER(*),INTENT(IN) :: VAL
+!     **************************************************************************
+      IF(ID.EQ.'CELLOPTIMIZER') THEN
+        CELLOPT=VAL
+      ELSE
+        CALL ERROR$MSG('ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID',ID)
+        CALL ERROR$STOP('RELAX$SETCH')
+      END IF
+      RETURN
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE RELAX$SETR8(ID,VAL)
+      USE RELAX_MODULE
+      IMPLICIT NONE
+      CHARACTER(*),INTENT(IN) :: ID
+      REAL(8)     ,INTENT(IN) :: VAL
+!     **************************************************************************
+      IF(VAL.LE.0.D0) THEN
+        CALL ERROR$MSG('L-BFGS PARAMETERS MUST BE POSITIVE')
+        CALL ERROR$CHVAL('ID',ID)
+        CALL ERROR$R8VAL('VAL',VAL)
+        CALL ERROR$STOP('RELAX$SETR8')
+      END IF
+      IF(ID.EQ.'FTOL') THEN
+        FTOL=VAL
+      ELSE IF(ID.EQ.'STOL') THEN
+        STOL=VAL
+      ELSE IF(ID.EQ.'MAXSTEP') THEN
+        MAXSTEP=VAL
+      ELSE IF(ID.EQ.'HESSIAN') THEN
+        HESSIAN=VAL
+      ELSE IF(ID.EQ.'B0') THEN
+        B0=VAL
+      ELSE
+        CALL ERROR$MSG('ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID',ID)
+        CALL ERROR$STOP('RELAX$SETR8')
+      END IF
+      RETURN
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE RELAX$SETI4(ID,VAL)
+      USE RELAX_MODULE
+      IMPLICIT NONE
+      CHARACTER(*),INTENT(IN) :: ID
+      INTEGER(4)  ,INTENT(IN) :: VAL
+!     **************************************************************************
+      IF(ID.EQ.'NMEM') THEN
+        IF(VAL.LT.1) THEN
+          CALL ERROR$MSG('!RDYN:NMEM MUST BE AT LEAST 1')
+          CALL ERROR$STOP('RELAX$SETI4')
+        END IF
+        NMEMX=VAL
+      ELSE IF(ID.EQ.'NSCFMAX') THEN
+        IF(VAL.LT.NSCFMIN) THEN
+          CALL ERROR$MSG('!RDYN:NSCFMAX TOO SMALL')
+          CALL ERROR$I4VAL('MINIMUM',NSCFMIN)
+          CALL ERROR$STOP('RELAX$SETI4')
+        END IF
+        NSCFMAX=VAL
+      ELSE
+        CALL ERROR$MSG('ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID',ID)
+        CALL ERROR$STOP('RELAX$SETI4')
+      END IF
+      RETURN
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE RELAX$GETL4(ID,VAL)
+!     **  'ON': L-BFGS ACTIVE; 'ATOMS': THE ATOMS ARE MOVED BY L-BFGS         **
+      USE RELAX_MODULE
+      IMPLICIT NONE
+      CHARACTER(*),INTENT(IN) :: ID
+      LOGICAL(4)  ,INTENT(OUT):: VAL
+!     **************************************************************************
+      CALL RELAX_INITIALIZE()
+      IF(ID.EQ.'ON') THEN
+        VAL=TON
+      ELSE IF(ID.EQ.'ATOMS') THEN
+        VAL=TATOMS
+      ELSE
+        CALL ERROR$MSG('ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID',ID)
+        CALL ERROR$STOP('RELAX$GETL4')
+      END IF
+      RETURN
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE RELAX$GETR8A(ID,LEN,VAL)
+!     **  'RP': POSITIONS OF THE NEXT STEP IN THE FRAME OF THE CURRENT CELL   **
+!     **  (ATOMS$SWITCH MAPS THEM INTO THE NEW CELL WITH CELL 'MAPTOCELL')    **
+      USE RELAX_MODULE
+      IMPLICIT NONE
+      CHARACTER(*),INTENT(IN) :: ID
+      INTEGER(4)  ,INTENT(IN) :: LEN
+      REAL(8)     ,INTENT(OUT):: VAL(LEN)
+!     **************************************************************************
+      IF(ID.EQ.'RP') THEN
+        IF(.NOT.TPROPOSED) THEN
+          CALL ERROR$MSG('NO GEOMETRY PROPOSED FOR THIS STEP (RELAX$STEP NOT CALLED)')
+          CALL ERROR$STOP('RELAX$GETR8A')
+        END IF
+        IF(LEN.NE.3*NAT) THEN
+          CALL ERROR$MSG('SIZE MISMATCH')
+          CALL ERROR$I4VAL('LEN',LEN)
+          CALL ERROR$I4VAL('3*NAT',3*NAT)
+          CALL ERROR$STOP('RELAX$GETR8A')
+        END IF
+        VAL=RESHAPE(RNEW,(/LEN/))
+        TPROPOSED=.FALSE.
+      ELSE
+        CALL ERROR$MSG('ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID',ID)
+        CALL ERROR$STOP('RELAX$GETR8A')
+      END IF
+      RETURN
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE RELAX_INITIALIZE()
+!     **************************************************************************
+!     **  DECIDES WHAT IS OPTIMIZED AND REFUSES COMBINATIONS THAT CANNOT WORK **
+!     **************************************************************************
+      USE RELAX_MODULE
+      IMPLICIT NONE
+      LOGICAL(4)    :: TDYN,TCELLMOVE,TCHK
+      CHARACTER(8)  :: WAVEOPT
+      INTEGER(4)    :: NFREE
+      INTEGER(4)    :: NFILO
+      INTEGER(4)    :: NTASKS,THISTASK
+      REAL(8)       :: EV,ANGSTROM,GPA
+!     **************************************************************************
+      IF(TINI) RETURN
+      TINI=.TRUE.
+      CALL ATOMS$GETL4('MOVE',TDYN)
+      CALL CELL$GETL4('MOVE',TCELLMOVE)
+      TATOMS=TATOMS.AND.TDYN
+!
+!     ==========================================================================
+!     ==  WHAT IS OPTIMIZED                                                   ==
+!     ==========================================================================
+      IF(TATOMS.AND.TCELLMOVE.AND.CELLOPT.EQ.'MD') THEN
+        CALL ERROR$MSG('!RDYN OPTIMIZER=''LBFGS'' AND !CELL OPTIMIZER=''MD''')
+        CALL ERROR$MSG('CANNOT BE COMBINED: DROP !CELL:OPTIMIZER TO RELAX')
+        CALL ERROR$MSG('ATOMS AND CELL JOINTLY WITH L-BFGS')
+        CALL ERROR$STOP('RELAX_INITIALIZE')
+      END IF
+      IF(CELLOPT.EQ.'LBFGS'.AND.TDYN.AND..NOT.TATOMS) THEN
+        CALL ERROR$MSG('!CELL OPTIMIZER=''LBFGS'' WITH MOLECULAR DYNAMICS OF THE ATOMS')
+        CALL ERROR$MSG('SET !RDYN OPTIMIZER=''LBFGS'' FOR A JOINT OPTIMIZATION,')
+        CALL ERROR$MSG('OR REMOVE !RDYN TO OPTIMIZE THE CELL AT FIXED FRACTIONAL COORDINATES')
+        CALL ERROR$STOP('RELAX_INITIALIZE')
+      END IF
+      TCELL=TCELLMOVE.AND.(CELLOPT.EQ.'LBFGS'.OR.(TATOMS.AND.CELLOPT.NE.'MD'))
+      TON=TATOMS.OR.TCELL
+      IF(.NOT.TON) RETURN
+!
+!     ==========================================================================
+!     ==  L-BFGS NEEDS BORN-OPPENHEIMER FORCES AND A PLAIN ENERGY SURFACE     ==
+!     ==========================================================================
+      CALL WAVES$GETCH('OPTIMIZER',WAVEOPT)
+      IF(WAVEOPT.NE.'DAV'.AND.WAVEOPT.NE.'RMM'.AND.WAVEOPT.NE.'CG') THEN
+        CALL ERROR$MSG('OPTIMIZER=''LBFGS'' NEEDS CONVERGED FORCES AT EVERY GEOMETRY:')
+        CALL ERROR$MSG('USE !PSIDYN OPTIMIZER=''DAV'', ''RMM'' OR ''CG''.')
+        CALL ERROR$MSG('WITH CAR-PARRINELLO ELECTRONS (OPTIMIZER=''MD'') RELAX')
+        CALL ERROR$MSG('WITH FRICTION DYNAMICS (!RDYN OPTIMIZER=''MD'' FRIC=...)')
+        CALL ERROR$CHVAL('!PSIDYN:OPTIMIZER',WAVEOPT)
+        CALL ERROR$STOP('RELAX_INITIALIZE')
+      END IF
+      CALL ATOMLIST$NATOM(NAT)
+      CALL CONSTRAINTS$NFREE(NAT,NFREE)
+      IF(TATOMS.AND.NFREE.LT.3*NAT) THEN
+        CALL ERROR$MSG('!RDYN OPTIMIZER=''LBFGS'' DOES NOT SUPPORT !CONSTRAINTS YET')
+        CALL ERROR$MSG('USE FRICTION DYNAMICS (OPTIMIZER=''MD'') FOR CONSTRAINED RELAXATIONS')
+        CALL ERROR$I4VAL('#(DEGREES OF FREEDOM)',NFREE)
+        CALL ERROR$I4VAL('3*NAT',3*NAT)
+        CALL ERROR$STOP('RELAX_INITIALIZE')
+      END IF
+      CALL DIMER$GETL4('DIMER',TCHK)
+      IF(TCHK) THEN
+        CALL ERROR$MSG('OPTIMIZER=''LBFGS'' CANNOT BE COMBINED WITH THE DIMER METHOD')
+        CALL ERROR$STOP('RELAX_INITIALIZE')
+      END IF
+      CALL QMMM$GETL4('ON',TCHK)
+      IF(TCHK) THEN
+        CALL ERROR$MSG('OPTIMIZER=''LBFGS'' CANNOT BE COMBINED WITH QM-MM')
+        CALL ERROR$STOP('RELAX_INITIALIZE')
+      END IF
+!
+!     ==========================================================================
+!     ==  VARIABLES AND HISTORY                                               ==
+!     ==========================================================================
+      NX=0
+      IF(TATOMS) NX=NX+3*NAT
+      IF(TCELL)  NX=NX+9
+      ALLOCATE(XPREV(NX))
+      ALLOCATE(GPREV(NX))
+      ALLOCATE(YK(NX,NMEMX))
+      ALLOCATE(SK(NX,NMEMX))
+      ALLOCATE(RNEW(3,NAT))
+      XPREV=0.D0
+      GPREV=0.D0
+      YK=0.D0
+      SK=0.D0
+      NMEM=0
+      CALL CELL$GETR8A('TREF',9,TREF)
+      CALL LIB$INVERTR8(3,TREF,TREFINV)
+      VREF=ABS(TREF(1,1)*(TREF(2,2)*TREF(3,3)-TREF(3,2)*TREF(2,3)) &
+     &        +TREF(2,1)*(TREF(3,2)*TREF(1,3)-TREF(1,2)*TREF(3,3)) &
+     &        +TREF(3,1)*(TREF(1,2)*TREF(2,3)-TREF(2,2)*TREF(1,3)))
+      CELLSCALE=SQRT(3.D0*B0*VREF/HESSIAN)
+      TRUST=MAXSTEP
+      CALL WAVES$GETR8('EDIFF',EDIFFUSER)
+      CALL WAVES$GETR8('MIXTOL',MIXTOLUSER)
+      ERISE=10.D0*EDIFFUSER
+      CALL CELL$SETL4('EXTERNALSTEP',TCELL)
+!
+!     ==========================================================================
+!     ==  REPORT                                                              ==
+!     ==========================================================================
+      CALL MPE$QUERY('MONOMER',NTASKS,THISTASK)
+      IF(THISTASK.EQ.1) THEN
+        CALL CONSTANTS('EV',EV)
+        CALL CONSTANTS('ANGSTROM',ANGSTROM)
+        CALL CONSTANTS('PASCAL',GPA)
+        GPA=1.D+9*GPA
+        CALL FILEHANDLER$UNIT('PROT',NFILO)
+        CALL REPORT$TITLE(NFILO,'L-BFGS GEOMETRY OPTIMIZATION')
+        CALL REPORT$L4VAL(NFILO,'ATOMIC POSITIONS OPTIMIZED',TATOMS)
+        CALL REPORT$L4VAL(NFILO,'UNIT CELL OPTIMIZED',TCELL)
+        IF(TATOMS) CALL REPORT$R8VAL(NFILO,'FORCE TOLERANCE',FTOL*ANGSTROM/EV,'EV/AA')
+        IF(TCELL)  CALL REPORT$R8VAL(NFILO,'STRESS TOLERANCE',STOL/GPA,'GPA')
+        CALL REPORT$R8VAL(NFILO,'MAX. DISPLACEMENT PER STEP',MAXSTEP/ANGSTROM,'AA')
+        CALL REPORT$R8VAL(NFILO,'INITIAL HESSIAN',HESSIAN*ANGSTROM**2/EV,'EV/AA**2')
+        IF(TCELL)  CALL REPORT$R8VAL(NFILO,'BULK MODULUS FOR THE CELL SCALE',B0/GPA,'GPA')
+        CALL REPORT$I4VAL(NFILO,'#(STEPS IN THE HISTORY)',NMEMX,' ')
+        CALL REPORT$I4VAL(NFILO,'MAX. #(SCF ITERATIONS PER GEOMETRY)',NSCFMAX,' ')
+      END IF
+      RETURN
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE RELAX$STEP(TSCFCONV,TLAST,TMOVED)
+!     **************************************************************************
+!     **  CALLED ONCE PER TIME STEP AFTER THE ENERGY, FORCES AND STRESS.      **
+!     **  PROPOSES THE GEOMETRY OF THE NEXT TIME STEP: UNCHANGED WHILE THE    **
+!     **  SCF IS NOT CONVERGED, OTHERWISE THE NEXT L-BFGS POINT. SIGNALS THE  **
+!     **  STOP WHEN FORCES AND STRESS ARE BELOW THEIR TOLERANCES.             **
+!     **  THE ATOMS PICK THE PROPOSAL UP IN ATOMS$PROPAGATE (RELAX$GETR8A),   **
+!     **  THE CELL IN CELL$PROPAGATE (CELL$SETR8A('TP') BELOW).               **
+!     **************************************************************************
+      USE RELAX_MODULE
+      USE ATOMS_MODULE, ONLY : R0,FORCE
+      USE MPE_MODULE
+      IMPLICIT NONE
+      LOGICAL(4),INTENT(IN)  :: TSCFCONV ! SCF CONVERGED AT THIS GEOMETRY
+      LOGICAL(4),INTENT(IN)  :: TLAST    ! LAST TIME STEP OF THE RUN
+      LOGICAL(4),INTENT(OUT) :: TMOVED   ! A NEW GEOMETRY HAS BEEN PROPOSED
+      REAL(8)   ,PARAMETER   :: SMALL=1.D-12
+      REAL(8)                :: T0(3,3),TNEW(3,3)
+      REAL(8)                :: FMAT(3,3),FINV(3,3),FNEW(3,3)
+      REAL(8)                :: ONE(3,3),STRESSI(3,3),STRESSX(3,3),GF(3,3)
+      REAL(8)                :: F(3,NAT),U(3,NAT)
+      REAL(8)                :: X(NX),G(NX),XNEW(NX),XBASE(NX),D(NX)
+      REAL(8)                :: ETOT,ENTH,DH,P,VOL,SVAR,SCALE,SY
+      REAL(8)                :: FMAXNOW,SMAXNOW
+      REAL(8)                :: EDIFFGEO
+      REAL(8)                :: EV,ANGSTROM,GPA
+      CHARACTER(32)          :: CTYPE
+      CHARACTER(16)          :: CSTEP
+      INTEGER(4)             :: IAT,I,IX
+      INTEGER(4)             :: NFILO
+      INTEGER(4)             :: NTASKS,THISTASK
+!     **************************************************************************
+      TMOVED=.FALSE.
+      CALL RELAX_INITIALIZE()
+      IF(.NOT.TON) RETURN
+      ONE=0.D0
+      DO I=1,3
+        ONE(I,I)=1.D0
+      ENDDO
+!
+!     ==  DEFAULT: STAY AT THE CURRENT GEOMETRY ================================
+      CALL CELL$GETR8A('T(0)',9,T0)
+      RNEW=R0
+      TPROPOSED=.TRUE.
+      IF(TCELL) CALL CELL$SETR8A('TP',9,T0)
+      IF(TLAST.OR.TDONE) RETURN
+!
+!     ==  WAIT FOR THE SCF =====================================================
+      NSCF=NSCF+1
+      IF(.NOT.(TSCFCONV.AND.NSCF.GE.NSCFMIN).AND.NSCF.LT.NSCFMAX) RETURN
+!
+      CALL MPE$QUERY('MONOMER',NTASKS,THISTASK)
+      CALL FILEHANDLER$UNIT('PROT',NFILO)
+      CALL CONSTANTS('EV',EV)
+      CALL CONSTANTS('ANGSTROM',ANGSTROM)
+      CALL CONSTANTS('PASCAL',GPA)
+      GPA=1.D+9*GPA
+!
+!     ==========================================================================
+!     ==  VARIABLES, GENERALIZED FORCES AND ENTHALPY OF THE CURRENT POINT     ==
+!     ==========================================================================
+      IF(TCELL) THEN
+        FMAT=MATMUL(T0,TREFINV)
+      ELSE
+        FMAT=ONE
+      END IF
+      CALL LIB$INVERTR8(3,FMAT,FINV)
+      F=FORCE
+      CALL SYMMETRIZE$FORCE(NAT,F)
+      DO IAT=1,NAT
+        U(:,IAT)=MATMUL(FINV,R0(:,IAT))
+      ENDDO
+      IX=0
+      IF(TATOMS) THEN
+        DO IAT=1,NAT
+          X(IX+1:IX+3)=U(:,IAT)
+          G(IX+1:IX+3)=MATMUL(TRANSPOSE(FMAT),F(:,IAT))
+          IX=IX+3
+        ENDDO
+      END IF
+      CALL ENERGYLIST$RETURN('TOTAL ENERGY',ETOT)
+      ENTH=ETOT
+      DH=0.D0
+      IF(TPREV) DH=ETOT-EPREV
+      SMAXNOW=0.D0
+      VOL=0.D0
+      P=0.D0
+      STRESSX=0.D0
+      IF(TCELL) THEN
+        VOL=ABS(T0(1,1)*(T0(2,2)*T0(3,3)-T0(3,2)*T0(2,3)) &
+     &         +T0(2,1)*(T0(3,2)*T0(1,3)-T0(1,2)*T0(3,3)) &
+     &         +T0(3,1)*(T0(1,2)*T0(2,3)-T0(2,2)*T0(1,3)))
+        CALL CELL$GETR8A('STRESS_I',9,STRESSI)
+        STRESSI=0.5D0*(STRESSI+TRANSPOSE(STRESSI))
+        CALL CELL$GETR8('P',P)
+        CALL CELL$GETR8A('STRESS',9,STRESSX)
+        GF=MATMUL(STRESSI-VOL*(P*ONE+STRESSX),TRANSPOSE(FINV))
+!       == CONSTRAINTS ON THE CELL: PROJECT THE GENERALIZED FORCE =============
+        CALL CELL$GETCH('CONSTRAINTTYPE',CTYPE)
+        IF(CTYPE.EQ.'FREE') THEN
+          GF=0.5D0*(GF+TRANSPOSE(GF))       ! NO ROTATION
+        ELSE IF(CTYPE.EQ.'NOSHEAR') THEN
+          DO I=1,3
+            SVAR=GF(I,I)
+            GF(I,:)=0.D0
+            GF(I,I)=SVAR
+          ENDDO
+        ELSE IF(CTYPE.EQ.'ISOTROPIC') THEN
+          SVAR=(GF(1,1)+GF(2,2)+GF(3,3))/3.D0
+          GF=SVAR*ONE
+        ELSE IF(CTYPE.EQ.'NOSTRESS') THEN
+          GF=0.D0
+        ELSE
+          CALL ERROR$MSG('CONSTRAINTTYPE NOT RECOGNIZED')
+          CALL ERROR$CHVAL('CONSTRAINTTYPE',CTYPE)
+          CALL ERROR$STOP('RELAX$STEP')
+        END IF
+        X(IX+1:IX+9)=CELLSCALE*RESHAPE(FMAT-ONE,(/9/))
+        G(IX+1:IX+9)=RESHAPE(GF,(/9/))/CELLSCALE
+!       == RESIDUAL STRESS [H/BOHR**3]: ZERO AT THE TARGET P*1+STRESS ==========
+        SMAXNOW=MAXVAL(ABS(MATMUL(GF,TRANSPOSE(FMAT))))/VOL
+        ENTH=ETOT+P*VOL
+        IF(TPREV) DH=DH+P*(VOL-VPREV) &
+     &              +VPREV*SUM(STRESSX*(MATMUL(FMAT,FPREVINV)-ONE))
+      END IF
+      FMAXNOW=0.D0
+      IF(TATOMS) THEN
+        DO IAT=1,NAT
+          FMAXNOW=MAX(FMAXNOW,SQRT(SUM(F(:,IAT)**2)))
+        ENDDO
+      END IF
+      NGEO=NGEO+1
+!
+!     ==========================================================================
+!     ==  CONVERGED?                                                          ==
+!     ==========================================================================
+      IF(TSCFCONV.AND.FMAXNOW.LT.FTOL.AND.SMAXNOW.LT.STOL) THEN
+        TDONE=.TRUE.
+        CALL RELAX_REPORT('CONVERGED')
+        CALL STOPIT$SETL4('STOP',.TRUE.)
+        CALL STOPIT$SETCH('REASON','CONVERGED (L-BFGS: FORCES AND STRESS)')
+        NSCF=0
+        RETURN
+      END IF
+!
+!     ==========================================================================
+!     ==  NEXT POINT                                                          ==
+!     ==========================================================================
+      IF(TPREV.AND.DH.GT.ERISE.AND.NBACK.LT.NBACKMAX) THEN
+!       == SAFEGUARD 1: THE ENTHALPY ROSE. HALVE THE STEP FROM THE LAST =======
+!       == ACCEPTED POINT AND START THE HISTORY AFRESH.                   ======
+        NBACK=NBACK+1
+        NMEM=0
+        TRUST=0.5D0*TRUST
+        XBASE=XPREV
+        D=0.5D0*(X-XPREV)
+        CSTEP='BACKTRACK'
+      ELSE
+        CSTEP='LBFGS'
+        IF(TPREV.AND.DH.GT.ERISE) THEN
+!         == GIVE UP BACKTRACKING: ACCEPT THE POINT, FORGET THE HISTORY ========
+          NMEM=0
+          CSTEP='ACCEPT-RISE'
+          IF(THISTASK.EQ.1) WRITE(NFILO,FMT='("L-BFGS HINT: THE ENERGY DID NOT DECREASE EVEN FOR"' &
+     &      //'," SMALL STEPS. THE SCF ENERGY IS NOT ACCURATE ENOUGH FOR THE FORCES:"' &
+     &      //'/"L-BFGS HINT: TIGHTEN !PSIDYN EDIFF/MIXTOL; FOR MOLECULES AND SLABS"' &
+     &      //'," IN VACUUM USE MIXER=''PULAY'' (VARIATIONAL MIXER: VACUUM BIAS)")')
+        ELSE IF(TPREV.AND.NBACK.EQ.0.AND.DH.LT.0.D0) THEN
+          TRUST=MIN(2.D0*TRUST,MAXSTEP)
+        END IF
+        NBACK=0
+        IF(TPREV) THEN
+!         == SAFEGUARD 2: STORE THE PAIR ONLY WITH POSITIVE CURVATURE. ========
+!         == WITH FORCES (NOT GRADIENTS) THIS IS S.Y<0.                 ========
+          SY=DOT_PRODUCT(X-XPREV,G-GPREV)
+          IF(SY.LT.-SMALL*SQRT(SUM((X-XPREV)**2)*SUM((G-GPREV)**2))) THEN
+            CALL LBFGS(NX,NMEMX,NMEM,1.D0/HESSIAN,YK,SK,X,XPREV,G,GPREV,XNEW)
+          ELSE
+            NMEM=0
+            CALL LBFGS(NX,NMEMX,NMEM,1.D0/HESSIAN,YK,SK,X,X,G,G,XNEW)
+            CSTEP='CURVATURE-RESET'
+          END IF
+        ELSE
+          CALL LBFGS(NX,NMEMX,NMEM,1.D0/HESSIAN,YK,SK,X,X,G,G,XNEW)
+        END IF
+        D=XNEW-X
+!       == SAFEGUARD 3: MUST GO DOWNHILL ========================================
+        IF(DOT_PRODUCT(D,G).LE.0.D0) THEN
+          NMEM=0
+          D=G/HESSIAN
+          CSTEP='STEEPEST-DESCENT'
+        END IF
+        XBASE=X
+        XPREV=X
+        GPREV=G
+        EPREV=ETOT
+        VPREV=VOL
+        FPREVINV=FINV
+        TPREV=.TRUE.
+      END IF
+!
+!     == SAFEGUARD 4: TRUST RADIUS ============================================
+      SCALE=1.D0
+      IX=0
+      IF(TATOMS) THEN
+        DO IAT=1,NAT
+          SVAR=SQRT(SUM(MATMUL(FMAT,D(IX+1:IX+3))**2))
+          IF(SVAR.GT.TRUST) SCALE=MIN(SCALE,TRUST/SVAR)
+          IX=IX+3
+        ENDDO
+      END IF
+      IF(TCELL) THEN
+        SVAR=MAXVAL(ABS(D(IX+1:IX+9)))/CELLSCALE
+        IF(SVAR.GT.MAXSTRAIN*TRUST/MAXSTEP) SCALE=MIN(SCALE,MAXSTRAIN*TRUST/MAXSTEP/SVAR)
+      END IF
+      XNEW=XBASE+SCALE*D
+      CALL RELAX_REPORT(CSTEP)
+!
+!     ==========================================================================
+!     ==  TRANSLATE BACK: NEXT CELL AND POSITIONS                             ==
+!     ==========================================================================
+      IX=0
+      IF(TATOMS) THEN
+        DO IAT=1,NAT
+          U(:,IAT)=XNEW(IX+1:IX+3)
+          IX=IX+3
+        ENDDO
+      END IF
+      IF(TCELL) THEN
+        FNEW=ONE+RESHAPE(XNEW(IX+1:IX+9),(/3,3/))/CELLSCALE
+        TNEW=MATMUL(FNEW,TREF)
+        CALL MPE$BROADCAST('MONOMER',1,TNEW)
+        CALL CELL$SETR8A('TP',9,TNEW)
+      END IF
+!     == POSITIONS IN THE FRAME OF THE CURRENT CELL: ATOMS$SWITCH MAPS THEM ===
+!     == WITH MAPTOCELL=FNEW*FMAT^(-1) TO THE CARTESIAN POSITIONS FNEW*U.   ===
+      DO IAT=1,NAT
+        RNEW(:,IAT)=MATMUL(FMAT,U(:,IAT))
+      ENDDO
+      CALL MPE$BROADCAST('MONOMER',1,RNEW)
+!
+!     == SCF ACCURACY AT THE NEXT GEOMETRY: 1% OF THE PREDICTED GAIN ==========
+      EDIFFGEO=0.01D0*0.5D0*SUM(G**2)/HESSIAN
+      EDIFFGEO=MIN(EDIFFUSER,MAX(EDIFFMIN,EDIFFGEO))
+      CALL WAVES$SETR8('EDIFF',EDIFFGEO)
+      CALL WAVES$SETR8('MIXTOL',MIXTOLUSER*EDIFFGEO/EDIFFUSER)
+      ERISE=10.D0*EDIFFGEO
+      TMOVED=.TRUE.
+      NSCF=0
+      RETURN
+      CONTAINS
+!       ........................................................................
+        SUBROUTINE RELAX_REPORT(STEPTYPE)
+        CHARACTER(*),INTENT(IN) :: STEPTYPE
+        IF(THISTASK.NE.1) RETURN
+        IF(NGEO.EQ.1) WRITE(NFILO,FMT='(/"L-BFGS",T10,"GEO",T15,"#SCF",T21' &
+     &      //',"E+PV[EV]",T41,"FMAX[EV/AA]",T54,"SMAX[GPA]",T65,"STEP")')
+        WRITE(NFILO,FMT='("L-BFGS",T8,I5,T14,I5,T20,F19.8,T40,ES12.4,T53,ES11.3,T65,A)') &
+     &        NGEO,NSCF,ENTH/EV,FMAXNOW*ANGSTROM/EV,SMAXNOW/GPA,TRIM(STEPTYPE)
+        IF(.NOT.TSCFCONV) WRITE(NFILO,FMT='("L-BFGS WARNING: SCF NOT CONVERGED AFTER",I5' &
+     &      //'," ITERATIONS (NSCFMAX); STEP TAKEN WITH UNCONVERGED FORCES")')NSCF
+        CALL LIB$FLUSHFILE(NFILO)
+        END SUBROUTINE RELAX_REPORT
       END

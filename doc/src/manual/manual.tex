@@ -1618,6 +1618,72 @@ will allow the wave functions to recover.}
 \vrules{optional, not used if ``AUTO'' is selected.}
 \vdefault{0.0}}
 
+\mbax{\key{OPTIMIZER}
+\vdescr{How the atoms are moved.
+\begin{itemize}
+\item 'MD': damped Newtonian dynamics as described above.
+\item 'LBFGS': geometry optimization with the limited-memory BFGS
+  method. The atoms stay where they are until the SCF has converged at
+  the current geometry (the stop signal of \key{MIXTOL}/\key{EDIFF} of
+  \key{!PSIDYN}, which then no longer ends the run); then one L-BFGS
+  step is taken and the SCF histories are restarted. The run stops when
+  the largest force is below \key{FMAX[EV/AA]} (and, with a moving
+  cell, the stress below \key{!CELL:SMAX[GPA]}). A moving cell
+  (\key{!CELL MOVE=T}) is optimized together with the atoms.
+  Safeguards: a step that raises the energy (enthalpy) is halved back
+  towards the last accepted point; pairs without positive curvature
+  and uphill directions reset the history; no atom moves more than a
+  trust radius, which starts at \key{MAXSTEP[AA]}, is halved at every
+  backtrack and recovers after successful steps.
+  As the forces become small, \key{EDIFF} and \key{MIXTOL} of
+  \key{!PSIDYN} are tightened automatically for each geometry to 1\% of
+  the energy gain expected from the step (but not below
+  $10^{-9}$~H), because the energy test needs an SCF energy more
+  accurate than that gain. For molecules and slabs in vacuum use
+  \key{MIXER='PULAY'}: the variational mixer leaves an error of about
+  $10^{-5}$~H there that stalls the optimization near 0.05~eV/\AA.
+  Restart files do not contain the L-BFGS history.
+  Requires \key{!PSIDYN OPTIMIZER='DAV'}, 'RMM' or 'CG'. Cannot be
+  combined with \key{!AUTO}, \key{!THERMOSTAT}, \key{!WARMUP},
+  \key{RANDOM[K]}, \key{!CONSTRAINTS}, QM-MM or the dimer method.
+\end{itemize}}
+\vformat{character}
+\vrules{optional}
+\vdefault{'MD'}}
+
+\mbax{\key{FMAX[EV/AA]}
+\vdescr{L-BFGS only: convergence criterion on the largest force on an atom.}
+\vformat{real}
+\vrules{optional}
+\vdefault{0.01}}
+
+\mbax{\key{MAXSTEP[AA]}
+\vdescr{L-BFGS only: largest displacement of an atom in one step.}
+\vformat{real}
+\vrules{optional}
+\vdefault{0.2}}
+
+\mbax{\key{HESSIAN[EV/AA**2]}
+\vdescr{L-BFGS only: initial guess for the Hessian; its inverse sets
+  the length of the first step.}
+\vformat{real}
+\vrules{optional}
+\vdefault{70.}}
+
+\mbax{\key{NMEM}
+\vdescr{L-BFGS only: number of steps kept in the history.}
+\vformat{integer}
+\vrules{optional}
+\vdefault{10}}
+
+\mbax{\key{NSCFMAX}
+\vdescr{L-BFGS only: if the SCF has not converged after this number of
+  iterations at one geometry, the step is taken anyway (with a warning
+  in the protocol).}
+\vformat{integer}
+\vrules{optional}
+\vdefault{60}}
+
 \mbax{\key{NONEGEFRIC}
 \vdescr{\textbf{Experimental option!}
 Avoids negative friction on the atoms. It is recommended for
@@ -2003,8 +2069,8 @@ TEMPERATURE[K]; CHARGE[E]; SPIN[HBAR].}
 \mbax{\key{FRIC}
 \vdescr{friction parameter}
 \vformat{real}
-\vrules{mandatory if !control!cell:move=.true.}
-\vdefault{none}}
+\vrules{optional}
+\vdefault{0.0}}
 %
 \mbax{\key{M}
 \vdescr{mass for unit cell dynamics}
@@ -2013,10 +2079,49 @@ TEMPERATURE[K]; CHARGE[E]; SPIN[HBAR].}
 \vdefault{mass corresponding to a period of 50*dt for diamond}}
 %
 \mbax{\key{P}
-\vdescr{external pressure}
+\vdescr{external pressure in Hartree/bohr$^3$. Alternatively
+  \key{P[GPA]} in GPa.}
 \vformat{real}
 \vrules{optional}
 \vdefault{0.0}}
+%
+\mbax{\key{STRESS}
+\vdescr{external stress tensor (row by row, symmetric) in
+  Hartree/bohr$^3$, alternatively \key{STRESS[GPA]} in GPa. Same sign
+  convention as \key{P} and as the printed stress
+  $\sigma=-\frac{1}{V}\frac{\partial E}{\partial\epsilon}$ (positive
+  is compressive): the cell relaxes until the printed stress equals
+  \key{P}$\cdot\mathbf{1}+$\key{STRESS}. The load acts on the actual
+  cell (true, Cauchy stress), so the result does not depend on the
+  starting cell. Works with Parrinello--Rahman dynamics and with L-BFGS.}
+\vformat{real(9)}
+\vrules{optional}
+\vdefault{9$\times$0.0}}
+%
+\mbax{\key{OPTIMIZER}
+\vdescr{'MD' (Parrinello--Rahman dynamics) or 'LBFGS'. Not needed for
+  a joint optimization: with \key{!RDYN OPTIMIZER='LBFGS'} a moving
+  cell is optimized with the atoms. \key{OPTIMIZER='LBFGS'} without
+  \key{!RDYN} optimizes the cell at fixed fractional coordinates.}
+\vformat{character}
+\vrules{optional}
+\vdefault{follows !RDYN:OPTIMIZER}}
+%
+\mbax{\key{SMAX[GPA]}
+\vdescr{L-BFGS only: convergence criterion on the largest element of
+  the difference between the printed stress and the target
+  \key{P}$\cdot\mathbf{1}+$\key{STRESS}.}
+\vformat{real}
+\vrules{optional}
+\vdefault{0.1}}
+%
+\mbax{\key{B0[GPA]}
+\vdescr{L-BFGS only: bulk modulus that sets the length of the first
+  cell step (exact for a hydrostatic strain of a material with this
+  bulk modulus).}
+\vformat{real}
+\vrules{optional}
+\vdefault{100.}}
 %
 \mbax{\key{CONSTRAINTTYPE}
 \vdescr{Constraints on the cell dynamics. Allowed values are the
@@ -2034,11 +2139,6 @@ rotation from the stress tensor.
 \vrules{optional}
 \vdefault{'FREE'}}
 %
-% \mbax{\key{STRESS}
-% \vdescr{external stress}
-% \vformat{real(9)}
-% \vrules{optional}
-% \vdefault{9$\times$0.0}}
 %
 %----------------------------------------------------------------------
 \block{!CONTROL!QM-MM}

@@ -38,6 +38,14 @@ setups without ZORA, the default since 2026-09-29.
 | Exact angular one-center XC | Experimental | `!CONTROL!DFT ANGULARXC='EXACT'` integrates the non-spherical one-center XC on an angular grid instead of the Taylor expansion (about 1.5× the cost per iteration). |
 | Explicit partial-wave reference energies | Experimental | `!AUGMENT DEREF[H]=` for HBS setups (replaces the box-state energies). |
 
+## Geometry optimization
+
+| Feature | Status | Description |
+|---|---|---|
+| L-BFGS relaxation of atoms — `!RDYN OPTIMIZER='LBFGS'` | Experimental | Quasi-Newton optimization (limited-memory BFGS) as an alternative to damped dynamics. A step is taken only after the SCF has converged at the current geometry; the SCF tolerances are tightened automatically as the forces become small. Safeguards: backtracking when the energy rises, curvature and descent checks, adaptive trust radius (`MAXSTEP[AA]`). Converges on `FMAX[EV/AA]`. Needs `OPTIMIZER='DAV'`, `'RMM'` or `'CG'`; not yet with `!CONSTRAINTS`. Si: same structure and energy as friction dynamics, about 10× faster (`si_relax`); H2O: 7 geometries to 0.004 eV/Å. |
+| Joint relaxation of atoms and cell | Experimental | `!CELL MOVE=T` with `!RDYN OPTIMIZER='LBFGS'` (or `!CELL OPTIMIZER='LBFGS'` alone at fixed fractional coordinates); `CONSTRAINTTYPE` `'FREE'`, `'NOSHEAR'`, `'ISOTROPIC'`; converges on `SMAX[GPA]`. Si: volume within 10⁻⁵ of Parrinello–Rahman friction dynamics (`si_relax`). |
+| External pressure and stress | Experimental | `!CELL P[GPA]=` and the general tensor `STRESS[GPA]=` (also in Hartree/bohr³ as `P`, `STRESS`). The load acts on the actual cell: at equilibrium the printed stress equals P·1 + STRESS, for L-BFGS and for Parrinello–Rahman dynamics (`si_relax`). |
+
 ## Symmetry and parallelization
 
 | Feature | Status | Description |
@@ -54,7 +62,7 @@ setups without ZORA, the default since 2026-09-29.
 | YAML input frontend | Experimental | `vespaw run foo.yaml`; covers the common case, with a `raw:` passthrough for any `.cntl` keyword. |
 | Python API (`python/`) | Experimental | Runs a deck and reads HDF5 results as numpy arrays. |
 | `potentials` setup library | Experimental | One PAW setup file per element (105 elements). The lattice-constant benchmark is in progress; see [KNOWN_ISSUES.md](KNOWN_ISSUES.md) for setups that are not yet validated. |
-| Regression suite (`testsuite/`) | Stable | 18 cases checking energies, gaps, forces, stress and cross-optimizer agreement, in serial and MPI runs. |
+| Regression suite (`testsuite/`) | Stable | 21 cases checking energies, gaps, forces, stress and cross-optimizer agreement, in serial and MPI runs. |
 
 ## Not yet available
 

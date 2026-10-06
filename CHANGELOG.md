@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- L-BFGS geometry optimization: `!RDYN OPTIMIZER='LBFGS'` for the atoms,
+  jointly with the unit cell (`!CELL MOVE=T`), or the cell alone
+  (`!CELL OPTIMIZER='LBFGS'`). Safeguards against energy rises, bad
+  curvature and too long steps; SCF tolerances tightened automatically
+  near convergence. Validated against friction dynamics (`si_relax`).
+- `!CELL STRESS=` (general external stress tensor) is available again,
+  with `STRESS[GPA]=` and `P[GPA]=`; at equilibrium the printed stress
+  equals P·1 + STRESS, also for Parrinello–Rahman dynamics.
+- `!CELL FRIC` is optional (default 0) as documented.
+
 ## 1.0.0 — 2026-10-12, first public release
 
 VESPAW is derived from CP-PAW (see README). Compared with CP-PAW:

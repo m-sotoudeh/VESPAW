@@ -33,7 +33,9 @@ LOGICAL(4) :: TINIT=.FALSE.
 LOGICAL(4) :: TON  =.FALSE.      ! USED TO REQUEST INTERNAL STRESS
 LOGICAL(4) :: TMOVE=.FALSE.      ! PROPAGATE UNIT CELL
 REAL(8)    :: TREF(3,3)          ! REFERENCE CELL CONSTANTS
-REAL(8)    :: STRESS(3,3)=0.D0   ! EXTERNAL STRESS TENSOR
+REAL(8)    :: STRESS(3,3)=0.D0   ! EXTERNAL STRESS TENSOR [H/BOHR**3], SAME SIGN AS P
+                                 ! (POSITIVE=COMPRESSIVE) AND AS THE PRINTED STRESS:
+                                 ! TARGET IS PRINTED STRESS = P*1+STRESS, SEE CELL$PROPAGATE
 REAL(8)    :: PRESSURE=0.D0      ! EXTERNAL PRESSURE
 REAL(8)    :: DELTAT=0.D0
 REAL(8)    :: FRIC=0.D0
@@ -50,6 +52,8 @@ REAL(8)    :: EKIN=0.D0          ! KINETIC ENERGY
 REAL(8)    :: VREF=0.D0          ! VOLUME OF THE REFERENCE UNIT CELL
 REAL(8)    :: V0=0.D0            ! VOLUME OF THE ACTUAL UNIT CELL
 LOGICAL(4) :: TSTOP=.FALSE.      ! RESET VELOCITIES TO ZERO
+LOGICAL(4) :: TEXTSTEP=.FALSE.   ! TP IS SET FROM OUTSIDE (L-BFGS, RELAX OBJECT)
+REAL(8)    :: TPEXT(3,3)=0.D0    ! CELL OF THE NEXT STEP PROPOSED BY RELAX
 !=====================================
 REAL(8)    :: SIGMA(3,3)      ! 
 REAL(8)    :: TREFINV(3,3)    ! 
@@ -132,6 +136,30 @@ CONTAINS
 !
       RETURN
       END SUBROUTINE CELL_INITIALIZE
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE CELL_EXTERNALENTHALPY(EPOT_)
+!     **************************************************************************
+!     **  ENTHALPY TERM OF THE EXTERNAL PRESSURE AND STRESS FOR THE CELL T0:  **
+!     **    PV + VREF*SUM_IJ STRESS_IJ*(F-1)_IJ,   F=T0*TREF^(-1)             **
+!     **  EXACT FOR THE PRESSURE, SMALL-STRAIN WORK FOR A NONHYDROSTATIC      **
+!     **  STRESS (SEE CELL$PROPAGATE). FOR REPORTING ONLY.                    **
+!     **************************************************************************
+      IMPLICIT NONE
+      REAL(8),INTENT(OUT) :: EPOT_
+      REAL(8)             :: FMAT(3,3),VOL
+      INTEGER(4)          :: I
+!     **************************************************************************
+      VOL=T0(1,1)*(T0(2,2)*T0(3,3)-T0(2,3)*T0(3,2)) &
+     &   +T0(2,1)*(T0(3,2)*T0(1,3)-T0(3,3)*T0(1,2)) &
+     &   +T0(3,1)*(T0(1,2)*T0(2,3)-T0(1,3)*T0(2,2)) 
+      FMAT=MATMUL(T0,TREFINV)
+      DO I=1,3
+        FMAT(I,I)=FMAT(I,I)-1.D0
+      ENDDO
+      EPOT_=PRESSURE*VOL+VREF*SUM(STRESS*FMAT)
+      RETURN
+      END SUBROUTINE CELL_EXTERNALENTHALPY
 END MODULE CELL_MODULE
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
@@ -150,6 +178,7 @@ END MODULE CELL_MODULE
       CALL REPORT$R8VAL(NFIL,'MASS',TMASS,'A.U.') 
       CALL REPORT$R8VAL(NFIL,'FRICTION',FRIC,'DT/2') 
       CALL REPORT$R8VAL(NFIL,'EXTERNAL PRESSURE',PRESSURE,'A.U.') 
+      IF(TEXTSTEP) CALL REPORT$CHVAL(NFIL,'CELL OPTIMIZER','L-BFGS (!RDYN/!CELL OPTIMIZER)')
       CALL REPORT$CHVAL(NFIL,'CONSTRAINTYPE',CONSTRAINTTYPE) 
       CALL REPORT$R8VAL(NFIL,'REFERENCE VOLUME',VREF,'A.U.') 
       WRITE(NFIL,FMT='("REFERENCE UNIT CELL",T35," STRESS ")')
@@ -214,6 +243,26 @@ END MODULE CELL_MODULE
       END SUBROUTINE CELL$SETCH
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE CELL$GETCH(ID,VAL)
+!     **************************************************************************
+!     **                                                                      **
+!     **************************************************************************
+      USE CELL_MODULE
+      IMPLICIT NONE
+      CHARACTER(*),INTENT(IN) :: ID
+      CHARACTER(*),INTENT(OUT):: VAL
+!     **************************************************************************
+      IF(ID.EQ.'CONSTRAINTTYPE') THEN
+        VAL=CONSTRAINTTYPE
+      ELSE
+        CALL ERROR$MSG('ID NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID',ID)
+        CALL ERROR$STOP('CELL$GETCH')
+      END IF
+      RETURN
+      END SUBROUTINE CELL$GETCH
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE CELL$SETL4(ID,VAL)
 !     **************************************************************************
 !     **                                                                      **
@@ -244,6 +293,12 @@ END MODULE CELL_MODULE
 !     =================================================================
       ELSE IF(ID.EQ.'STOP') THEN
         TSTOP=VAL
+!
+!     =================================================================
+!     ==  NEXT CELL IS SET FROM OUTSIDE BY CELL$SETR8A('TP') (L-BFGS) ==
+!     =================================================================
+      ELSE IF(ID.EQ.'EXTERNALSTEP') THEN
+        TEXTSTEP=VAL
 !
 !     =================================================================
 !     ==  DONE                                                       ==
@@ -376,6 +431,12 @@ END MODULE CELL_MODULE
         VAL=TMASS
 !
 !     ==========================================================================
+!     ==  EXTERNAL PRESSURE                                                   ==
+!     ==========================================================================
+      ELSE IF(ID.EQ.'P') THEN
+        VAL=PRESSURE
+!
+!     ==========================================================================
 !     ==  DONE                                                                ==
 !     ==========================================================================
       ELSE
@@ -472,6 +533,19 @@ END MODULE CELL_MODULE
         TM=RESHAPE(VAL,(/3,3/))
 !
 !     ==================================================================
+!     ==  CELL OF THE NEXT STEP, SET BY THE L-BFGS OPTIMIZER (RELAX)  ==
+!     ==  USED BY CELL$PROPAGATE IF CELL$SETL4('EXTERNALSTEP',.TRUE.) ==
+!     ==================================================================
+      ELSE IF(ID.EQ.'TP'.OR.ID.EQ.'T(+)') THEN
+        IF(LEN.NE.9) THEN
+          CALL ERROR$MSG('SIZE MISMATCH')
+          CALL ERROR$CHVAL('ID',ID)
+          CALL ERROR$I4VAL('LEN',LEN)
+          CALL ERROR$STOP('CELL$SETR8A')
+        END IF
+        TPEXT=RESHAPE(VAL,(/3,3/))
+!
+!     ==================================================================
 !     ==  DONE                                                        ==
 !     ==================================================================
       ELSE
@@ -544,6 +618,15 @@ END MODULE CELL_MODULE
 !     ==========================================================================
 !     ==  STRESS                                                              ==
 !     ==========================================================================
+      ELSE IF(ID.EQ.'STRESS') THEN
+        IF(LEN.NE.9) THEN
+          CALL ERROR$MSG('SIZE MISMATCH')
+          CALL ERROR$CHVAL('ID',ID)
+          CALL ERROR$I4VAL('LEN',LEN)
+          CALL ERROR$STOP('CELL$GETR8A')
+        END IF
+        VAL=RESHAPE(STRESS,(/9/))
+!
       ELSE IF(ID.EQ.'STRESS_I') THEN
         IF(LEN.NE.9) THEN
           CALL ERROR$MSG('SIZE MISMATCH')
@@ -667,6 +750,23 @@ END IF
       DO I=1,3
         ONE(I,I)=1.D0
       ENDDO
+      V0=T0(1,1)*(T0(2,2)*T0(3,3)-T0(2,3)*T0(3,2)) &
+     &  +T0(2,1)*(T0(3,2)*T0(1,3)-T0(3,3)*T0(1,2)) &
+     &  +T0(3,1)*(T0(1,2)*T0(2,3)-T0(1,3)*T0(2,2)) 
+!
+!     ==========================================================================
+!     == L-BFGS (RELAX OBJECT): THE NEXT CELL IS PRESCRIBED, NO DYNAMICS.     ==
+!     == TM=TP MAKES THE CELL VELOCITY, EKIN AND THE CELL FRICTION MATRIX     ==
+!     == ('FRICMAT') VANISH. EPOT IS THE ENTHALPY TERM OF THE CURRENT CELL.   ==
+!     ==========================================================================
+      IF(TEXTSTEP) THEN
+        TP=TPEXT
+        TM=TP
+        EKIN=0.D0
+        CALL CELL_EXTERNALENTHALPY(EPOT)
+        TPROPAGATED=.TRUE.
+        RETURN
+      END IF
 !
 !     ==========================================================================
 !     == ENSURE THAT STRESS-TENSOR IS SYMMETRIC                               ==
@@ -732,9 +832,6 @@ END IF
         CALL ERROR$STOP('CELL$PROPAGATE')
       END IF
 !
-      V0=T0(1,1)*(T0(2,2)*T0(3,3)-T0(2,3)*T0(3,2)) &
-     &  +T0(2,1)*(T0(3,2)*T0(1,3)-T0(3,3)*T0(1,2)) &
-     &  +T0(3,1)*(T0(1,2)*T0(2,3)-T0(1,3)*T0(2,2)) 
       IF(ABS(V0).GT.1.D+10*ABS(VREF)) THEN
         CALL ERROR$MSG('CELL DYNAMICS UNSTABLE')
         CALL ERROR$R8VAL('VOLUME ',V0)
@@ -743,9 +840,16 @@ END IF
       END IF
 
       IF(TPARRINELLORAHMAN) THEN
-!       == ENERGY AND STRESS OF THE VOLUME RESERVOIR. THE ENTHALPY IS  H=E+PV
-        EPOT=PRESSURE*V0
-        STRESS_EXT(:,:)=-PRESSURE*V0*ONE
+!       == ENERGY AND STRESS OF THE RESERVOIR. THE EXTERNAL (CAUCHY) STRESS  ==
+!       == P*1+STRESS ACTS ON THE ACTUAL CELL, SO THAT AT EQUILIBRIUM THE     ==
+!       == PRINTED STRESS -(1/V)DE/DEPSILON IS P*1+STRESS, WHATEVER THE      ==
+!       == STARTING CELL. FOR A HYDROSTATIC LOAD THIS IS THE ENTHALPY        ==
+!       == H=E+PV. A NONHYDROSTATIC STRESS AT FINITE STRAIN HAS NO EXACT     ==
+!       == POTENTIAL; EPOT THEN CARRIES THE SMALL-STRAIN WORK                ==
+!       == VREF*SUM_IJ STRESS_IJ*(F-1)_IJ, F=T0*TREF^(-1), AND THE CONSTANT  ==
+!       == ENERGY IS CONSERVED ONLY TO THAT ORDER.                           ==
+        CALL CELL_EXTERNALENTHALPY(EPOT)
+        STRESS_EXT(:,:)=-V0*(PRESSURE*ONE+STRESS)
 !       == PROPAGATE LATTICE VECTORS ===========================================
         SVAR1=2.D0/(1.D0+FRIC)
         SVAR2=1.D0-SVAR1
