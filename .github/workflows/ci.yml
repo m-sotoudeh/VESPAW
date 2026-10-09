@@ -53,13 +53,18 @@ jobs:
           vespaw doctor
           python3 testsuite/run.py pbe_atom si8_gamma si_pbe:dav_var si_forces:dav_var
 
+      - name: Show the install log on failure
+        if: failure()
+        run: |
+          mkdir -p ci-logs
+          cp "$HOME"/.vespaw/*.log* ci-logs/ 2>/dev/null || true
+          for f in testsuite/*/work/*/*.prot; do [ -f "$f" ] && cp "$f" "ci-logs/$(echo "$f" | tr / _)"; done
+          tail -n 80 "$HOME/.vespaw/install.log" 2>/dev/null || true
+
       - name: Upload logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: logs-${{ matrix.os }}
-          path: |
-            ~/.vespaw/*.log
-            ~/.vespaw/check.log*
-            testsuite/**/*.prot
+          path: ci-logs/
           if-no-files-found: ignore
