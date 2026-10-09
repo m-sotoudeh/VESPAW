@@ -2091,8 +2091,19 @@ PRINT*,'A     ',(A(I,I),I=1,NB)
         SMAP(I)=I
       ENDDO 
       ALLOCATE(X(NB,NB))
+      IF(TINV.AND.NBH.NE.NB) THEN
 !== SPEICHERZUGRIFFSFEHLER IFC10
-      CALL WAVES_ORTHO_Y_C(NB,OVERLAP,OVERLAP,OVERLAP,X,SMAP)
+        CALL WAVES_ORTHO_Y_C(NB,OVERLAP,OVERLAP,OVERLAP,X,SMAP)
+      ELSE
+!       == ONE WAVE FUNCTION PER SLOT (COMPLEX K-POINTS, TINV SWITCHED  ==
+!       == OFF AT GAMMA AS FOR TSCANDELOC, OR TSUPER): EXACT GRAM-     ==
+!       == SCHMIDT BY CHOLESKY, O=U^DAGGER*U, |PSI>=|PSI>U^-1.         ==
+!       == WAVES_ORTHO_Y_C ASSUMES <CHI|O|CHI> CLOSE TO ONE, AS IN THE ==
+!       == CONSTRAINT STEP; FOR RAW RANDOM START VECTORS (NORM ~4,     ==
+!       == LARGE OFF-DIAGONAL OVERLAPS) ITS RECURSION DIVERGED (SI8 AND==
+!       == LIMN2O4 AT GAMMA WITH TINV OFF: OVERLAP EIGENVALUES 1E33).  ==
+        CALL WAVES_CHOLESKYORTHO(NB,OVERLAP,X)
+      END IF
       DEALLOCATE(OVERLAP)
       DEALLOCATE(SMAP)
 !     
@@ -2178,6 +2189,43 @@ PRINT*,'A     ',(A(I,I),I=1,NB)
         ENDDO
         DEALLOCATE(X)
       END IF
+      RETURN
+      END
+!
+!     ..................................................................
+      SUBROUTINE WAVES_CHOLESKYORTHO(NB,OVERLAP,X)
+!     ******************************************************************
+!     **  GRAM-SCHMIDT TRANSFORM FROM THE CHOLESKY FACTOR OF THE       **
+!     **  OVERLAP MATRIX: O=U^DAGGER*U WITH U UPPER TRIANGULAR, AND    **
+!     **  |PSI_I>+SUM_J |PSI_J>X(J,I) ORTHONORMAL FOR X=U^-1-1        **
+!     **  (X(I>J)=0, SAME CONVENTION AS WAVES_ORTHO_Y_C).             **
+!     ******************************************************************
+      IMPLICIT NONE
+      INTEGER(4),INTENT(IN)  :: NB
+      COMPLEX(8),INTENT(IN)  :: OVERLAP(NB,NB) ! <PSI_I|O|PSI_J>
+      COMPLEX(8),INTENT(OUT) :: X(NB,NB)
+      INTEGER(4)             :: I,J,INFO
+!     ******************************************************************
+      X(:,:)=OVERLAP(:,:)
+      CALL ZPOTRF('U',NB,X,NB,INFO) !LAPACK
+      IF(INFO.NE.0) THEN
+        CALL ERROR$MSG('OVERLAP MATRIX NOT POSITIVE DEFINITE')
+        CALL ERROR$MSG('(LINEARLY DEPENDENT START WAVE FUNCTIONS)')
+        CALL ERROR$I4VAL('INFO',INFO)
+        CALL ERROR$STOP('WAVES_CHOLESKYORTHO')
+      END IF
+      CALL ZTRTRI('U','N',NB,X,NB,INFO) !LAPACK
+      IF(INFO.NE.0) THEN
+        CALL ERROR$MSG('CHOLESKY FACTOR SINGULAR')
+        CALL ERROR$I4VAL('INFO',INFO)
+        CALL ERROR$STOP('WAVES_CHOLESKYORTHO')
+      END IF
+      DO J=1,NB
+        DO I=J+1,NB
+          X(I,J)=(0.D0,0.D0)
+        ENDDO
+        X(J,J)=X(J,J)-(1.D0,0.D0)
+      ENDDO
       RETURN
       END
 !
