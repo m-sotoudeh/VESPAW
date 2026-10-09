@@ -183,12 +183,30 @@ case "$TOOLCHAIN" in
     for d in ${CPATH:+${CPATH//:/ }} /usr/include /usr/include/hdf5/serial; do
       [ -d "$d" ] && INCDIRS="$INCDIRS -I$d"
     done
-    HDF5LIBS="-lhdf5_hl_fortran -lhdf5_fortran -lhdf5_hl -lhdf5"
+    # Debian/Ubuntu name the high-level Fortran library libhdf5hl_fortran
+    HL="hdf5_hl_fortran"
+    for d in $LIBDIRS; do
+      d="${d#-L}"
+      if ls "$d"/libhdf5_hl_fortran.* >/dev/null 2>&1; then HL="hdf5_hl_fortran"; break; fi
+      if ls "$d"/libhdf5hl_fortran.* >/dev/null 2>&1; then HL="hdf5hl_fortran"; break; fi
+    done
+    HDF5LIBS="-l$HL -lhdf5_fortran -lhdf5_hl -lhdf5"
     FFTH=""
     for d in ${CPATH:+${CPATH//:/ }} /usr/include; do
       if [ -f "$d/fftw3.f03" ]; then FFTH="$d/fftw3.f03"; break; fi
     done
+    # mpif.h: ask the MPI compiler wrapper (Open MPI, MPICH), then the usual places
     MPIH=""
+    MPIINC=""
+    if [ -n "$MPIFC" ]; then
+      MPIINC="$("$MPIFC" --showme:incdirs 2>/dev/null || true)"
+      [ -n "$MPIINC" ] || MPIINC="$("$MPIFC" -show 2>/dev/null | tr ' ' '\n' | sed -n 's/^-I//p' || true)"
+    fi
+    for d in $MPIINC ${CPATH:+${CPATH//:/ }} /usr/lib/x86_64-linux-gnu/openmpi/include \
+             /usr/include/x86_64-linux-gnu/openmpi /usr/include/openmpi-x86_64 /usr/include/mpich \
+             /usr/include/x86_64-linux-gnu/mpich /usr/include; do
+      if [ -f "$d/mpif.h" ]; then MPIH="$d/mpif.h"; break; fi
+    done
     ;;
 esac
 [ -n "$FC" ] && [ -x "$FC" ] || fail "no Fortran compiler found (toolchain $TOOLCHAIN)"
