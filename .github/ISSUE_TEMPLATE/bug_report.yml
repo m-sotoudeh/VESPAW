@@ -1,0 +1,42 @@
+name: Bug report
+description: A calculation crashes, does not converge, or gives a wrong result
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting a problem. Please check
+        [doc/KNOWN_ISSUES.md](../blob/main/doc/KNOWN_ISSUES.md) first.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What did you expect, and what did you get instead?
+    validations:
+      required: true
+  - type: textarea
+    id: input
+    attributes:
+      label: Input files
+      description: Attach or paste the `.cntl` and `.strc` (or YAML) input. A small system that shows the problem helps most.
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: The relevant part of `<name>.prot` (sections 04 SCF and the summary) and any error message from `<name>.log`.
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: VESPAW version or commit
+      placeholder: "1.0.0 or the commit hash shown in section 09 of the .prot"
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Output of `vespaw doctor` (operating system, compiler, MPI, number of tasks and threads).
+      render: text

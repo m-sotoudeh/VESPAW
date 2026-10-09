@@ -1,0 +1,16 @@
+name: Feature request
+description: Suggest a new functional, method, output or improvement
+labels: [enhancement]
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: What do you need?
+      description: The calculation you want to do and what is missing for it.
+    validations:
+      required: true
+  - type: textarea
+    id: refs
+    attributes:
+      label: References
+      description: Papers or other codes that describe or implement the method, if any.

@@ -10,6 +10,14 @@
   plane waves &middot; MPI and OpenMP &middot; GPL-3.0
 </p>
 
+<p align="center">
+  <a href="https://github.com/m-sotoudeh/VESPAW/actions/workflows/ci.yml"><img src="https://github.com/m-sotoudeh/VESPAW/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/m-sotoudeh/VESPAW/releases/latest"><img src="https://img.shields.io/github/v/release/m-sotoudeh/VESPAW" alt="Release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="License: GPL-3.0"></a>
+  <img src="https://img.shields.io/badge/Fortran-OpenMP%20%7C%20MPI-734f96" alt="Fortran, OpenMP, MPI">
+  <img src="https://img.shields.io/badge/platforms-Linux%20%7C%20macOS-lightgrey" alt="Linux, macOS">
+</p>
+
 ---
 
 **VESPAW** is a plane-wave electronic-structure code based on the
@@ -123,6 +131,12 @@ If you use VESPAW, please cite
   Phys. Rev. B **84**, 205101 (2011).
 
 See [CITATION.cff](CITATION.cff).
+
+## Contributing
+
+Bug reports, test cases and code are welcome; see
+[CONTRIBUTING.md](CONTRIBUTING.md). Please follow the
+[code of conduct](CODE_OF_CONDUCT.md).
 
 ## License
 

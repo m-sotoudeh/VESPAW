@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
-"""VESPAW regression guard -- a small, fast, checked-in set of known-good
-energies, distinct from the (gitignored) exploratory `tests/` tree.
+"""VESPAW regression suite -- a small, fast set of reference calculations
+with known-good energies, gaps, forces and stresses.
 
-Why this exists: every session's "verified against a real run" was ad hoc
-and left no trace in the repository (tests/ is gitignored). This is the
-minimum needed so a future Phase 0.5 cleanup pass, or any other change,
-has something automatic to check against instead of relying on someone
-remembering to re-run last session's manual checks. See the dev notes's
-"Not yet implemented -- continuation checklist" for the YAML frontend, and
-the "Known bugs" section for SCAN0r, for why these particular cases were
-picked.
+Every change to the code is checked against it. The cases cover the
+self-consistency optimizers (Davidson, RMM-DIIS, CG, EDFT and
+Car-Parrinello friction dynamics must reach the same minimum), metals at
+finite temperature, spin polarization, the local hybrids, meta-GGA
+(SCAN), DFT+U, spin-orbit coupling, the dipole correction, forces and
+stress against finite differences, geometry optimization and space-group
+symmetry.
 
 Each case directory holds its own real input (.cntl/.strc, or a YAML
 input) plus `expected.json` (a known-good final energy + tolerance, in

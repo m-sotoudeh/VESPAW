@@ -1,16 +1,11 @@
-# H -- PAW setup ("NDLSS" augmentation), REAL PUBLISHED PARAMETERS
-# Source: Peter Bloechl's own production setup, as printed directly in
-#   Bloechl group, PBE0r paper, Phys. Rev. B 95, 235150 (2017)
-#   (pasted into this session by the user from the paper itself, not
-#   re-derived) -- supersedes the generic Element0ktest recipe this file
-#   used to hold.
-# This block also carries the paper's own !NTBO (onsite-hybrid) sub-block
-#   (LHFWEIGHT etc.) for PBE0r/SCAN0r use -- inert for a plain TYPE='PBE'
-#   run (no !DFT!NTBO MODUS='HYBRID' active), real production values if
-#   hybrid IS requested.
-# Still worth a convergence/GHOSTBUSTER check in YOUR specific system
-#   before trusting it blindly, same as any setup -- but this is the
-#   closest thing to "already validated in a real publication" available.
+# H -- PAW setup (NDLSS augmentation) with published parameters
+# Source: the production setup of P. E. Bloechl as given in
+#   M. Sotoudeh et al., Phys. Rev. B 95, 235150 (2017).
+# The !NTBO sub-block holds the onsite-hybrid parameters of that paper
+#   (LHFWEIGHT etc.). It is used only when a local hybrid (PBE0r, SCAN0r)
+#   is selected with !DFT!NTBO MODUS='HYBRID'; plain PBE ignores it.
+# As for any setup, check convergence and ghost states (GHOSTBUSTER)
+#   for the system at hand.
 #
   !SPECIES NAME='H_' NPRO=1 0 0 LRHOX=4 RAD/RCOV=1.2
     !NTBO NOFL=1 0 0 CV=T LHFWEIGHT=0.07
