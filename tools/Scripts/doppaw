@@ -35,7 +35,7 @@ export VERBOSE=no
 export PARCODE=$(which ppaw_fast.x)
 #export MPIRUN=/opt/openmpi-1.10.1/bin/mpirun    #package mpi execution
 export MPIRUN=/usr/local/bin/mpirun    #package mpi execution
-export NFILE=/Users/ptpb/bin/NODES    # nodes file
+export NFILE=$HOME/bin/NODES    # nodes file
 export NNODES=4
 while getopts :hv0n:x: OPT  ; do
   case $OPT in

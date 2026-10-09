@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x86_64 (gfortran, system libraries)
+            os: ubuntu-24.04
+            toolchain: system
+          - name: macOS arm64 (Homebrew)
+            os: macos-14
+            toolchain: brew
+    env:
+      OMP_NUM_THREADS: 2
+      OPENBLAS_NUM_THREADS: 1
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gfortran libopenblas-dev libfftw3-dev libhdf5-dev \
+            libopenmpi-dev openmpi-bin autoconf \
+            python3-numpy python3-yaml python3-h5py
+          # Debian keeps the serial HDF5 Fortran libraries in a subdirectory
+          echo "LIBRARY_PATH=/usr/lib/x86_64-linux-gnu/hdf5/serial" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu/hdf5/serial" >> "$GITHUB_ENV"
+          echo "OMPI_MCA_rmaps_base_oversubscribe=1" >> "$GITHUB_ENV"
+
+      - name: Build and check (install.sh)
+        run: ./install.sh --toolchain ${{ matrix.toolchain }} --prefix "$HOME/.vespaw"
+
+      - name: Regression tests
+        run: |
+          export PATH="$HOME/.vespaw/bin:$PATH"
+          vespaw doctor
+          python3 testsuite/run.py pbe_atom si8_gamma si_pbe:dav_var si_forces:dav_var
+
+      - name: Show the install log on failure
+        if: failure()
+        run: |
+          mkdir -p ci-logs
+          cp "$HOME"/.vespaw/*.log* ci-logs/ 2>/dev/null || true
+          for f in testsuite/*/work/*/*.prot; do [ -f "$f" ] && cp "$f" "ci-logs/$(echo "$f" | tr / _)"; done
+          tail -n 80 "$HOME/.vespaw/install.log" 2>/dev/null || true
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-${{ matrix.os }}
+          path: ci-logs/
+          if-no-files-found: ignore

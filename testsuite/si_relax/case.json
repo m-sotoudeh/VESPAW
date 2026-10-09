@@ -48,9 +48,9 @@
     {
       "run": "lbfgs_cell",
       "quantity": "energy",
-      "value": -7.967430788,
-      "tol": 2e-08,
-      "reference": "2026-10-06, 7 geometries / 72 SCF iterations, V=41.20565 AA^3; Parrinello-Rahman friction relaxation (CELL FRIC=0.1, 6000 steps) -216.80483330 eV, V=41.20522 AA^3"
+      "value": -7.9674302014,
+      "tol": 1e-06,
+      "reference": "2026-10-06, 7 geometries / 72 SCF iterations, V=41.20565 AA^3; Parrinello-Rahman friction relaxation (CELL FRIC=0.1, 6000 steps) -216.80483330 eV, V=41.20522 AA^3 -- re-referenced 2026-10-08 after 08504d2 (Cholesky orthonormalization of the random start for unpacked wave functions): the cold-start trajectory changed; same 72 SCF iterations, P=-0.0009 GPa; tol widened from 2e-8 to 1e-6 Ha because the L-BFGS end point depends on the path within SMAX=0.01 GPa/FMAX"
     },
     {
       "run": "lbfgs_cell",

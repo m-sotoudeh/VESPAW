@@ -103,9 +103,9 @@
     {
       "run": "dav_var",
       "quantity": "energy",
-      "value": -112.1341491196,
+      "value": -112.1341526906,
       "tol": 3e-06,
-      "reference": "first reference 2026-10-03 (DAV/RMM/friction MD agree)"
+      "reference": "first reference 2026-10-03 (DAV/RMM/friction MD agree) -- re-referenced 2026-10-08 after 08504d2 (Cholesky orthonormalization of the random start for unpacked wave functions): the cold-start trajectory changed; DAV, RMM and friction MD all moved down by 3.2-3.6e-6 Ha together and still agree to 1.2e-6"
     },
     {
       "run": "dav_var",
