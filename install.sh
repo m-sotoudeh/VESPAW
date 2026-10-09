@@ -177,15 +177,15 @@ case "$TOOLCHAIN" in
     MPIRUN="$(command -v mpirun || command -v mpiexec || true)"
     TOOL="$(cd "$(dirname "${FC:-/usr/bin/gfortran}")/.." && pwd)"
     LIBDIRS=""; INCDIRS=""
-    for d in ${LD_LIBRARY_PATH//:/ } ${LIBRARY_PATH//:/ } /usr/lib64 /usr/lib /usr/lib/x86_64-linux-gnu; do
+    for d in ${LD_LIBRARY_PATH:+${LD_LIBRARY_PATH//:/ }} ${LIBRARY_PATH:+${LIBRARY_PATH//:/ }} /usr/lib64 /usr/lib /usr/lib/x86_64-linux-gnu /usr/lib/x86_64-linux-gnu/hdf5/serial; do
       [ -d "$d" ] && LIBDIRS="$LIBDIRS -L$d"
     done
-    for d in ${CPATH//:/ } /usr/include /usr/include/hdf5/serial; do
+    for d in ${CPATH:+${CPATH//:/ }} /usr/include /usr/include/hdf5/serial; do
       [ -d "$d" ] && INCDIRS="$INCDIRS -I$d"
     done
     HDF5LIBS="-lhdf5_hl_fortran -lhdf5_fortran -lhdf5_hl -lhdf5"
     FFTH=""
-    for d in ${CPATH//:/ } /usr/include; do
+    for d in ${CPATH:+${CPATH//:/ }} /usr/include; do
       if [ -f "$d/fftw3.f03" ]; then FFTH="$d/fftw3.f03"; break; fi
     done
     MPIH=""
@@ -269,11 +269,11 @@ if want install; then
 # build, its MPI and the setup library visible, then calls the dispatcher.
 export VESPAW_HOME="$REPO"
 export VESPAW_BIN_DIR="$BINDIR"
-export VESPAW_POT_DIR="\${VESPAW_POT_DIR:-$REPO/potentials}"
+export VESPAW_POT_DIR="\${VESPAW_POT_DIR:-$REPO/vespaw_pot}"
 export VESPAW_MPIRUN="\${VESPAW_MPIRUN:-$MPIRUN}"
 export PATH="$BINDIR:$(dirname "${MPIRUN:-$FC}"):$ENV/bin:\$PATH"
 export PYTHONPATH="$REPO/python\${PYTHONPATH:+:\$PYTHONPATH}"
-if [ "\${1:-}" = "doctor" ]; then shift; exec "$REPO/tools/Scripts/vespaw_doctor.sh" "\$@"; fi
+if [ "\${1:-}" = "doctor" ]; then shift; exec "$REPO/installation/vespaw_doctor.sh" "\$@"; fi
 exec "$BINDIR/vespaw" "\$@"
 EOF
   chmod +x "$PREFIX/bin/vespaw"
@@ -287,12 +287,12 @@ if want test && [ "$RUN_TESTS" -eq 1 ]; then
   say "checking the build against the regression suite (a few minutes)"
   export VESPAW_BIN_DIR="$BINDIR"
   CHK="$PREFIX/check.log"
-  ( cd "$REPO/testsuite" && "$PY" run.py pbe_atom si8_gamma ) >"$CHK" 2>&1 || true
+  ( cd "$REPO/regression" && "$PY" run.py pbe_atom si8_gamma ) >"$CHK" 2>&1 || true
   grep -E "\[FAIL\]|regression cases passed" "$CHK" || true
   grep -q "2/2 regression cases passed" "$CHK" || fail "serial check failed (see $CHK)"
   if [ "$WITH_MPI" -eq 1 ] && [ -x "$BINDIR/vespaw_fast_mpi.x" ]; then
     say "checking the MPI version on 2 tasks"
-    ( cd "$REPO/testsuite" && VESPAW_REGRESSION_NP=2 VESPAW_MPIRUN="$MPIRUN" \
+    ( cd "$REPO/regression" && VESPAW_REGRESSION_NP=2 VESPAW_MPIRUN="$MPIRUN" \
         "$PY" run.py si8_gamma ) >"$CHK.mpi" 2>&1 || true
     grep -E "\[FAIL\]|regression cases passed" "$CHK.mpi" || true
     grep -q "1/1 regression cases passed" "$CHK.mpi" || fail "MPI check failed (see $CHK.mpi)"
