@@ -41,8 +41,8 @@ mistaken for a converged one.
   minimizes directly over orbitals and occupations.
 - **Functionals**, checked against libxc and VASP to machine precision:
   LDA (PZ, PW92), GGA (PBE, RPBE, PW91, revPBE, PBEsol, BLYP, BP86),
-  meta-GGA (SCAN with orbital τ, SCAN-L), the local hybrids PBE0r,
-  PBE-SL0r and SCAN0r, DFT+U. Selected by name (`TYPE='PBEsol'`) or by
+  meta-GGA (SCAN and r²SCAN with orbital τ, SCAN-L), the local hybrids
+  PBE0r, PBE-SL0r, SCAN0r and r²SCAN0r, DFT+U. Selected by name (`TYPE='PBEsol'`) or by
   the VASP tags (`'PS'`, `'RP'`, …).
 - **Physics**: collinear and non-collinear spin, spin–orbit coupling,
   finite electron temperature, dipole correction, forces and stress,

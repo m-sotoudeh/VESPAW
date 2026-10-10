@@ -1051,6 +1051,15 @@ parameterization of the Ceperley Alder quantum Monte Carlo calculation}
     for the plane-wave and one-center parts. Exchange is spin scaled,
     correlation fully spin polarized ({\tt METAGGA=SCAN}) $\checkmark$;
 
+    {\bf(22)} {\tt 'R2SCAN'}: r$^2$SCAN \cite{furness20_jpcl11_8208},
+    the regularized and restored SCAN, with the orbital kinetic-energy
+    density; requires {\tt TSCANDELOC=T} like SCAN; spin treatment as for
+    SCAN ({\tt METAGGA=R2SCAN}) $\checkmark$. Checked against libxc to
+    $10^{-14}$. r$^2$SCAN is numerically smoother than SCAN: its band gaps
+    change little with the cutoff, while SCAN gaps scatter by a few
+    0.01~eV. Gaps compared with VASP~6.4.2 (PAW\_PBE): Si 0.919/0.917~eV,
+    MgO 5.34/5.30~eV;
+
     {\bf(20)} {\tt 'SCANL'}: SCAN-L, deorbitalized SCAN
     \cite{mejia17_pra96_052512} with the optimized Perdew-Constantin
     kinetic energy density \cite{perdew07_prb75_155109}
@@ -1071,6 +1080,14 @@ parameterization of the Ceperley Alder quantum Monte Carlo calculation}
     SCAN0r: {\tt TYPE='SCAN' TSCANDELOC=T} with {\tt !NTBO}; SCAN
     everywhere, part of the onsite SCAN exchange replaced by exact
     exchange.
+
+    r$^2$SCAN0r: {\tt TYPE='R2SCAN' TSCANDELOC=T} with {\tt !NTBO}; as
+    SCAN0r, with r$^2$SCAN everywhere and in the onsite double counting.
+
+    The PAW setups of the meta-GGAs (types 20, 21, 22) are constructed with
+    PBE, as for VASP. The kinetic-energy density contains the pseudized
+    core contribution in the plane-wave part and the core kinetic-energy
+    density in the one-center part.
 
     \underline{Variants for testing and for reproducing old results}
 
@@ -1093,9 +1110,10 @@ parameterization of the Ceperley Alder quantum Monte Carlo calculation}
               \vrules{optional} \vdefault{1}}
 
 \mbax{\key{TSCANDELOC}
-\vdescr{evaluate the orbital-tau SCAN functional (TYPE=21) for the
-plane-wave density and the one-center terms, i.e. use SCAN everywhere.
-Needed for TYPE='SCAN' and for SCAN0r.}
+\vdescr{evaluate the orbital-tau meta-GGA, SCAN (TYPE=21) or r$^2$SCAN
+(TYPE=22), for the plane-wave density and the one-center terms, i.e. use
+it everywhere. Needed for TYPE='SCAN' and TYPE='R2SCAN', and for SCAN0r
+and r$^2$SCAN0r.}
 \vformat{logical}
 \vrules{optional}
 \vdefault{F}}

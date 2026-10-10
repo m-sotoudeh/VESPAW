@@ -104,7 +104,8 @@ VESPAW adds
   gradients) next to the damped dynamics of CP-PAW
   (chapter~\ref{chap:eigensolvers});
 \item functionals checked against libxc and VASP, the SCAN family
-  (SCAN-L and SCAN with the orbital kinetic-energy density), and the
+  (SCAN-L, and SCAN and r$^2$SCAN with the orbital kinetic-energy
+  density), and the
   local hybrids \pbeslzero\ and \scanzero, which build on \pbezero\
   (chapters~\ref{chap:dft} and~\ref{chap:hybrids});
 \item quality checks for PAW setups, an audited setup library
@@ -231,11 +232,13 @@ hybrids are described in Chapter~\ref{chap:hybrids}.}
 6  &  & B88 exchange only & & \checkmark\\
 \multicolumn{5}{@{}l}{\emph{meta-GGA}}\\
 21 & \key{SCAN} & SCAN, orbital $\tau$~\cite{sun15_prl115_036402} (with \key{TSCANDELOC=T}) & \key{METAGGA=SCAN} & \checkmark\\
+22 & \key{R2SCAN} & r$^2$SCAN, orbital $\tau$~\cite{furness20_jpcl11_8208} (with \key{TSCANDELOC=T}) & \key{METAGGA=R2SCAN} & \checkmark\\
 20 & \key{SCANL} & SCAN-L, deorbitalized~\cite{mejiarodriguez17_pra96_052512,perdew07_prb75_155109} & \key{METAGGA=SCANL} & \checkmark\\
 \multicolumn{5}{@{}l}{\emph{local hybrids} (Chapter~\ref{chap:hybrids})}\\
    & \pbezero   & PBE + onsite exact exchange & & \\
    & \pbeslzero & PBE; onsite SCAN-L/exact exchange & & \\
    & \scanzero  & SCAN + onsite exact exchange & & \\
+   & r$^2$SCAN0r  & r$^2$SCAN + onsite exact exchange & & \\
 \multicolumn{5}{@{}l}{\emph{for testing and reproducing old results}}\\
 $-10$ & & PBE before the 2024/2026 corrections (see text) & & \\
 $-12$ & & PBE exchange + PW91 correlation (old type 12) & & \\
@@ -260,7 +263,7 @@ CODATA~2018 (1~Hartree $=27.211386$~eV, 1~bohr $=0.529177211$~\AA).
 Plane-wave hybrids with full exact exchange (PBE0, HSE06, SCAN0, B3LYP)
 are not yet available.
 
-\paragraph{Meta-GGAs: SCAN, SCAN-L and TSCAN.} The SCAN
+\paragraph{Meta-GGAs: SCAN, r$^2$SCAN, SCAN-L and TSCAN.} The SCAN
 functional~\cite{sun15_prl115_036402} depends in addition on the kinetic
 energy density $\tau=\frac12\sum_n f_n|\nabla\psi_n|^2$ through the
 iso-orbital indicator
@@ -282,7 +285,28 @@ VESPAW provides two routes:
   $v_\tau=\partial e_{\mathrm{xc}}/\partial\tau$. In the PAW spheres the
   one-center $\tau$ is built from the partial waves, including its
   non-spherical parts.
+\item \textbf{r$^2$SCAN} (\key{TYPE='R2SCAN'} with \key{TSCANDELOC=T}),
+  the regularized and restored SCAN of Furness \emph{et
+  al.}~\cite{furness20_jpcl11_8208}, with the same orbital $\tau$ and the
+  same PAW treatment as TSCAN. It replaces $\alpha$ by the regularized
+  $\bar\alpha=(\tau-\tau_W)/(\tau_{\mathrm{unif}}+\eta\tau_W)$ with
+  $\eta=10^{-3}$, the switching function of SCAN by a polynomial for
+  $0\le\bar\alpha\le2.5$, and adds the gradient-expansion corrections of
+  exchange and correlation. The implementation follows the paper and its
+  erratum and agrees with libxc to $10^{-14}$. Band gaps change smoothly
+  with the cutoff, unlike those of SCAN, which scatter by a few 0.01~eV.
 \end{itemize}
+
+\paragraph{PAW treatment of $\tau$.} The kinetic-energy density is
+divided like the density: the plane-wave part $\tilde\tau$ of the
+auxiliary wave functions plus the pseudized core kinetic-energy density
+$\tilde\tau_c$, and in each sphere the one-center terms
+$\tau^1-\tilde\tau^1=\sum_{ij}D_{ij}\bigl(\tfrac12\nabla\phi_i\cdot\nabla\phi_j
+-\tfrac12\nabla\tilde\phi_i\cdot\nabla\tilde\phi_j\bigr)$ plus the core
+parts. Two checks are useful: $\int\tilde\tau\,d^3r$ equals the kinetic
+energy of the auxiliary wave functions, and
+$\int(\tau^1-\tilde\tau^1)\,d^3r=\sum_{ij}D_{ij}\Delta T_{ij}$. The setups
+of the meta-GGAs are constructed with PBE, as for VASP.
 
 \paragraph{Functional derivatives.} For a semilocal energy
 $E=\int e(n,|\nabla n|^2,\nabla^2 n)\,d^3r$ the potential is the full
@@ -307,6 +331,19 @@ Self-consistent solutions were then not stationary points of the energy:
 the variational optimizer found lower energies without reaching
 self-consistency, and for TSCAN it did not converge at all. The
 consistency test of Sec.~\ref{sec:consistency} exposed both.
+
+\paragraph{Pitfall (October 2026).} Three errors made all meta-GGA band
+gaps too small by about 0.3~eV, e.g. 4.93 instead of 5.24~eV for SCAN MgO:
+the setups were built from an atom without exchange and correlation, the
+one-center $\tau$ lacked the factor $\frac12$, and the pseudized core
+$\tau$ was missing in the plane-wave part. The energy and the
+Hamiltonian were consistent with each other, so the consistency tests
+passed. They were found with the two checks above and by comparison
+with VASP: SCAN and r$^2$SCAN gaps now agree within 0.06~eV (MgO 5.30
+and 5.34~eV, VASP 5.24 and 5.30~eV; Si 0.949 and 0.919~eV, VASP 0.969
+and 0.917~eV). For SCAN0r the double counting also subtracted the
+potential of the core $\tau$, which made the Hamiltonian inconsistent
+with the energy and stalled the variational optimizer.
 
 \section{Spin}
 
@@ -706,6 +743,8 @@ $E_x^{\mathrm{SCAN},\onec}$ uses the onsite $\tau$ of the local orbitals,
 is spin scaled, and by default contains exchange only (\key{TSCANCORR=T}
 adds SCAN correlation). Exchange-only spin scaling and the
 spin-polarized correlation of Chapter~\ref{chap:dft} apply as for SCAN.
+With \key{TYPE='R2SCAN'} the same construction gives r$^2$SCAN0r, with
+r$^2$SCAN everywhere and in the double counting.
 
 
 \section*{Further reading}

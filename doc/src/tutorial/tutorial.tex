@@ -490,8 +490,35 @@ displacement couples to a shear strain. The test case
 \file{testsuite/si\_forces} checks forces and stress against finite
 differences of the energy.
 
+\section{Meta-GGAs: SCAN and r$^2$SCAN}
+
+The meta-GGAs SCAN and r$^2$SCAN depend on the kinetic-energy density of
+the orbitals. They are selected in the \key{!DFT} block:
+\begin{verbatim}
+!DFT TYPE='SCAN' TSCANDELOC=T !END      # SCAN
+!DFT TYPE='R2SCAN' TSCANDELOC=T !END    # r2SCAN
+\end{verbatim}
+\key{TSCANDELOC=T} is required: it evaluates the functional for the
+plane-wave density and in the atomic spheres. The test cases
+\file{testsuite/si\_tscan} and \file{testsuite/si\_r2scan} use the same
+cell, cutoff and $k$-points as above:
+\begin{center}
+\begin{tabular}{lcc}\toprule
+functional & gap VESPAW (eV) & gap VASP (eV) \\ \midrule
+PBE & 0.710 & \\
+SCAN & 0.949 & 0.969 \\
+r$^2$SCAN & 0.919 & 0.917 \\ \bottomrule
+\end{tabular}
+\end{center}
+Both open the gap of PBE, as expected for a meta-GGA. r$^2$SCAN is the
+numerically more robust of the two: SCAN results change irregularly
+with the cutoff, by a few 0.01~eV in the band gap, because the SCAN
+switching function is sensitive to the integration grid.
+
 \section{Things to try}
 \begin{itemize}
+\item Repeat the SCAN and r$^2$SCAN calculations at 30, 40 and 50~Ry
+  and compare how smoothly the gaps converge.
 \item Converge the band gap with the $k$-point mesh. Which mesh
   contains the conduction-band minimum?
 \item Repeat the equation of state at 25~Ry and compare the lattice
@@ -650,8 +677,9 @@ becomes
 fraction of the onsite PBE exchange of the local orbitals by exact
 exchange. PBE-SL0r uses PBE as well, but replaces the onsite exchange
 by SCAN-L exchange (\key{DCTYPE='SCANL'}) before part of it is replaced
-by exact exchange. A third local hybrid, SCAN0r, uses SCAN everywhere
-(\key{TYPE='SCAN' TSCANDELOC=T}); it is still experimental. The local
+by exact exchange. Two further local hybrids, SCAN0r and r$^2$SCAN0r, use
+SCAN or r$^2$SCAN everywhere (\key{TYPE='SCAN'} or \key{TYPE='R2SCAN'},
+each with \key{TSCANDELOC=T}). The local
 orbitals are defined per species in the structure file:
 \deck{../../../examples/tutorial/05_mgo_hybrid/mgo.strc}
 \key{NOFL} gives the number of local orbitals per angular momentum,
@@ -675,6 +703,8 @@ shells, such as NiO and the manganites, it is large.
 \item Calculate NiO with PBE0r and compare band gap and magnetic
   moments with PBE.
 \item Vary \key{HFWEIGHT} between 0.1 and 0.25 and follow the band gap.
+\item Replace PBE by r$^2$SCAN (\key{TYPE='R2SCAN' TSCANDELOC=T}) and
+  keep the \key{!NTBO} block: this is the local hybrid r$^2$SCAN0r.
 \end{itemize}
 
 % =====================================================================
