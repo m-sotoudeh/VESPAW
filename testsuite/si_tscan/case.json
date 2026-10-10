@@ -30,16 +30,16 @@
     {
       "run": "dav_var",
       "quantity": "energy",
-      "value": -8.3723801291,
+      "value": -7.9411520806,
       "tol": 3e-06,
-      "reference": "2026-09-27 after the onsite SCAN gradient-term fix; MD -8.4009275 (stops early). Before the fix Route 1 did not converge and the best energy was -8.40076. -- re-referenced 2026-09-29 after the default relativistic treatment changed from ZORA to energy-dependent scalar-relativistic (cross-optimizer agreement and finite-difference checks unchanged) -- re-referenced 2026-10-02 for the corrected PBE reduced gradient (TFAC ported from CP-PAW 2024; also fixed in the SCAN correlation code; TYPE=-10 reproduces the old values)"
+      "reference": "2026-09-27 after the onsite SCAN gradient-term fix; MD -8.4009275 (stops early). Before the fix Route 1 did not converge and the best energy was -8.40076. -- re-referenced 2026-09-29 after the default relativistic treatment changed from ZORA to energy-dependent scalar-relativistic (cross-optimizer agreement and finite-difference checks unchanged) -- re-referenced 2026-10-02 for the corrected PBE reduced gradient (TFAC ported from CP-PAW 2024; also fixed in the SCAN correlation code; TYPE=-10 reproduces the old values) -- re-referenced 2026-10-10 after three meta-GGA PAW fixes: setups for meta-GGA built from a PBE atom (before: no-XC atom), one-center tau with the factor 1/2 (before: twice too large), pseudo-core tau added to the plane-wave tau; for SCAN0r also the core tau potential no longer subtracted in the onsite double counting; VASP 6.4.2 SCAN (Si, PAW_PBE) gap 0.969 eV"
     },
     {
       "run": "dav_var",
       "quantity": "gap_ev",
-      "value": 1.0395,
+      "value": 0.9486,
       "tol": 0.003,
-      "reference": "same"
+      "reference": "same -- re-referenced 2026-10-10 after three meta-GGA PAW fixes: setups for meta-GGA built from a PBE atom (before: no-XC atom), one-center tau with the factor 1/2 (before: twice too large), pseudo-core tau added to the plane-wave tau; for SCAN0r also the core tau potential no longer subtracted in the onsite double counting; VASP 6.4.2 SCAN (Si, PAW_PBE) gap 0.969 eV"
     },
     {
       "run": "dav_var",

@@ -1,0 +1,13 @@
+# SN -- PAW setup (NDLSS construction, semicore d in the valence as VASP SN_d), 2026-10-02
+# Same as sn_ndlss_sc_v0 but with two projectors for the semicore d channel
+# (one projector left the channel incomplete). Checked: see AUDIT.md.
+#
+  !SPECIES NAME='SN' NPRO=2 2 2 LRHOX=4 RAD/RCOV=1.2
+    !AUGMENT ID='SN_NDLSS_SC_V1' EL='SN' ZV=14. TYPE='NDLSS'
+             RBOX/RCOV=1.2 RCSM/RCOV=0.25
+             RCL/RCOV=0.7 0.7 0.7 0.7
+      !GRID DMIN=1.E-6 DMAX=0.1 RMAX=10. !END
+      !POT  POW=3. RC/RCOV=0.7 !END
+      !CORE POW=2. RC/RCOV=0.7 !END
+    !END
+  !END

@@ -3516,6 +3516,17 @@ REAL(8)            :: K1        ! H1X INTERPOLATION PARAMETER
 REAL(8)            :: B1,B2,B3,B4 ! H1X(S,ALPHA) "X" FUNCTION PARAMETERS
 REAL(8)            :: C1X,C2X,DX  ! FX(ALPHA) SWITCHING-FUNCTION PARAMETERS
 REAL(8),PARAMETER  :: FX1=1.174D0 ! SINGLE-ORBITAL-LIMIT PREFACTOR (SUN ET AL. EQ.12)
+!     == R2SCAN (FURNESS ET AL., J.PHYS.CHEM.LETT 11, 8208 (2020) AND ERRATUM ==
+!     == 11, 9248 (2020)). TR2SCAN IS SET BY SCAN$SETR2SCAN (DFT TYPE 22). ===
+!     == ALL CALLERS PASS S AND THE ALPHA OF SCAN; ALPHA-BAR FOLLOWS FROM ====
+!     == TAU_W/TAU_UNIF=(5/3)S**2:  ALPHA-BAR=ALPHA/(1+ETA*(5/3)S**2) =======
+LOGICAL(4)         :: TR2SCAN=.FALSE.
+REAL(8),PARAMETER  :: R2ETA=1.D-3    ! REGULARIZATION OF ALPHA-BAR
+REAL(8),PARAMETER  :: R2DP2=0.361D0  ! DAMPING OF THE GRADIENT-EXPANSION TERMS
+!     == INTERPOLATION POLYNOMIAL FOR 0<=ALPHA-BAR<=2.5, EXCHANGE =============
+REAL(8),PARAMETER  :: R2CX(0:7)=(/1.D0,-0.667D0,-0.4445555D0,-0.663086601049D0 &
+     &                  ,1.451297044490D0,-0.887998041597D0,0.234528941479D0 &
+     &                  ,-0.023185843322D0/)
 CONTAINS
 !      .................................................................
        SUBROUTINE SCAN_X_INITIALIZE
@@ -3619,12 +3630,76 @@ CONTAINS
        REAL(8),INTENT(OUT):: FX
        REAL(8)            :: G,H,F
 !      *****************************************************************
+       IF(TR2SCAN) THEN
+         CALL R2SCAN_X_FX(S,ALPHA,FX)
+         RETURN
+       END IF
        CALL SCAN_X_GX(S,G)
        CALL SCAN_X_H1X(S,ALPHA,H)
        CALL SCAN_X_FALPHA(ALPHA,F)
        FX=(H+F*(FX1-H))*G
        RETURN
        END SUBROUTINE SCAN_X_FX
+!
+!      .................................................................
+       SUBROUTINE R2SCAN_FALPHA(A,C,C2,D,F)
+!      *****************************************************************
+!      **  INTERPOLATION FUNCTION OF RSCAN/R2SCAN IN ALPHA-BAR:       **
+!      **    F=EXP(-C1*A/(1-A)), C1=-C(1)    FOR A<0                  **
+!      **    F=SUM_I C(I)*A**I               FOR 0<=A<=2.5            **
+!      **    F=-D*EXP(C2/(1-A))              FOR A>2.5                **
+!      *****************************************************************
+       IMPLICIT NONE
+       REAL(8),INTENT(IN) :: A
+       REAL(8),INTENT(IN) :: C(0:7)
+       REAL(8),INTENT(IN) :: C2,D
+       REAL(8),INTENT(OUT):: F
+       INTEGER(4)         :: I
+!      *****************************************************************
+       IF(A.LT.0.D0) THEN
+         F=EXP(C(1)*A/(1.D0-A))
+       ELSE IF(A.LE.2.5D0) THEN
+         F=C(7)
+         DO I=6,0,-1
+           F=F*A+C(I)
+         ENDDO
+       ELSE
+         F=-D*EXP(C2/(1.D0-A))
+       END IF
+       RETURN
+       END SUBROUTINE R2SCAN_FALPHA
+!
+!      .................................................................
+       SUBROUTINE R2SCAN_X_FX(S,ALPHA,FX)
+!      *****************************************************************
+!      **  R2SCAN EXCHANGE ENHANCEMENT FACTOR                         **
+!      **    FX={H1X(P)+F(ALPHA-BAR)*[1.174-H1X(P)]}*GX(P), P=S**2    **
+!      **    H1X(P)=1+K1-K1/(1+P*(MU+C_ETA*C2*EXP(-P**2/DP2**4))/K1)  **
+!      **    C2=-SUM_{I=1..7} I*C(I)*(1-1.174), C_ETA=20/27+ETA*5/3   **
+!      *****************************************************************
+       IMPLICIT NONE
+       REAL(8),INTENT(IN) :: S      ! REDUCED DENSITY GRADIENT
+       REAL(8),INTENT(IN) :: ALPHA  ! (TAU-TAU_W)/TAU_UNIF AS FOR SCAN
+       REAL(8),INTENT(OUT):: FX
+       REAL(8)            :: P,ABAR,DELF2,C2,CETA,DAMP,H,F,G
+       INTEGER(4)         :: I
+!      *****************************************************************
+       IF(.NOT.TINI) CALL SCAN_X_INITIALIZE
+       P=S*S
+       ABAR=ALPHA/(1.D0+R2ETA*5.D0/3.D0*P)
+       DELF2=0.D0
+       DO I=1,7
+         DELF2=DELF2+DBLE(I)*R2CX(I)
+       ENDDO
+       C2=-DELF2*(1.D0-FX1)
+       CETA=20.D0/27.D0+R2ETA*5.D0/3.D0
+       DAMP=EXP(-P**2/R2DP2**4)
+       H=1.D0+K1-K1/(1.D0+P*(MUGE+CETA*C2*DAMP)/K1)
+       CALL R2SCAN_FALPHA(ABAR,R2CX,C2X,DX,F)
+       CALL SCAN_X_GX(S,G)
+       FX=(H+F*(FX1-H))*G
+       RETURN
+       END SUBROUTINE R2SCAN_X_FX
 !
 END MODULE SCAN_X_MODULE
 !
@@ -3832,6 +3907,7 @@ END MODULE DEORB_ALPHA_MODULE
 !**                                                                    **
 !***********************************************************************
 MODULE SCAN_C_MODULE
+USE SCAN_X_MODULE, ONLY: TR2SCAN,R2ETA,R2DP2,R2SCAN_FALPHA
 IMPLICIT NONE
 LOGICAL(4)         :: TINI=.FALSE.
 !     == PW92 UNPOLARIZED LSDA CORRELATION PARAMETERS (STANDARD) ==============
@@ -3866,6 +3942,12 @@ REAL(8),PARAMETER  :: PW92S(6)=(/0.0168869D0,0.11125D0,10.357D0,3.6231D0 &
 REAL(8),PARAMETER  :: FZZ=1.709920934161365617563962776245D0 ! F''(0)
 REAL(8),PARAMETER  :: DXC=2.363D0   ! G_C(ZETA) PARAMETER: 2.363 AS VASP (VSCANC) AND LIBXC;
 !                                      ! THE SCAN SUPPLEMENT QUOTES 2.3631
+!     == R2SCAN CORRELATION: INTERPOLATION POLYNOMIAL FOR 0<=ALPHA-BAR<=2.5 ===
+REAL(8),PARAMETER  :: R2CC(0:7)=(/1.D0,-0.64D0,-0.4352D0,-1.535685604549D0 &
+     &                  ,3.061560252175D0,-1.915710236206D0,0.516884468372D0 &
+     &                  ,-0.051848879792D0/)
+REAL(8),PARAMETER  :: PW92U(6)=(/0.0310907D0,0.21370D0,7.5957D0,3.5876D0 &
+     &                          ,1.63820D0,0.49294D0/)
 CONTAINS
 !      .................................................................
        SUBROUTINE SCAN_C_PW92(RS,EU)
@@ -3986,6 +4068,26 @@ CONTAINS
        END SUBROUTINE SCAN_C_PW92G
 !
 !      .................................................................
+       SUBROUTINE SCAN_C_PW92GD(P,RS,G,DG)
+!      *****************************************************************
+!      **  PW92 INTERPOLATION G(RS) AND ITS DERIVATIVE DG/DRS          **
+!      *****************************************************************
+       IMPLICIT NONE
+       REAL(8),INTENT(IN) :: P(6)   ! A,ALPHA1,BETA1..BETA4
+       REAL(8),INTENT(IN) :: RS
+       REAL(8),INTENT(OUT):: G,DG
+       REAL(8)            :: SQRTRS,Q1,DQ1,LG
+!      *****************************************************************
+       SQRTRS=SQRT(RS)
+       Q1=2.D0*P(1)*SQRTRS*(P(3)+SQRTRS*(P(4)+SQRTRS*(P(5)+P(6)*SQRTRS)))
+       DQ1=P(1)*(P(3)/SQRTRS+2.D0*P(4)+3.D0*P(5)*SQRTRS+4.D0*P(6)*RS)
+       LG=LOG(1.D0+1.D0/Q1)
+       G=-2.D0*P(1)*(1.D0+P(2)*RS)*LG
+       DG=-2.D0*P(1)*P(2)*LG+2.D0*P(1)*(1.D0+P(2)*RS)*DQ1/(Q1*(1.D0+Q1))
+       RETURN
+       END SUBROUTINE SCAN_C_PW92GD
+!
+!      .................................................................
        SUBROUTINE SCAN_C_EPSC_SPIN(RS,ZETA,S,T2,ALPHA0,EPSC)
 !      *****************************************************************
 !      **  SCAN CORRELATION ENERGY PER PARTICLE FOR SPIN POLARIZATION **
@@ -4013,6 +4115,8 @@ CONTAINS
        REAL(8)            :: Z,OPZ,OMZ,PHI,PHI3,DX,DS,FZ,Z4,GCZ
        REAL(8)            :: EU,EP,EA,ELSDA,W1,BETA,Y,GY,H1,EC1
        REAL(8)            :: ECLDA0,W0,GINF,H0,EC0,ALPHA,IEF
+       REAL(8)            :: P,DELF2,DEU,DEP,DEA,DELSDA,DECLDA0,DELY
+       INTEGER(4)         :: I
 !      *****************************************************************
        Z=MIN(MAX(ZETA,-ZMAX),ZMAX)
        OPZ=1.D0+Z
@@ -4049,9 +4153,40 @@ CONTAINS
        GCZ=(1.D0-DXC*(DX-1.D0))*(1.D0-Z**12)
        EC0=(ECLDA0+H0)*GCZ
 !
+!      == R2SCAN: H1 WITH THE GRADIENT-EXPANSION CORRECTION DELTA-Y ====
+!      == DELY=DF2/(27 GAMMA DS PHI3 W1)*{20 RS [D(GC*ELDA0)/DRS        ==
+!      ==   -D(ELSDA)/DRS]-45 ETA [GC*ELDA0-ELSDA]}*P*EXP(-P**2/DP2**4)  ==
+       IF(TR2SCAN) THEN
+         P=S*S
+         CALL SCAN_C_PW92GD(PW92U,RS,EU,DEU)
+         DELSDA=DEU
+         IF(Z.NE.0.D0) THEN
+           CALL SCAN_C_PW92GD(PW92P,RS,EP,DEP)
+           CALL SCAN_C_PW92GD(PW92S,RS,EA,DEA)
+           DELSDA=DEU*(1.D0-FZ*Z4)+DEP*FZ*Z4-DEA*FZ*(1.D0-Z4)/FZZ
+         END IF
+         DECLDA0=B1C*(0.5D0*B2C/SQRT(RS)+B3C)/(1.D0+B2C*SQRT(RS)+B3C*RS)**2
+         DELF2=0.D0
+         DO I=1,7
+           DELF2=DELF2+DBLE(I)*R2CC(I)
+         ENDDO
+         DELY=DELF2/(27.D0*GAMMA_PBE*DS*PHI3*W1) &
+     &       *(20.D0*RS*(GCZ*DECLDA0-DELSDA)-45.D0*R2ETA*(GCZ*ECLDA0-ELSDA)) &
+     &       *P*EXP(-P**2/R2DP2**4)
+         GY=1.D0/MAX(1.D0+4.D0*(Y-DELY),1.D-12)**0.25D0
+         H1=GAMMA_PBE*PHI3*LOG(1.D0+W1*(1.D0-GY))
+         EC1=ELSDA+H1
+       END IF
+!
 !      == INTERPOLATION ================================================
-       ALPHA=ALPHA0/DS
-       CALL SCAN_C_FALPHA(ALPHA,IEF)
+       IF(TR2SCAN) THEN
+!        == ALPHA-BAR=(TAU-TAU_W)/(TAU_UNIF*DS+ETA*TAU_W) ==============
+         ALPHA=ALPHA0/(DS+R2ETA*5.D0/3.D0*S*S)
+         CALL R2SCAN_FALPHA(ALPHA,R2CC,CFC2,CFDC1,IEF)
+       ELSE
+         ALPHA=ALPHA0/DS
+         CALL SCAN_C_FALPHA(ALPHA,IEF)
+       END IF
        EPSC=EC1+IEF*(EC0-EC1)
        RETURN
        END SUBROUTINE SCAN_C_EPSC_SPIN
@@ -4087,6 +4222,20 @@ CONTAINS
        END SUBROUTINE SCAN_C_EDENS
 !
 END MODULE SCAN_C_MODULE
+!
+!     ..................................................................
+      SUBROUTINE SCAN$SETR2SCAN(TVAL)
+!     ******************************************************************
+!     **  SELECTS THE R2SCAN FORMS IN SCAN_X_MODULE AND SCAN_C_MODULE **
+!     **  (CALLED BY DFT_INITIALIZE FOR EVERY CHANGE OF THE DFT TYPE) **
+!     ******************************************************************
+      USE SCAN_X_MODULE, ONLY: TR2SCAN
+      IMPLICIT NONE
+      LOGICAL(4),INTENT(IN) :: TVAL
+!     ******************************************************************
+      TR2SCAN=TVAL
+      RETURN
+      END
 !
 !.........1.........2.........3.........4.........5.........6.........7.........8
 !***********************************************************************

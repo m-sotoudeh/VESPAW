@@ -156,7 +156,7 @@ clean_tools: $(addprefix clean_,${TOOLS} ${SCRIPTS})
 tests: ${TESTS}
 #
 ${TESTS}:
-	cd ${OBJDIR}/$(subst _tests,,$@); ${MAKE} $@
+	cd ${OBJDIR}/$(subst _tests,,$@) || exit 1; ${MAKE} $@
 #
 #########################################################################
 ## specific target rules                                               ##
@@ -167,56 +167,56 @@ ${TESTS}:
 #-- (none,fast,dbg,prof,none_parallel,fast_parallel,dbg_parallel,prof_parallel)
 #---------------------------------------------------------------------------
 ${OBJTYPES}:
-	ALLDEP=F; export ALLDEP; cd ${OBJDIR}/$@; ${MAKE} f90pp; ${MAKE} 
+	ALLDEP=F; export ALLDEP; cd ${OBJDIR}/$@ || exit 1; ${MAKE} f90pp; ${MAKE} 
 #
 $(addsuffix _new,${OBJTYPES}):
-	ALLDEP=T; export ALLDEP; cd ${OBJDIR}/$(subst _new,,$@); \
+	ALLDEP=T; export ALLDEP; cd ${OBJDIR}/$(subst _new,,$@) || exit 1; \
                                                         ${MAKE} f90pp; ${MAKE} 
 #
 $(addprefix clean_,${OBJTYPES}):
-	cd ${OBJDIR}/$(subst clean_,,$@); ${MAKE} clean
+	cd ${OBJDIR}/$(subst clean_,,$@) || exit 1; ${MAKE} clean
 #
 #---------------------------------------------------------------------------
 #--          PAW library libpaw.a                                         --
 #---------------------------------------------------------------------------
 lib:
-	ALLDEP=F; export ALLDEP; cd ${OBJDIR}/${TOOLCOMP}; ${MAKE} -f Makefile ${OBJDIR}/${TOOLCOMP}/libpaw.a
+	ALLDEP=F; export ALLDEP; cd ${OBJDIR}/${TOOLCOMP} || exit 1; ${MAKE} -f Makefile ${OBJDIR}/${TOOLCOMP}/libpaw.a
 #
 lib_new:
-	ALLDEP=T; export ALLDEP; cd ${OBJDIR}/${TOOLCOMP}; ${MAKE} -f Makefile ${OBJDIR}/${TOOLCOMP}/libpaw.a
+	ALLDEP=T; export ALLDEP; cd ${OBJDIR}/${TOOLCOMP} || exit 1; ${MAKE} -f Makefile ${OBJDIR}/${TOOLCOMP}/libpaw.a
 #
 #---------------------------------------------------------------------------
 #--          PAW library libppaw.a                                       --
 #---------------------------------------------------------------------------
 lib_parallel:
-	ALLDEP=F; export ALLDEP; cd ${OBJDIR}/${TOOLCOMP}_parallel; ${MAKE} -f Makefile ${OBJDIR}/${TOOLCOMP}_parallel/libppaw.a
+	ALLDEP=F; export ALLDEP; cd ${OBJDIR}/${TOOLCOMP}_parallel || exit 1; ${MAKE} -f Makefile ${OBJDIR}/${TOOLCOMP}_parallel/libppaw.a
 #
 lib_new_parallel:
-	ALLDEP=T; export ALLDEP; cd ${OBJDIR}/${TOOLCOMP}_parallel; ${MAKE} -f Makefile ${OBJDIR}/${TOOLCOMP}_parallel/libppaw.a
+	ALLDEP=T; export ALLDEP; cd ${OBJDIR}/${TOOLCOMP}_parallel || exit 1; ${MAKE} -f Makefile ${OBJDIR}/${TOOLCOMP}_parallel/libppaw.a
 #
 #---------------------------------------------------------------------------
 #--          PAW library libpawfull.a                                     --
 #---------------------------------------------------------------------------
 libfull:
-	ALLDEP=F; export ALLDEP; cd ${OBJDIR}/${TOOLCOMP}; ${MAKE} -f Makefile ${OBJDIR}/${TOOLCOMP}/libpawfull.a EXCLUDE="${EXCLUDE}"
+	ALLDEP=F; export ALLDEP; cd ${OBJDIR}/${TOOLCOMP} || exit 1; ${MAKE} -f Makefile ${OBJDIR}/${TOOLCOMP}/libpawfull.a EXCLUDE="${EXCLUDE}"
 #
 libfull_new:
-	ALLDEP=T; export ALLDEP; cd ${OBJDIR}/${TOOLCOMP}; ${MAKE} -f Makefile ${OBJDIR}/${TOOLCOMP}/libpawfull.a EXCLUDE="${EXCLUDE}"
+	ALLDEP=T; export ALLDEP; cd ${OBJDIR}/${TOOLCOMP} || exit 1; ${MAKE} -f Makefile ${OBJDIR}/${TOOLCOMP}/libpawfull.a EXCLUDE="${EXCLUDE}"
 #
 #---------------------------------------------------------------------------
 #--          PAW library libppawfull.a                                    --
 #---------------------------------------------------------------------------
 libfull_parallel:
-	ALLDEP=F; export ALLDEP; cd ${OBJDIR}/${TOOLCOMP}_parallel; ${MAKE} -f Makefile ${OBJDIR}/${TOOLCOMP}_parallel/libppawfull.a EXCLUDE="${EXCLUDE}"
+	ALLDEP=F; export ALLDEP; cd ${OBJDIR}/${TOOLCOMP}_parallel || exit 1; ${MAKE} -f Makefile ${OBJDIR}/${TOOLCOMP}_parallel/libppawfull.a EXCLUDE="${EXCLUDE}"
 #
 libfull_new_parallel:
-	ALLDEP=T; export ALLDEP; cd ${OBJDIR}/${TOOLCOMP}_parallel; ${MAKE} -f Makefile ${OBJDIR}/${TOOLCOMP}_parallel/libppawfull.a EXCLUDE="${EXCLUDE}"
+	ALLDEP=T; export ALLDEP; cd ${OBJDIR}/${TOOLCOMP}_parallel || exit 1; ${MAKE} -f Makefile ${OBJDIR}/${TOOLCOMP}_parallel/libppawfull.a EXCLUDE="${EXCLUDE}"
 #
 #---------------------------------------------------------------------------
 #--          Tools and scripts                                            --
 #---------------------------------------------------------------------------
 ${TOOLS}: lib_new
-	ALLDEP=T; export ALLDEP; cd ${OBJDIR}/${TOOLCOMP}; ${MAKE} -f Makefile ${BINDIR}/vespaw_$@.x
+	ALLDEP=T; export ALLDEP; cd ${OBJDIR}/${TOOLCOMP} || exit 1; ${MAKE} -f Makefile ${BINDIR}/vespaw_$@.x
 #
 #---------------------------------------------------------------------------
 #--          separate target for bands_parallel, which is the only tool,  --
@@ -224,10 +224,10 @@ ${TOOLS}: lib_new
 #--          version                                                      --
 #---------------------------------------------------------------------------
 bands_parallel: lib_new_parallel
-	ALLDEP=T; export ALLDEP; cd ${OBJDIR}/${TOOLCOMP}_parallel; ${MAKE} -f Makefile ${BINDIR}/vespaw_bands_mpi.x 
+	ALLDEP=T; export ALLDEP; cd ${OBJDIR}/${TOOLCOMP}_parallel || exit 1; ${MAKE} -f Makefile ${BINDIR}/vespaw_bands_mpi.x 
 #
 $(addprefix clean_,${TOOLS}):
-	cd ${OBJDIR}/${TOOLCOMP}; ${MAKE} -f Makefile $@
+	cd ${OBJDIR}/${TOOLCOMP} || exit 1; ${MAKE} -f Makefile $@
 #
 scripts: 
 	cp ${THISDIR}/tools/Scripts/* ${BINDIR}

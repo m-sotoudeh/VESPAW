@@ -1,5 +1,5 @@
 {
-  "description": "NiO AFM-II, SCAN0r: orbital-tau SCAN exchange and correlation everywhere (TYPE='SCAN', TSCANDELOC=T) plus 25% onsite exact exchange on Ni and O, double counting with the same TSCAN exchange (no DCTYPE override). Added 2026-10-03; DAV, RMM and friction MD must agree. Until the route-1 stall is fixed only the Davidson run is executed (it documents the stall); RMM and friction MD will be added back with the fix.",
+  "description": "NiO AFM-II, SCAN0r: orbital-tau SCAN exchange and correlation everywhere (TYPE='SCAN', TSCANDELOC=T) plus 25% onsite exact exchange on Ni and O, double counting with the same TSCAN exchange (no DCTYPE override). Added 2026-10-03; DAV, RMM and friction MD must agree. The route-1 stall (2026-10-03) was a Hamiltonian that was not the derivative of the energy: the frozen-core tau potential was subtracted from the valence tau potential of the TSCAN double counting; fixed 2026-10-10 and RMM and friction MD added back.",
   "inputs": [
     "nio.cntl",
     "nio.strc"
@@ -29,11 +29,90 @@
           }
         }
       ]
+    },
+    "rmm_var": {
+      "stages": [
+        {
+          "subs": {
+            "@START@": "T",
+            "@NSTEP@": "300",
+            "@ORBPOT@": "ORBPOT",
+            "@PSIDYN@": "STOP=F FRIC=0.02 SAFEORTHO=T\n    !AUTO FRIC(-)=0.3 FACT(-)=0.97 FRIC(+)=0.3 FACT(+)=1. MINFRIC=0.02 !END\n "
+          }
+        },
+        {
+          "subs": {
+            "@START@": "F",
+            "@NSTEP@": "300",
+            "@ORBPOT@": "ORBPOT_OFF",
+            "@PSIDYN@": "OPTIMIZER='RMM' MIXER='VARIATIONAL' SAFEORTHO=T STOP=T"
+          }
+        }
+      ]
+    },
+    "md": {
+      "stages": [
+        {
+          "subs": {
+            "@START@": "T",
+            "@NSTEP@": "300",
+            "@ORBPOT@": "ORBPOT",
+            "@PSIDYN@": "STOP=F FRIC=0.02 SAFEORTHO=T\n    !AUTO FRIC(-)=0.3 FACT(-)=0.97 FRIC(+)=0.3 FACT(+)=1. MINFRIC=0.02 !END\n "
+          }
+        },
+        {
+          "subs": {
+            "@START@": "F",
+            "@NSTEP@": "4000",
+            "@ORBPOT@": "ORBPOT_OFF",
+            "@PSIDYN@": "STOP=T FRIC=0.02 SAFEORTHO=T\n    !AUTO FRIC(-)=0.3 FACT(-)=0.97 FRIC(+)=0.3 FACT(+)=1. MINFRIC=0.02 !END\n "
+          }
+        }
+      ]
     }
   },
-  "agree": [],
-  "known_issues": {
-    "dav_var": "SCAN0r (orbital-tau SCAN + onsite exact exchange) does not converge with route 1: from the first variational step the residual stays at 2.95e-4, 254 of 297 steps are rejected and 42 re-anchored, the energy wanders by ~6 meV around -3060.435 eV (NiO, 2026-10-03). TSCAN alone (nio_tscan) and PBE-SL0r converge, so the potential of the TSCAN onsite double counting is probably not the exact derivative of its energy. Open; to be diagnosed with an energy-vs-potential check."
-  },
-  "checks": []
+  "agree": [
+    {
+      "runs": [
+        "dav_var",
+        "rmm_var"
+      ],
+      "quantity": "energy",
+      "tol": 3e-06
+    },
+    {
+      "runs": [
+        "dav_var",
+        "md"
+      ],
+      "quantity": "energy",
+      "tol": 1e-05
+    },
+    {
+      "runs": [
+        "dav_var",
+        "rmm_var",
+        "md"
+      ],
+      "quantity": "gap_ev",
+      "tol": 0.02
+    }
+  ],
+  "known_issues": {},
+  "checks": [
+    {
+      "run": "dav_var",
+      "quantity": "energy",
+      "value": -111.0217159631,
+      "tol": 3e-06,
+      "reference": "re-referenced 2026-10-10 after three meta-GGA PAW fixes: setups for meta-GGA built from a PBE atom (before: no-XC atom), one-center tau with the factor 1/2 (before: twice too large), pseudo-core tau added to the plane-wave tau; for SCAN0r also the core tau potential no longer subtracted in the onsite double counting"
+    },
+    {
+      "run": "dav_var",
+      "quantity": "gap_ev",
+      "value": 3.3853,
+      "tol": 0.01,
+      "reference": "re-referenced 2026-10-10 after three meta-GGA PAW fixes: setups for meta-GGA built from a PBE atom (before: no-XC atom), one-center tau with the factor 1/2 (before: twice too large), pseudo-core tau added to the plane-wave tau; for SCAN0r also the core tau potential no longer subtracted in the onsite double counting"
+    }
+  ]
 }

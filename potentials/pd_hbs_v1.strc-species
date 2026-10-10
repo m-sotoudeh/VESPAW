@@ -1,0 +1,17 @@
+# PD -- PAW setup (HBS construction), built 2026-10-02
+# Replaces pd_ndlss_v0 (one projector per channel; lattice constant +12.6 %
+# in the 2026-09-30 benchmark, the incomplete-channel collapse).
+# Parameters: CP-PAW parameters/stp.cntl entry PD_HBS (4d10 valence);
+#   NPRO=2 2 2 (two per s/p/d channel).
+# Checked: see AUDIT.md.
+#
+  !SPECIES NAME='PD' NPRO=2 2 2 LRHOX=4 RAD/RCOV=1.2
+    !AUGMENT ID='PD_HBS' EL='PD' ZV=10. TYPE='HBS'
+             RBOX/RCOV=1.2 RCSM/RCOV=0.25
+             RCL/RCOV= 0.75 0.75 0.75 0.75
+             LAMBDA= 6. 6. 6. 6.
+      !GRID DMIN=1.E-6 DMAX=0.1 RMAX=10. !END
+      !POT  POW=3. RC/RCOV=0.67 !END
+      !CORE POW=3. RC/RCOV=0.67 !END
+    !END
+  !END

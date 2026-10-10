@@ -278,7 +278,10 @@ END MODULE SCANTAU_MODULE
             DO IM2=1,2*L2+1
               LMN2=LMN2+1
               LM2=L2**2+IM2
-              SVAR=REAL(DENMAT(LMN1,LMN2),KIND=8)
+!             == TAU=(1/2)*SUM_I F_I |GRAD PSI_I|**2. THE FACTOR 1/2 WAS   ==
+!             == MISSING BEFORE 2026-10-10 (ONE-CENTER TAU TWICE TOO LARGE,==
+!             == META-GGA GAPS OF MGO ~0.3 EV TOO SMALL VS VASP).         ==
+              SVAR=0.5D0*REAL(DENMAT(LMN1,LMN2),KIND=8)
               IF(SVAR.EQ.0.D0) CYCLE
 !             == GUARD AGAINST THE SHLOG GRID EXACT R(1)=0: THE TRUE       ==
 !             == PHI*PHI/R**2 TERM IS MATHEMATICALLY FINITE EVERYWHERE     ==
@@ -310,6 +313,7 @@ END MODULE SCANTAU_MODULE
 !     **  FOR THE POTENTIAL TOO), RETURNS THE ONE-CENTER HAMILTONIAN   **
 !     **  MATRIX ELEMENT DATH(LMN1,LMN2)=D(E_TAU)/D(DENMAT(LMN1,LMN2)) **
 !     **  WHERE E_TAU=INT V_TAU(R,OMEGA)*TAU(R,OMEGA) D3R.             **
+!     **  (K BELOW CARRIES THE FACTOR 1/2 OF TAU, SEE AUGMENTATION_TAU)**
 !     **                                                                **
 !     **  DERIVATION: TAU_LM3(R) IS LINEAR IN DENMAT (SEE               **
 !     **  AUGMENTATION_TAU ABOVE):                                      **
@@ -390,7 +394,8 @@ END MODULE SCANTAU_MODULE
      &                 DPHI(:,LN1)*DPHI(:,LN2)*XTAB(LM1,LM2,LM3) &
      &                +PHI(:,LN1)*PHI(:,LN2)/MAX(R(:)**2,1.D-16)*YTAB(LM1,LM2,LM3) )
                 CALL RADIAL$INTEGRAL(GID,NR,WORK,SVAR)
-                DATH(LMN1,LMN2)=DATH(LMN1,LMN2)+CMPLX(SVAR,0.D0,KIND=8)
+!               == FACTOR 1/2 OF TAU=(1/2)*SUM F|GRAD PSI|**2 (AS ABOVE) ==
+                DATH(LMN1,LMN2)=DATH(LMN1,LMN2)+CMPLX(0.5D0*SVAR,0.D0,KIND=8)
               ENDDO
             ENDDO
           ENDDO

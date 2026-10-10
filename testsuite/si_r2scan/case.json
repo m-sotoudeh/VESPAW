@@ -1,0 +1,73 @@
+{
+  "description": "Si diamond, r2SCAN (orbital tau, TSCANDELOC=T), 6x6x6 k: route 1 with Davidson and RMM-DIIS must agree with friction MD. The r2SCAN energy densities agree with libxc 7.0.0 mgga_x/c_r2scan to 1e-14 (point-wise test, 2026-10-09)",
+  "inputs": [
+    "si.cntl",
+    "si.strc"
+  ],
+  "timeout": 900,
+  "defaults": {
+    "@NSTEP@": "300"
+  },
+  "runs": {
+    "dav_var": {
+      "subs": {
+        "@PSIDYN@": "OPTIMIZER='DAV' MIXER='VARIATIONAL' SAFEORTHO=T STOP=T"
+      }
+    },
+    "rmm_var": {
+      "subs": {
+        "@PSIDYN@": "OPTIMIZER='RMM' MIXER='VARIATIONAL' SAFEORTHO=T STOP=T"
+      }
+    },
+    "md": {
+      "subs": {
+        "@NSTEP@": "3000",
+        "@PSIDYN@": "STOP=T FRIC=0.02 SAFEORTHO=T\n    !AUTO FRIC(-)=0.3 FACT(-)=0.97 FRIC(+)=0.3 FACT(+)=1. MINFRIC=0.02 !END"
+      }
+    }
+  },
+  "checks": [
+    {
+      "run": "dav_var",
+      "quantity": "energy",
+      "value": -7.9255509978,
+      "tol": 3e-06,
+      "reference": "re-referenced 2026-10-10 after three meta-GGA PAW fixes: setups for meta-GGA built from a PBE atom (before: no-XC atom), one-center tau with the factor 1/2 (before: twice too large), pseudo-core tau added to the plane-wave tau; for SCAN0r also the core tau potential no longer subtracted in the onsite double counting; VASP 6.4.2 r2SCAN gap 0.917 eV"
+    },
+    {
+      "run": "dav_var",
+      "quantity": "gap_ev",
+      "value": 0.9187,
+      "tol": 0.003,
+      "reference": "re-referenced 2026-10-10 after three meta-GGA PAW fixes: setups for meta-GGA built from a PBE atom (before: no-XC atom), one-center tau with the factor 1/2 (before: twice too large), pseudo-core tau added to the plane-wave tau; for SCAN0r also the core tau potential no longer subtracted in the onsite double counting; VASP 6.4.2 r2SCAN gap 0.917 eV"
+    }
+  ],
+  "agree": [
+    {
+      "runs": [
+        "dav_var",
+        "rmm_var"
+      ],
+      "quantity": "energy",
+      "tol": 3e-06
+    },
+    {
+      "runs": [
+        "dav_var",
+        "md"
+      ],
+      "quantity": "energy",
+      "tol": 1e-05
+    },
+    {
+      "runs": [
+        "dav_var",
+        "rmm_var",
+        "md"
+      ],
+      "quantity": "gap_ev",
+      "tol": 0.005
+    }
+  ],
+  "known_issues": {}
+}

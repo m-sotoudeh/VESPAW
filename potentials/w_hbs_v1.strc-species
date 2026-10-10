@@ -1,0 +1,21 @@
+# W -- PAW setup (HBS construction), built 2026-10-02
+# Replaces w_ndlss_sc_v0, whose ZV=14 is inconsistent with the energy order
+# of the atom (4f at -33 eV lies above 5p at -40 eV, so the valence became
+# 6s 5d plus part of 4f with 5s/5p frozen) and which collapses in the solid
+# (ghost state at -293 H). CP-PAW offers W only with ZV=6 or ZV=28.
+# Parameters: CP-PAW parameters/stp.cntl entry W_HBS (5d4 6s2 valence), with
+#   the s/p radii and LAMBDA of TA_HBS (W_HBS as listed gave a non-positive
+#   PAW overlap);
+#   NPRO=2 2 2 1 (two per s/p/d channel).
+# Checked: see AUDIT.md.
+#
+  !SPECIES NAME='W_' NPRO=2 2 2 1 LRHOX=4 RAD/RCOV=1.2
+    !AUGMENT ID='W_HBS' EL='W' ZV=6. TYPE='HBS'
+             RBOX/RCOV=1.2 RCSM/RCOV=0.25
+             RCL/RCOV= 0.85 0.85 0.75 0.75
+             LAMBDA= 3.5 3.5 6. 6.
+      !GRID DMIN=1.E-6 DMAX=0.1 RMAX=10. !END
+      !POT  POW=3. RC/RCOV=0.67 !END
+      !CORE POW=3. RC/RCOV=0.67 !END
+    !END
+  !END

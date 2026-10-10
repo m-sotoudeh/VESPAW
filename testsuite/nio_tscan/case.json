@@ -103,16 +103,16 @@
     {
       "run": "dav_var",
       "quantity": "energy",
-      "value": -112.1341526906,
+      "value": -111.2531898199,
       "tol": 3e-06,
-      "reference": "first reference 2026-10-03 (DAV/RMM/friction MD agree) -- re-referenced 2026-10-08 after 08504d2 (Cholesky orthonormalization of the random start for unpacked wave functions): the cold-start trajectory changed; DAV, RMM and friction MD all moved down by 3.2-3.6e-6 Ha together and still agree to 1.2e-6"
+      "reference": "first reference 2026-10-03 (DAV/RMM/friction MD agree) -- re-referenced 2026-10-08 after 08504d2 (Cholesky orthonormalization of the random start for unpacked wave functions): the cold-start trajectory changed; DAV, RMM and friction MD all moved down by 3.2-3.6e-6 Ha together and still agree to 1.2e-6 -- re-referenced 2026-10-10 after three meta-GGA PAW fixes: setups for meta-GGA built from a PBE atom (before: no-XC atom), one-center tau with the factor 1/2 (before: twice too large), pseudo-core tau added to the plane-wave tau; for SCAN0r also the core tau potential no longer subtracted in the onsite double counting"
     },
     {
       "run": "dav_var",
       "quantity": "gap_ev",
-      "value": 2.1715,
+      "value": 2.5914,
       "tol": 0.01,
-      "reference": "first reference 2026-10-03 (DAV/RMM/friction MD agree)"
+      "reference": "first reference 2026-10-03 (DAV/RMM/friction MD agree) -- re-referenced 2026-10-10 after three meta-GGA PAW fixes: setups for meta-GGA built from a PBE atom (before: no-XC atom), one-center tau with the factor 1/2 (before: twice too large), pseudo-core tau added to the plane-wave tau; for SCAN0r also the core tau potential no longer subtracted in the onsite double counting"
     }
   ]
 }
