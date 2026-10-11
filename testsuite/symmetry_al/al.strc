@@ -1,7 +1,7 @@
 !STRUCTURE
 #
-# Bulk FCC Al, 1-atom primitive cell, a=4.05 AA (matches the dev notes's
-# "Al metal" EDFT test description). Lattice-vector pattern copied from
+# Bulk FCC Al, 1-atom primitive cell, a=4.05 AA.
+# Lattice-vector pattern copied from
 # tests/pd/pd.strc (another 1-atom FCC metal already proven to run in this
 # repo) -- only LUNIT[AA], the species block, and the atom name differ.
 #

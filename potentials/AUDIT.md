@@ -9,8 +9,7 @@ setup diagnostics added on 2026-09-27. Status:
   below the valence level of that channel. Do not use.
 - **INCOMPLETE** -- the local potential binds a state far below the valence level in a channel
   with a single projector. Atomic tests pass, but in solids the variational minimum can collapse
-  into such states (NiO: 3-10 Ha below the physical state, growing with the cutoff; see
-  `the dev notes`). A second projector for that channel removed the collapse for Ni.
+  into such states (NiO: 3-10 Ha below the physical state, growing with the cutoff). A second projector for that channel removed the collapse for Ni.
 - **OK** -- no warning. (Not a validation of accuracy.)
 
 **Rebuild (2026-09-27):** every flagged setup has a replacement `<el>_hbs_v1` /

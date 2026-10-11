@@ -31,15 +31,16 @@ Hamiltonian, not the density, is the variable of the self-consistency
 loop. The Mermin free energy is evaluated for the actual output state of
 every trial Hamiltonian, and a step is accepted only if this energy does
 not increase. Every energy reported during the iteration is therefore an
-upper bound of the converged result, and a stalled calculation cannot be
-mistaken for a converged one.
+upper bound of the converged result, and a restart that lowers the
+energy shows that a calculation had not converged.
 
 ## Highlights
 
-- **Variational SCF** (default): `MIXER='VARIATIONAL'` with the Davidson,
-  RMM-DIIS or CG eigensolver; a second route (`OPTIMIZER='EDFT'`)
-  minimizes directly over orbitals and occupations.
-- **Functionals**, checked against libxc and VASP to machine precision:
+- **Variational SCF**: Hamiltonian minimization (HM, the default,
+  `MIXER='VARIATIONAL'`) with the Davidson, RMM-DIIS or CG eigensolver;
+  direct minimization (DM, `OPTIMIZER='EDFT'`) over orbitals and
+  occupations as an independent variational reference.
+- **Functionals**, checked against libxc (to machine precision) and VASP:
   LDA (PZ, PW92), GGA (PBE, RPBE, PW91, revPBE, PBEsol, BLYP, BP86),
   meta-GGA (SCAN and r²SCAN with orbital τ, SCAN-L), the local hybrids
   PBE0r, PBE-SL0r, SCAN0r and r²SCAN0r, DFT+U. Selected by name (`TYPE='PBEsol'`) or by
@@ -124,7 +125,7 @@ correction of the PBE reduced gradient).
 If you use VESPAW, please cite
 
 - the variational self-consistency method: M. Sotoudeh, *The Kohn–Sham
-  Hamiltonian as the variational object* (2026);
+  Hamiltonian as the variational object* (manuscript in preparation, 2026);
 - the PAW method: P. E. Blöchl, Phys. Rev. B **50**, 17953 (1994);
 - for the local hybrids: M. Sotoudeh *et al.*, Phys. Rev. B **95**,
   235150 (2017); P. E. Blöchl, C. F. J. Walther and Th. Pruschke,

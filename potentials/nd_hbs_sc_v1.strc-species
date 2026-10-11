@@ -2,7 +2,7 @@
 # Replaces nd_ndlss_sc_v0 (see AUDIT.md), which the setup audit flagged.
 # Parameters: CP-PAW parameters/stp.cntl entry ND_HBS_SC; projectors
 #   NPRO=2 2 2 1 (two per s/p/d channel: the recipe that removed
-#   the NiO incompleteness collapse, the dev notes 2026-09-27).
+#   the NiO incompleteness collapse).
 # Checked: builds for an isolated atom (PBE) with no ghost state and no
 #   incompleteness warning. NOT yet validated in solids (lattice constants,
 #   cutoff convergence) unless stated in AUDIT.md.

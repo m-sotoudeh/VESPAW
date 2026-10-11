@@ -73,9 +73,4 @@ mismatch on Li** below, keep that in mind for any other element too).
   volume-vs-experiment before trusting one in production. Elements already
   proven in real VESPAW runs (or found in a future paper/validated source)
   should get the same paper-exact treatment as H/Li/O/Mn, superseding the
-  generic entry for that element — the scan0r project's own individually
-  hand-tuned Ti/Ni/La/Ca/Pr/Mg setups (still only inline in `.strc` files,
-  e.g. `tests/mgo/mgo.strc`, the `SCAN0r notes*` decks) are an obvious next
-  source to extract from.
-
-See `the dev notes` for how this fits into the broader project.
+  generic entry for that element.

@@ -591,7 +591,6 @@ $(OBJECTS) $(LOBJS): ${OBJDIR}/%.o: ${SRCDIR}/%.f90
 #__vespaw_scantau.f90 needs -notemplates: f90pp_tmplts.x segfaults on it for__
 #__an unidentified reason (no actual F90PP template syntax is used in it,_
 #__so -notemplates is a legitimate workaround, not a skip of real work)___
-#__-- see SCAN0r notes
 ${OBJDIR}/vespaw_scantau.o: ${SRCDIR}/vespaw_scantau.f90
 	${F90PP} -notemplates $< >${OBJDIR}/vespaw_scantau_d.${FEXT}
 	${COMPILE} -o $@ ${OBJDIR}/vespaw_scantau_d.${FEXT}

@@ -10,8 +10,7 @@ on success.
 
 See python/vespaw/yaml_input.py's module docstring for the input schema
 ("simple case" fields plus the raw: passthrough that reaches every .cntl
-keyword) and the dev notes, Phase 6, "Input language" for the full
-target design this is one deliberately-scoped step towards.
+keyword).
 """
 import argparse
 import sys

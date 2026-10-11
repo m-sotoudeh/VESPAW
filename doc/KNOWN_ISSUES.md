@@ -3,14 +3,19 @@
 Open problems and limitations of the current version, with workarounds
 where they exist. Please report anything not listed here as an issue.
 
+HM: Hamiltonian minimization, the default variational SCF
+(`MIXER='VARIATIONAL'`); DM: direct minimization over orbitals and
+occupations (`OPTIMIZER='EDFT' MIXER='VARIATIONAL'`).
+
 ## Correctness and robustness
 
 - **Cells with large vacuum.** The variational optimizer realigns the
   potential gauge and fixes the potential in empty space, which makes
   slabs and molecules converge. A residual floor from the gradient-
   corrected XC potential in the density tail remains: for a water layer
-  in an 18 Å cell (`h2o_dipole`) the Davidson run stops about 1.1 meV
-  above friction dynamics. If a molecule or slab stalls, a softer Kerker
+  in an 18 Å cell (`h2o_dipole`) HM stops 0.7 meV above friction
+  dynamics with Davidson and about 6 meV above with RMM-DIIS or CG;
+  DM agrees with friction dynamics within 16 µeV. If a molecule or slab stalls, a softer Kerker
   filter (`MIXG0SQ=0.1`) helps; for µHa accuracy, finish with
   `OPTIMIZER='MD'`. The same floor, about 10⁻⁵ H and different from
   geometry to geometry, stops an L-BFGS relaxation of a molecule near
@@ -23,15 +28,15 @@ where they exist. Please report anything not listed here as an issue.
   the plane-wave basis of the starting cell (Pulay stress); take the
   final energy from a static run at the relaxed cell.
 - **Large cells from random wave functions.** For Si with 216 atoms,
-  route 1 started from random orbitals stalls about 78 Ha above the
-  minimum: every proposed step raises the energy, and the re-anchor
-  returns to the same point. A longer warm-up does not help, and a
-  restart from a few Pulay iterations was not usable either (2026-10-04).
-  For cells with hundreds of atoms use damped dynamics until this is
-  resolved.
+  HM started from random orbitals does not converge: the Hamiltonian of
+  the random orbitals is far from the minimum, and every proposed step
+  raises the energy. A longer warm-up does not help. Workaround: about
+  30 steps of friction dynamics (`OPTIMIZER='MD'`), then a restart with
+  HM and RMM-DIIS, which then converges in about 20 iterations. With
+  Davidson, HM stalls 2.8 meV above the minimum in this cell.
 - **Orbital-dependent hybrids in large magnetic cells.** The onsite
   exact-exchange operator is built from the current orbitals and is not
-  a variable of route 1. For MgMn2O4 (56 atoms, PBE0r) the energy of a
+  a variable of HM. For MgMn2O4 (56 atoms, PBE0r) the energy of a
   Hamiltonian then depends on how well the eigenstates are converged,
   and the line search cycles (half of all trial steps rejected, no
   convergence in 300 steps). Keeping the orbitals of the best point
@@ -40,9 +45,6 @@ where they exist. Please report anything not listed here as an issue.
 - **Symmetry with dense k meshes.** fcc Al with 12³ k-points and
   `SYMMETRY=T` converges to the right energy but needs 93 instead of 13
   iterations (39 rejected steps); the 8³ case of the suite is unaffected.
-- **SCAN0r (orbital-τ SCAN with onsite exact exchange) with route 1**
-  stalls for NiO (`nio_scan0r_tscan`, known issue in the suite); use
-  friction dynamics.
 - **PBE-SL0r ghost states at unphysical densities.** Far from
   self-consistency, the one-center SCAN-L double counting can produce
   deep spurious eigenstates (−70 to −100 eV). Start PBE-SL0r from a
@@ -69,8 +71,9 @@ compared with all-electron values) is in progress:
   K, Li, Mo, Na, Nb, Si, Sr, V;
 - too large an error: Pd `pd_ndlss_v0` (+12.6%), Sn `sn_ndlss_sc_v0`
   (−7.5%), Ge `ge_ndlss_sc_v0` (+2.6%), Au `au_hbs_v1` (+1.3%);
-- failing: Pt `pt_hbs_sc_v1` and Rh `rh_hbs_sc_v1` (setup construction
-  stops), Ta and W `*_ndlss_sc_v0` (spurious deep states), Ba
+- not yet benchmarked: Pt `pt_hbs_sc_v1` and Rh `rh_hbs_sc_v1` (their
+  construction stopped in the benchmark; fixed on 2026-10-02);
+- failing: Ta and W `*_ndlss_sc_v0` (spurious deep states), Ba
   `ba_hbs_sc_v1` (SCF does not converge).
 
 Validate a setup for your system before production use; the setups in
@@ -78,8 +81,8 @@ Validate a setup for your system before production use; the setups in
 
 ## Parallelization
 
-- All SCF routes run under MPI (k-point and plane-wave parallelization):
-  route 1 with DAV/RMM/CG, route 2 (`OPTIMIZER='EDFT' MIXER='VARIATIONAL'`)
+- All SCF methods run under MPI (k-point and plane-wave parallelization):
+  HM with DAV/RMM/CG, DM (`OPTIMIZER='EDFT' MIXER='VARIATIONAL'`)
   and the Pulay/Anderson density mixers. Only the older, non-variational
   EDFT prototype (`OPTIMIZER='EDFT'` with a density mixer) is serial only.
 - With MPI, set `OMP_NUM_THREADS=1` and `OPENBLAS_NUM_THREADS=1`
@@ -91,8 +94,8 @@ Validate a setup for your system before production use; the setups in
   recognized but not used to store half the coefficients (as VASP's
   `vasp_gam` does). Together with other open items this makes VESPAW
   noticeably slower than VASP for comparable systems.
-- **Route 2 is slower than route 1** for large or antiferromagnetic
-  cells (64-atom Si: 253 vs 19 iterations). Prefer route 1 there.
+- **DM is slower than HM** for large or antiferromagnetic cells
+  (64-atom Si: 303 vs 20 iterations). Prefer HM there.
 
 ## Design limitations
 

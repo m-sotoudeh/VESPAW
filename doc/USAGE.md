@@ -1,16 +1,15 @@
 # Using VESPAW
 
-This covers running a calculation from the command line and from Python.
-For the full `.cntl`/`.strc` input-file reference — every block, every
-keyword, the underlying physics — see `doc/manual.pdf` (the upstream
-CP-PAW manual: VESPAW inherits nearly all of CP-PAW's input format
-unchanged). This page only covers what's specific to VESPAW.
+This page covers running a calculation from the command line and from
+Python. The input reference (every block and keyword of `.cntl` and
+`.strc`) is `doc/manual.pdf`; the methods are described in
+`doc/theory.pdf`, and `doc/tutorial.pdf` works through examples.
 
-## 1. The `vespaw` dispatcher
+## 1. The `vespaw` command
 
-Once built (see [INSTALL.md](INSTALL.md)), `bin/<arch>/vespaw` is a
-single command that dispatches by file extension, and auto-selects the
-parallel build when launched under `mpirun`/`mpiexec`/`srun`:
+After the installation (see [INSTALL.md](INSTALL.md)), `vespaw` runs a
+calculation and dispatches by file extension. Under `mpirun`, `mpiexec`
+or `srun` it selects the parallel build.
 
 ```
 usage: vespaw [--np] FILE.<cntl|dcntl|dpcntl|bcntl|pcntl|gcntl> [args...]
@@ -22,28 +21,28 @@ usage: vespaw [--np] FILE.<cntl|dcntl|dpcntl|bcntl|pcntl|gcntl> [args...]
 | `.cntl` | the SCF/MD driver (the main calculation) |
 | `.dcntl` | density-of-states post-processing |
 | `.dpcntl` | DOS plotting |
-| `.bcntl` | band-structure calculation |
+| `.bcntl` | band structure |
 | `.pcntl` | pre-optimizer |
 | `.gcntl` | "grab" post-processor |
-| `.yaml`/`.yml`, or `vespaw run ...` | the YAML input frontend (§3 below) |
-| `vespaw convert ...` | structure-file importer (§2 below) |
+| `.yaml`/`.yml`, or `vespaw run ...` | the YAML input frontend (§4) |
+| `vespaw convert ...` | structure-file importer (§2) |
+| `vespaw doctor` | check the installation |
 
 ```sh
-vespaw foo.cntl                          # serial
-OPENBLAS_NUM_THREADS=1 mpirun -np 4 vespaw foo.cntl   # parallel — see INSTALL.md
+vespaw foo.cntl                                                      # serial
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 mpirun -np 4 vespaw foo.cntl # MPI
 ```
 
-Other CP-PAW tools (`strc`, `tostrc`, `toxyz`, `tra`, `wave`,
-`murnaghan`, ...) aren't yet wired into this dispatcher — call their
-`vespaw_<name>.x` binary directly.
+The other CP-PAW tools (`strc`, `tostrc`, `toxyz`, `tra`, `wave`,
+`murnaghan`, …) are called by their executable names
+`vespaw_<name>.x` in `bin/<arch>/`.
 
 ## 2. Building a structure file
 
-`.strc` files can be hand-written (see `doc/manual.pdf` and
-`installation/examples/template_full.cntl` for the block syntax) or
-generated from any ASE-readable structure file (CIF, POSCAR, ...) plus
-one or more species definitions from the [`potentials`](../potentials/README.md)
-library:
+`.strc` files can be written by hand (see `doc/manual.pdf` and the
+annotated template `examples/installation/template_full.cntl`) or
+generated from any structure file that ASE can read (CIF, POSCAR, …)
+plus species definitions from the [setup library](../potentials/README.md):
 
 ```sh
 vespaw convert POSCAR mgo.strc \
@@ -51,24 +50,18 @@ vespaw convert POSCAR mgo.strc \
     --kdiv 4 4 4 --empty 4
 ```
 
-## 3. A minimal worked example
+## 3. A minimal calculation
 
-The fastest way to see a real, working `.cntl` deck is to copy one of
-the checked-in regression cases (`testsuite/pbe_atom/atom.cntl` is a
-small single-atom PBE run) rather than starting from a blank page.
-`installation/examples/template_full.cntl` is the other reference worth
-knowing about — an extensively annotated **template**, not a runnable
-deck (no atoms/structure block), meant to be copied from when you need
-to see every VESPAW-specific `.cntl` extension in one place.
-
-A hand-written minimal deck, PBE on a pre-built `.strc`:
+The decks in `examples/tutorial/` and `testsuite/` are complete, checked
+inputs and the best starting point. A minimal control file for a PBE
+calculation with the default variational SCF:
 
 ```
 !CONTROL
-  !GENERIC NSTEP=60 DT=5.0 NWRITE=10 START=T !END
+  !GENERIC NSTEP=300 DT=5.0 START=T !END
   !FOURIER EPWPSI=25. CDUAL=2.0 !END
   !DFT TYPE='PBE' !END
-  !PSIDYN OPTIMIZER='DAV' SAFEORTHO=F STOP=T MIXER='PULAY' !END
+  !PSIDYN OPTIMIZER='DAV' MIXER='VARIATIONAL' SAFEORTHO=T STOP=T !END
 !END
 !EOB
 ```
@@ -77,17 +70,21 @@ A hand-written minimal deck, PBE on a pre-built `.strc`:
 vespaw foo.cntl
 ```
 
-Output lands in `foo.prot` (the human-readable run log — the live
-per-iteration energy/residual table plus a final `RUN-TIME REPORT`) and
-`foo.rstrt` (the restart/wavefunction file for continuing the run). Add
-`!HDF5OUT READ=T FILE='results.h5' !END` under `!CONTROL` to also get a
-structured HDF5 results file readable from Python (§5).
+Output files:
 
-## 4. The YAML input frontend
+- `foo.prot`: the report (input echo, system, model, SCF history,
+  energies, k-points and occupations, charges and moments, forces,
+  stress, timing) in eV, Å and GPa;
+- `foo.log`: the full protocol of the run;
+- `foo.rstrt`: the restart file (`START=F` continues from it).
 
-For the common case (a plane-wave DFT calculation: functional, cutoff,
-k-mesh, SCF settings), a much shorter YAML input lowers to the
-`.cntl`/`.strc` pair above automatically:
+`!HDF5OUT READ=T FILE='results.h5' !END` in `!CONTROL` writes the results
+also to an HDF5 file, which the Python API reads (§5).
+
+## 4. YAML input
+
+For a standard plane-wave calculation (functional, cutoff, k-points,
+SCF settings), a short YAML file is converted to `.cntl` and `.strc`:
 
 ```yaml
 vespaw:
@@ -98,29 +95,27 @@ system:
 
 electronic:
   xc:
-    functional: PBE          # any name of the TYPE list, or PBE0R / PBE-SL0R / SCAN0R -- see FEATURES.md
+    functional: PBE          # any TYPE name, or PBE0R / PBE-SL0R / SCAN0R
   basis:
     wavefunction_cutoff: 25 Ry
   kpoints:
-    mesh: [1, 1, 1]
+    mesh: [4, 4, 4]
 
 scf:
-  max_iterations: 10
+  max_iterations: 100
   diagonalizer:
-    method: cg                # cg | davidson | rmm-diis
+    method: davidson          # davidson | rmm-diis | cg
 
 ions:
-  mode: static                 # or relax
+  mode: static                # or relax
 ```
 
 ```sh
 vespaw run foo.yaml
 ```
 
-This covers the common structured fields only (functional, basis,
-k-points, SCF/mixing, ionic mode). Anything else — any `.cntl` keyword
-without a dedicated YAML field — is reachable through a `raw:` section,
-a literal mirror of the `.cntl` block tree:
+Any `.cntl` keyword without a YAML field is reached through a `raw:`
+section, which mirrors the `.cntl` block tree:
 
 ```yaml
 raw:
@@ -130,13 +125,12 @@ raw:
     READ: false
 ```
 
-See `python/vespaw/yaml_input.py`'s module docstring for the exact
-schema and what's deliberately not supported yet (it fails with a clear
-message naming the offending key rather than silently ignoring
-anything), and `testsuite/yaml_frontend/`, `testsuite/yaml_raw/` for
-two more complete, runnable examples.
+The schema is documented in the docstring of
+`python/vespaw/yaml_input.py`; unknown keys are rejected with a message
+naming them. Runnable examples: `testsuite/yaml_frontend/`,
+`testsuite/yaml_raw/`.
 
-## 5. From Python
+## 5. Python
 
 ```sh
 pip install -e python/
@@ -148,31 +142,28 @@ from vespaw import Calculation
 calc = Calculation("foo.cntl", env={"OPENBLAS_NUM_THREADS": "1"})
 result = calc.run()
 
-result.energy          # Hartree
-result.forces          # (nat, 3) ndarray, Hartree/bohr
-result.gap              # LUMO - HOMO, Hartree (None for dynamical-occupation runs)
+result.energy          # eV
+result.forces          # (nat, 3) ndarray, eV/Å
+result.gap             # LUMO - HOMO in eV (None without eigenvalue data; see result.is_metal)
 result.provenance["git_revision"]
 ```
 
-Requires the deck to already contain a `!HDF5OUT READ=T
-FILE='results.h5' !END` block (this API reads results back, it does not
-rewrite your input for you). `Calculation.run()` also writes a
-`run.json` provenance record next to the results file; the human-readable
-report is the `<root>.prot` file that VESPAW writes for every run. For YAML input, use
-`vespaw.yaml_input.prepare_run(yaml_path)` instead, which validates and
-lowers the YAML for you and hands back a ready-to-run `Calculation`.
-
-See `python/vespaw/__init__.py`'s module docstring for the full API and
-units (everything is VESPAW's own internal atomic units: bohr, Hartree,
-Hartree/bohr).
+The deck must contain `!HDF5OUT READ=T FILE='results.h5' !END`; the API
+reads the results back and does not modify the input. `Calculation.run()`
+also writes a provenance record `run.json` next to the results file. For
+YAML input, `vespaw.yaml_input.prepare_run(yaml_path)` validates and
+converts the input and returns a ready-to-run `Calculation`. The full API
+is described in the docstring of `python/vespaw/__init__.py`.
 
 ## 6. Regression suite
 
 ```sh
-python3 testsuite/run.py            # every checked-in case
-python3 testsuite/run.py pbe_atom   # just one
+python3 testsuite/run.py            # all cases
+python3 testsuite/run.py pbe_atom   # one case
+python3 testsuite/run.py si_pbe:dav_var   # one run of a case
+VESPAW_REGRESSION_NP=4 python3 testsuite/run.py   # with 4 MPI tasks
 ```
 
-A small, fast, checked-in set of known-good energies (distinct from the
-gitignored exploratory `tests/` tree) — see `testsuite/run.py`'s own
-module docstring.
+Each case solves one system with several optimizers and checks energies,
+gaps, forces and stresses against stored references and against each
+other; see the docstring of `testsuite/run.py`.

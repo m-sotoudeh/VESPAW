@@ -1,11 +1,11 @@
 """YAML input frontend for VESPAW -- the "simple case" subset of Phase 6's
-target input-language design (see the dev notes, "Input language"),
+target input-language design,
 plus a ``raw:`` passthrough that reaches every ``.cntl`` keyword, not just
 the ones this module has bespoke schema fields for.
 
 Scope of the structured ("simple case") fields, exactly as confirmed:
 ``vespaw.schema``, ``system.structure``, ``electronic.xc``/``basis``/
-``kpoints``, ``scf``, and ``ions.mode``. Everything the design's full
+``kpoints``, ``scf``, and ``ions.mode``. Everything the full
 design also specifies -- ``execution``/``restart``/``output`` policy
 sections, the ``vespaw validate``/``inspect-input``/``migrate`` CLI
 subcommands, and caret-precise line/column error messages -- is
@@ -65,7 +65,7 @@ _CONVERT_SCRIPT = _REPO_ROOT / "tools" / "Scripts" / "vespaw_convert.py"
 _VESPAW_POT_DIR = _REPO_ROOT / "potentials"
 
 # Named functional aliases actually wired into `.cntl` (see
-# the dev notes, "Named functional aliases", READIN_DFTTYPEFROMNAME in
+# READIN_DFTTYPEFROMNAME in
 # src/vespaw_ioroutines.f90). Deliberately only the well-established names,
 # not all ~25 numeric DFT_INITIALIZE codes.
 _PLAIN_FUNCTIONALS = {
@@ -238,7 +238,6 @@ def _reject_unsupported(cfg: Dict[str, Any]) -> None:
     for key in ("execution", "restart", "output", "paw", "properties"):
         if key in cfg:
             _fail(key, "not supported as a structured field in this pass "
-                        "(see the dev notes, Phase 6 'Input language') "
                         "-- use raw: to reach the underlying .cntl keyword "
                         "directly if there is one")
     system = cfg.get("system", {})

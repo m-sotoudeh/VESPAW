@@ -8,8 +8,7 @@ physics. This module itself does not generate .cntl/.strc input for you
 import); for a higher-level YAML input frontend that lowers to .cntl/.strc
 and hands back a ready-to-run Calculation, see vespaw.yaml_input.prepare_run.
 
-See the dev notes, Phase 6, for why this exists: it is the minimum
-needed to make VESPAW usable from a notebook, a workflow engine, or a
+It is the minimum needed to make VESPAW usable from a notebook, a workflow engine, or a
 dataset-generation script instead of only from the command line.
 
 Requires the .cntl deck to already contain a
@@ -75,7 +74,7 @@ class Result:
     revision 2026-09-04) -- a breaking rename of the original
     2026-09-03 MVP's flat /energy, /forces groups. See
     src/vespaw_ioroutines.f90, HDF5IO$WRITE, for the authoritative
-    Fortran-side schema and the dev notes (Phase 6) for why.
+    Fortran-side schema.
 
     eigenvalues/occupations/kpoints/kpoint_weights/homo/lumo/is_metal are
     None whenever the run used dynamical occupations (DYNOCC DYN=T) --
@@ -155,8 +154,7 @@ class Result:
     def write_run_json(self, path: Optional[Union[str, Path]] = None,
                         cntl_path: Optional[Union[str, Path]] = None
                         ) -> Path:
-        """Writes the reproducibility record the dev notes's output-
-        layer design calls run.json: a flat JSON object of exactly the
+        """Writes the reproducibility record run.json: a flat JSON object of exactly the
         provenance fields HDF5IO$WRITE already captured, plus sha256
         hashes of the .cntl and its companion .strc (same basename, the
         CP-PAW convention -- see src/vespaw_ioroutines.f90) when found.
@@ -202,8 +200,7 @@ class Calculation:
         up on ``PATH``.
     env:
         Extra environment variables merged into the subprocess call
-        (e.g. ``{"OPENBLAS_NUM_THREADS": "1"}`` -- see
-        the dev notes's Phase 1 note on why that matters under MPI).
+        (e.g. ``{"OPENBLAS_NUM_THREADS": "1"}``, which avoids oversubscription under MPI).
     """
 
     cntl: Union[str, Path]

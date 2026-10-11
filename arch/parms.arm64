@@ -3,8 +3,7 @@
 ## parameter file for configuration of PAW/VESPAW environment
 ##
 ## for: Apple Silicon (M3) native arm64 build -- avoids Rosetta 2 translation, which the
-## existing x86_64 build (parms.in_use, ARCH=gfortran_openblas_fftw3) runs under on this
-## machine. See the dev notes, 2026-09-07, "why is VESPAW ~20x slower than VASP".
+## x86_64 build (ARCH=gfortran_openblas_fftw3) runs under; about 2.2x faster on an M3.
 ##
 #########################################################################################
 #

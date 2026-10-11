@@ -6,7 +6,7 @@
 ##  UNTESTED VARIANT (2026-09-03) -- cuFFT backend for PLANEWAVE$SUPFFT's hot path,    ##
 ##  written and syntax-checked (via gfortran -fsyntax-only against a stub link) on a   ##
 ##  machine with NO CUDA toolkit or GPU, so the CUDADIR/library paths below are        ##
-##  templates, not verified values. See the dev notes Phase 2 for what's actually  ##
+##  templates, not verified values. What has actually                             ##
 ##  been validated (Fortran/ISO_C_BINDING interface correctness) vs. not (linking      ##
 ##  against real libcudart/libcufft, correctness of the actual transform, performance).##
 ##                                                                                     ##
@@ -148,8 +148,8 @@ CPPFLAGS="-DCPPVAR_FFT_CUFFT -DCPPVAR_BLAS_OPENBLAS -DCPPVAR_U77 -DCPPVAR_COMPIL
 ##-------------------------------------------------------------------------------------##
 ##  selects LIB_CUFFT/LIB_3DFFTCUFFT in src/paw_library.f90 instead of LIB_FFTW3.      ##
 ##  everything else (LAPACK/BLAS via OpenBLAS, MPI) is unchanged from the FFTW3 parms  ##
-##  file this was copied from -- this variant only swaps the FFT backend, per the      ##
-##  design's Phase 2 scope (library swap, no algorithm change).                       ##
+##  file this was copied from -- this variant only swaps the FFT backend              ##
+##  (library swap, no algorithm change).                                               ##
 ##                                                                                     ##
 #########################################################################################
 #

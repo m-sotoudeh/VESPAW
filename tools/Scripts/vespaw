@@ -24,7 +24,7 @@
 ##  strc/tostrc/toxyz/tra/converttra/cleantra/wave/1davpot/     ##
 ##  cmcwave/murnaghan/polyhedra/stpa/stpreport) has no fixed    ##
 ##  extension convention yet and must still be called by its   ##
-##  own vespaw_<name>.x name -- see the dev notes.          ##
+##  own vespaw_<name>.x name.                              ##
 #################################################################
 set -eu
 
