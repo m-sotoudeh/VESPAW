@@ -25,6 +25,14 @@
       "subs": {
         "@PSIDYN@": "OPTIMIZER='EDFT' MIXER='VARIATIONAL' SAFEORTHO=F STOP=T"
       }
+    },
+    "md": {
+      "subs": {
+        "@NSTEP@": "4000",
+        "@PSIDYN@": "STOP=T FRIC=0.02 SAFEORTHO=F\n    !AUTO FRIC(-)=0.3 FACT(-)=0.97 FRIC(+)=0.3 FACT(+)=1. MINFRIC=0.02 !END"
+      },
+      "note": "optional: run for Table I of the PRB paper (agreement with the other optimizers; no reference check)",
+      "optional": true
     }
   },
   "checks": [
@@ -54,5 +62,8 @@
       "quantity": "energy",
       "tol": 2e-06
     }
-  ]
+  ],
+  "defaults": {
+    "@NSTEP@": "500"
+  }
 }

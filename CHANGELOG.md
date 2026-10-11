@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.2 — 2026-10-11
+
+- Test suite: the runs behind Table I of the method paper (direct
+  minimization for most systems, CG for Si with TSCAN, NiO with PBE+U
+  and PBE-SL0r, and MgO, RMM-DIIS and CG for the water layer, friction
+  dynamics for Al at 1000 K, direct minimization with symmetry) are part
+  of the regression cases. They are marked `"optional"` because they take long;
+  they run when named (`python3 testsuite/run.py si8_gamma:edft_var`) or
+  with `VESPAW_REGRESSION_OPTIONAL=1`.
+- The code and all results are unchanged from 1.0.1.
+
 ## 1.0.1 — 2026-10-11
 
 First release archived on Zenodo, which assigns it a DOI. The code and

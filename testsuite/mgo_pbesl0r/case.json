@@ -4,7 +4,7 @@
     "mgo.cntl",
     "mgo.strc"
   ],
-  "timeout": 1800,
+  "timeout": 7200,
   "defaults": {
     "@NSTEP@": "300",
     "@NTBO@": "    !NTBO MODUS='HYBRID' HFWEIGHT=0.25 DCTYPE='SCANL' K2=-0.25 SCALERCUT=2. !END\n",
@@ -46,6 +46,21 @@
       "subs": {
         "@NTBO@": ""
       }
+    },
+    "scan0r_cg": {
+      "subs": {
+        "@PSIDYN@": "OPTIMIZER='CG' MIXER='VARIATIONAL' SAFEORTHO=T STOP=T"
+      },
+      "note": "optional: run for Table I of the PRB paper (agreement with the other optimizers; no reference check)",
+      "optional": true
+    },
+    "scan0r_edft": {
+      "subs": {
+        "@PSIDYN@": "OPTIMIZER='EDFT' MIXER='VARIATIONAL' SAFEORTHO=T STOP=T",
+        "@NSTEP@": "3000"
+      },
+      "note": "optional: run for Table I of the PRB paper (agreement with the other optimizers; no reference check)",
+      "optional": true
     }
   },
   "checks": [

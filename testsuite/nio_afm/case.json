@@ -4,7 +4,7 @@
     "nio.cntl",
     "nio.strc"
   ],
-  "timeout": 1800,
+  "timeout": 7200,
   "defaults": {
     "@NINTBO@": "",
     "@HFWEIGHT@": ""
@@ -109,6 +109,28 @@
           }
         }
       ]
+    },
+    "edft_var": {
+      "stages": [
+        {
+          "subs": {
+            "@START@": "T",
+            "@NSTEP@": "300",
+            "@ORBPOT@": "ORBPOT",
+            "@PSIDYN@": "STOP=F FRIC=0.02 SAFEORTHO=T\n    !AUTO FRIC(-)=0.3 FACT(-)=0.97 FRIC(+)=0.3 FACT(+)=1. MINFRIC=0.02 !END\n "
+          }
+        },
+        {
+          "subs": {
+            "@START@": "F",
+            "@NSTEP@": "3000",
+            "@ORBPOT@": "ORBPOT_OFF",
+            "@PSIDYN@": "OPTIMIZER='EDFT' MIXER='VARIATIONAL' SAFEORTHO=T STOP=T"
+          }
+        }
+      ],
+      "note": "optional: run for Table I of the PRB paper (agreement with the other optimizers; no reference check)",
+      "optional": true
     }
   },
   "agree": [

@@ -4,7 +4,7 @@
     "al.cntl",
     "al.strc"
   ],
-  "timeout": 900,
+  "timeout": 7200,
   "defaults": {
     "@SYM@": "T"
   },
@@ -29,12 +29,25 @@
       "subs": {
         "@PSIDYN@": "OPTIMIZER='CG' MIXER='VARIATIONAL' SAFEORTHO=F STOP=T"
       }
+    },
+    "sym_edft": {
+      "subs": {
+        "@PSIDYN@": "OPTIMIZER='EDFT' MIXER='VARIATIONAL' SAFEORTHO=F STOP=T",
+        "@NSTEP@": "3000"
+      },
+      "note": "optional: run for Table I of the PRB paper (agreement with the other optimizers; no reference check)",
+      "optional": true
     }
   },
   "checks": [],
   "agree": [
     {
-      "runs": ["full", "sym_dav", "sym_rmm", "sym_cg"],
+      "runs": [
+        "full",
+        "sym_dav",
+        "sym_rmm",
+        "sym_cg"
+      ],
       "quantity": "energy",
       "tol": 1e-06
     }

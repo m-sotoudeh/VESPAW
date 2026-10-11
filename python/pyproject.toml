@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vespaw"
-version = "1.0.1"
+version = "1.0.2"
 description = "Python API for VESPAW (variational electronic structure with projector augmented waves): run a .cntl deck via the vespaw CLI and read its HDF5 results back as numpy/plain-Python objects."
 requires-python = ">=3.9"
 dependencies = ["h5py", "pyyaml"]

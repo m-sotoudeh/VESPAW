@@ -4,7 +4,7 @@
     "w.cntl",
     "w.strc"
   ],
-  "timeout": 1800,
+  "timeout": 7200,
   "defaults": {
     "@NSTEP@": "600",
     "@DIP@": "T",
@@ -24,6 +24,28 @@
         "@NSTEP@": "3000",
         "@PSIDYN@": "STOP=T FRIC=0.02 SAFEORTHO=T EDIFF=1.E-8\n    !AUTO FRIC(-)=0.3 FACT(-)=0.97 FRIC(+)=0.3 FACT(+)=1. MINFRIC=0.02 !END"
       }
+    },
+    "dip_rmm": {
+      "subs": {
+        "@PSIDYN@": "OPTIMIZER='RMM' MIXER='VARIATIONAL' SAFEORTHO=T STOP=T EDIFF=1.E-8"
+      },
+      "note": "optional: run for Table I of the PRB paper (agreement with the other optimizers; no reference check)",
+      "optional": true
+    },
+    "dip_cg": {
+      "subs": {
+        "@PSIDYN@": "OPTIMIZER='CG' MIXER='VARIATIONAL' SAFEORTHO=T STOP=T EDIFF=1.E-8"
+      },
+      "note": "optional: run for Table I of the PRB paper (agreement with the other optimizers; no reference check)",
+      "optional": true
+    },
+    "dip_edft": {
+      "subs": {
+        "@PSIDYN@": "OPTIMIZER='EDFT' MIXER='VARIATIONAL' SAFEORTHO=T STOP=T EDIFF=1.E-8",
+        "@NSTEP@": "3000"
+      },
+      "note": "optional: run for Table I of the PRB paper (agreement with the other optimizers; no reference check)",
+      "optional": true
     }
   },
   "checks": [

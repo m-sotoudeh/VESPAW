@@ -4,7 +4,7 @@
     "si8.cntl",
     "si8.strc"
   ],
-  "timeout": 900,
+  "timeout": 7200,
   "defaults": {
     "@NSTEP@": "300"
   },
@@ -29,6 +29,14 @@
         "@NSTEP@": "3000",
         "@PSIDYN@": "STOP=T FRIC=0.02 SAFEORTHO=T\n    !AUTO FRIC(-)=0.3 FACT(-)=0.97 FRIC(+)=0.3 FACT(+)=1. MINFRIC=0.02 !END"
       }
+    },
+    "edft_var": {
+      "subs": {
+        "@PSIDYN@": "OPTIMIZER='EDFT' MIXER='VARIATIONAL' SAFEORTHO=F STOP=T",
+        "@NSTEP@": "3000"
+      },
+      "note": "optional: run for Table I of the PRB paper (agreement with the other optimizers; no reference check)",
+      "optional": true
     }
   },
   "agree": [

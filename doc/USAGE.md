@@ -162,6 +162,7 @@ python3 testsuite/run.py            # all cases
 python3 testsuite/run.py pbe_atom   # one case
 python3 testsuite/run.py si_pbe:dav_var   # one run of a case
 VESPAW_REGRESSION_NP=4 python3 testsuite/run.py   # with 4 MPI tasks
+VESPAW_REGRESSION_OPTIONAL=1 python3 testsuite/run.py   # include the long optional runs
 ```
 
 Each case solves one system with several optimizers and checks energies,

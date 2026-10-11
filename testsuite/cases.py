@@ -35,6 +35,10 @@ for runs with !CONTROL!GENERIC FORCES=T / STRESS=T, "force:<ATOM>:<x|y|z>"
 An "fd" entry compares an analytic quantity of run "run" with the central
 finite difference factor*(E[plus]-E[minus])/(2*step) of two other runs.
 
+A run with "optional": true (e.g. the long runs behind the tables of a
+paper) is skipped unless it is named explicitly ("case:run") or the
+environment variable VESPAW_REGRESSION_OPTIONAL=1 is set.
+
 Runs listed in "known_issues" are executed and reported, but their checks
 do not count towards the pass/fail result. All stages of one run share a
 work directory, so later stages can continue from the restart file of an
@@ -129,6 +133,10 @@ def run_case(case_dir, env, binary, only_runs=None, keep=False):
 
     for run_name, run in spec["runs"].items():
         if only_runs and run_name not in only_runs:
+            continue
+        if (run.get("optional") and not only_runs
+                and os.environ.get("VESPAW_REGRESSION_OPTIONAL") != "1"):
+            print(f"  [SKIP] {run_name}: optional run (VESPAW_REGRESSION_OPTIONAL=1 to include)")
             continue
         stages = run.get("stages", [run])
         work = case_dir / "work" / run_name
