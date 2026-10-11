@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.1 — 2026-10-11
+
+First release archived on Zenodo, which assigns it a DOI. The code and
+all results are unchanged from 1.0.0.
+
 ## 1.0.0 — 2026-10-11, first public release
 
 VESPAW is derived from CP-PAW (see README). Compared with CP-PAW:
