@@ -8,6 +8,7 @@ authors:
     affiliation: "Helmholtz Institute Ulm (HIU) / Karlsruhe Institute of Technology (KIT)"
 license: GPL-3.0-only
 version: "1.0.1"
+doi: "10.5281/zenodo.23295633"
 date-released: "2026-10-11"
 repository-code: "https://github.com/m-sotoudeh/VESPAW"
 keywords:

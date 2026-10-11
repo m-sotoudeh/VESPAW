@@ -13,6 +13,7 @@
 <p align="center">
   <a href="https://github.com/m-sotoudeh/VESPAW/actions/workflows/ci.yml"><img src="https://github.com/m-sotoudeh/VESPAW/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/m-sotoudeh/VESPAW/releases/latest"><img src="https://img.shields.io/github/v/release/m-sotoudeh/VESPAW" alt="Release"></a>
+  <a href="https://doi.org/10.5281/zenodo.23295633"><img src="https://zenodo.org/badge/DOI/10.5281/zenodo.23295633.svg" alt="DOI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="License: GPL-3.0"></a>
   <img src="https://img.shields.io/badge/Fortran-OpenMP%20%7C%20MPI-734f96" alt="Fortran, OpenMP, MPI">
   <img src="https://img.shields.io/badge/platforms-Linux%20%7C%20macOS-lightgrey" alt="Linux, macOS">
@@ -124,6 +125,9 @@ correction of the PBE reduced gradient).
 
 If you use VESPAW, please cite
 
+- the software: M. Sotoudeh, *VESPAW: variational electronic structure
+  with projector augmented waves*, Zenodo,
+  [doi:10.5281/zenodo.23295633](https://doi.org/10.5281/zenodo.23295633);
 - the variational self-consistency method: M. Sotoudeh, *The Kohn–Sham
   Hamiltonian as the variational object* (manuscript in preparation, 2026);
 - the PAW method: P. E. Blöchl, Phys. Rev. B **50**, 17953 (1994);
