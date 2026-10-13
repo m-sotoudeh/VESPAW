@@ -99,18 +99,18 @@ VESPAW adds
 \begin{itemize}
 \item a \emph{variational} self-consistency optimizer, whose energies
   are upper bounds of the ground-state energy in every iteration
-  (chapter~\ref{chap:variational});
+  (Chapter~\ref{chap:variational});
 \item iterative eigensolvers (block Davidson, RMM-DIIS, conjugate
   gradients) next to the damped dynamics of CP-PAW
-  (chapter~\ref{chap:eigensolvers});
+  (Chapter~\ref{chap:eigensolvers});
 \item functionals checked against libxc and VASP, the SCAN family
   (SCAN-L, and SCAN and r$^2$SCAN with the orbital kinetic-energy
   density), and the
   local hybrids \pbeslzero\ and \scanzero, which build on \pbezero\
-  (chapters~\ref{chap:dft} and~\ref{chap:hybrids});
+  (Chapters~\ref{chap:dft} and~\ref{chap:hybrids});
 \item quality checks for PAW setups, an audited setup library
-  (chapter~\ref{chap:paw}) and a regression suite
-  (chapter~\ref{chap:code}).
+  (Chapter~\ref{chap:paw}) and a regression suite
+  (Chapter~\ref{chap:code}).
 \end{itemize}
 
 \paragraph{License.} CP-PAW is distributed under the GNU General Public
@@ -123,11 +123,12 @@ of the inherited source files predates the GPL release.
 
 Chapters~\ref{chap:dft} to~\ref{chap:paw} summarize the physics that
 VESPAW implements: density-functional theory, plane waves and the PAW
-method. Chapter~\ref{chap:hybrids} treats the local hybrid functionals.
+method, including core-level spectra. Chapter~\ref{chap:hybrids} treats
+hybrid and local hybrid functionals.
 Chapters~\ref{chap:variational} and~\ref{chap:eigensolvers} describe how
 the Kohn--Sham equations are solved, which is where VESPAW differs most
 from other codes. Chapter~\ref{chap:forces} covers forces, stress and
-molecular dynamics, and chapter~\ref{chap:code} the structure of the
+molecular dynamics, and Chapter~\ref{chap:code} the structure of the
 program. The hands-on tutorial (\texttt{doc/tutorial.pdf}) puts all of
 this into practice.
 
@@ -163,20 +164,139 @@ their parameters were checked against independent implementations.
 
 % =====================================================================
 
+\section{The many-electron problem}
+
+\paragraph{Hamiltonian.} A system of nuclei at positions
+$\bm R_1,\dots,\bm R_M\equiv\bm R$ with masses $M_I$ and charges $Z_I$,
+and of $N$ electrons with coordinates $\bm x_i=(\bm r_i,s_i)$, combining
+position and spin, is described by the Hamiltonian
+\begin{equation}
+  \hat H = \underbrace{-\sum_I\frac{\nabla^2_{\bm R_I}}{2M_I}}_{\hat T_{\mathrm N}}
+  \underbrace{-\sum_i\tfrac12\nabla^2_{\bm r_i}}_{\hat T_{\mathrm e}}
+  +\underbrace{\sum_{i<j}\frac{1}{|\bm r_i-\bm r_j|}}_{\hat V_{\mathrm{ee}}}
+  \underbrace{-\sum_{i,I}\frac{Z_I}{|\bm r_i-\bm R_I|}}_{\hat V_{\mathrm{eN}}}
+  +\underbrace{\sum_{I<J}\frac{Z_IZ_J}{|\bm R_I-\bm R_J|}}_{\hat V_{\mathrm{NN}}} .
+  \label{eq:fullH}
+\end{equation}
+In principle, every property of molecules and solids follows from the
+eigenstates of this operator. In practice, the number of electronic
+configurations grows exponentially with the number of electrons, and
+the problem must be simplified before it can be solved.
+
+\paragraph{Born--Oppenheimer approximation.} Nuclei are more than three
+orders of magnitude heavier than electrons. Born and
+Oppenheimer~\cite{born27_ap84_457,born54_book} therefore first solve the
+electronic problem for fixed nuclei,
+\begin{equation}
+  \hat H_{\mathrm e}(\bm R)\,\Phi_k(\bm x;\bm R)=E_k(\bm R)\,\Phi_k(\bm x;\bm R),
+  \qquad
+  \hat H_{\mathrm e}=\hat T_{\mathrm e}+\hat V_{\mathrm{ee}}+\hat V_{\mathrm{eN}}+\hat V_{\mathrm{NN}},
+  \label{eq:bo}
+\end{equation}
+and expand the full wave function as
+$\Psi(\bm x,\bm R,t)=\sum_k\Phi_k(\bm x;\bm R)\chi_k(\bm R,t)$. This
+expansion is exact. Inserting it into the time-dependent Schr\"odinger
+equation gives equations of motion for the nuclear wave functions
+$\chi_k$ that are coupled through matrix elements of $\nabla_{\bm R}$
+between different electronic states. The Born--Oppenheimer approximation
+neglects these non-adiabatic couplings: the nuclei then move on a single
+potential-energy surface $E_k(\bm R)$. The approximation fails where two
+surfaces come close, within the thermal energy $k_BT$ or within the
+energy of the nuclear motion. Treating the nuclei moreover as classical
+particles gives Newton's equations
+\begin{equation}
+  M_I\ddot{\bm R}_I=-\nabla_{\bm R_I}E_0(\bm R),
+\end{equation}
+which is the basis of molecular dynamics (Chapter~\ref{chap:forces}).
+By the Hellmann--Feynman theorem~\cite{Feynman1939} the force is the
+expectation value $-\bra{\Phi_0}\nabla_{\bm R_I}\hat H_{\mathrm e}\ket{\Phi_0}$.
+What remains is to find the electronic ground state $\Phi_0$ and its
+energy $E_0(\bm R)$.
+
+\paragraph{Variational principle.} For any normalizable, antisymmetric
+trial wave function $\Phi$,
+\begin{equation}
+  E[\Phi]=\frac{\bra{\Phi}\hat H_{\mathrm e}\ket{\Phi}}{\braket{\Phi}{\Phi}}\ge E_0,
+  \label{eq:ritz}
+\end{equation}
+with equality only for the ground state. Wave-function methods restrict
+$\Phi$ to a subspace: Hartree--Fock theory to a single Slater
+determinant, configuration interaction to linear combinations of
+determinants~\cite{szabo89_book}. Their accuracy can be improved
+systematically by enlarging the subspace, but the cost grows so steeply
+that only small systems can be treated. Density-functional theory
+avoids this cost by replacing the many-electron wave function with the
+density. The upper-bound property of Eq.~\eqref{eq:ritz} carries over
+to it, and it is the foundation of the variational optimizer of
+Chapter~\ref{chap:variational}.
+
+\section{Hohenberg--Kohn theorems}
+
+The electron density
+\begin{equation}
+  n(\bm r)=N\sum_{s}\int d^4x_2\cdots\int d^4x_N\,
+  |\Phi(\bm r s,\bm x_2,\dots,\bm x_N)|^2,
+  \qquad \int d^4x:=\sum_s\int d^3r,
+\end{equation}
+depends on three coordinates only. Hohenberg and
+Kohn~\cite{HohenbergKohn1964} showed that it nevertheless determines
+all ground-state properties.
+
+\paragraph{First theorem.} The external potential is determined, up to a
+constant, by the ground-state density. Suppose that two potentials
+$v_1$ and $v_2$, which differ by more than a constant, lead to
+non-degenerate ground states $\Phi_1$ and $\Phi_2$ with the same density
+$n$. Because $\Phi_2$ is not the ground state of $\hat H_1$,
+\begin{equation}
+  E_1<\bra{\Phi_2}\hat H_1\ket{\Phi_2}
+  =\bra{\Phi_2}\hat H_2\ket{\Phi_2}+\bra{\Phi_2}\hat H_1-\hat H_2\ket{\Phi_2}
+  =E_2+\int d^3r\,n(\bm r)\bigl[v_1(\bm r)-v_2(\bm r)\bigr].
+\end{equation}
+Exchanging the indices gives
+$E_2<E_1+\int d^3r\,n\,(v_2-v_1)$, and the sum of both inequalities
+gives the contradiction $E_1+E_2<E_1+E_2$. Since $v$ fixes the
+Hamiltonian, the density fixes the ground state and all properties
+derived from it.
+
+\paragraph{Second theorem.} The energy can be written as
+\begin{equation}
+  E_v[n]=F[n]+\int d^3r\,v(\bm r)\,n(\bm r),
+  \qquad
+  F[n]=\min_{\Phi\to n}\bra{\Phi}\hat T_{\mathrm e}+\hat V_{\mathrm{ee}}\ket{\Phi},
+  \label{eq:levy}
+\end{equation}
+where $F$ is a universal functional, the same for all systems, and the
+minimum runs over all wave functions with density $n$ (constrained
+search of Levy~\cite{levy79_pnas76_6062}, which also removes the
+restriction to non-degenerate ground states). By
+Eq.~\eqref{eq:ritz}, $E_v[n]$ is minimized by the ground-state density,
+and its minimum is the ground-state energy. If $F$ were known, the
+many-electron problem would be solved for all external potentials at
+once. The theorems hold for the ground state only; excited states
+require extensions such as time-dependent density-functional theory.
+
 \section{Kohn--Sham equations}
 
-By the Hohenberg--Kohn theorem~\cite{HohenbergKohn1964} the ground-state
-energy of $N$ interacting electrons in an external potential
-$v_{\mathrm{ext}}$ is a functional of the density $n(\bm r)$. Kohn and
-Sham~\cite{KohnSham1965} write it in terms of non-interacting orbitals
+The kinetic energy is the largest part of $F[n]$ and the hardest to
+express directly by the density. Kohn and Sham~\cite{KohnSham1965}
+therefore introduce a fictitious system of non-interacting electrons
+that has the same density as the interacting one. Its kinetic energy
+$T_s$ is calculated exactly from its orbitals, and only the remainder is
+approximated. With non-interacting orbitals
 $\psi_n$ with occupations $f_n$,
 \begin{equation}
   E[n] = \sum_n f_n \bra{\psi_n}-\tfrac12\nabla^2\ket{\psi_n}
   + \int d^3r\, v_{\mathrm{ext}} n
   + \frac12\iint d^3r\,d^3r'\,\frac{n(\bm r)n(\bm r')}{|\bm r-\bm r'|}
   + E_{\mathrm{xc}}[n],
-  \qquad n(\bm r)=\sum_n f_n|\psi_n(\bm r)|^2 .
+  \qquad n(\bm r)=\sum_n f_n|\psi_n(\bm r)|^2 ,
+  \label{eq:eks}
 \end{equation}
+the terms are the kinetic energy of the non-interacting electrons, the
+interaction with the external potential of the nuclei, the Hartree
+energy, and the exchange-correlation energy, which contains everything
+else. The nuclear repulsion $V_{\mathrm{NN}}$ is a constant for fixed
+nuclei and is added to $E$; it matters for forces and stress.
 Minimizing with orthonormal orbitals gives the Kohn--Sham equations
 \begin{equation}
   \Bigl[-\tfrac12\nabla^2 + v_{\mathrm{eff}}(\bm r)\Bigr]\psi_n = \epsilon_n\psi_n,
@@ -190,14 +310,102 @@ potential is the functional derivative of the energy. This condition is
 easy to state and easy to violate in an implementation; VESPAW tests it
 routinely (Sec.~\ref{sec:consistency}).
 
+\section{The exchange-correlation energy}
+
+\paragraph{Exchange-correlation hole.} If the electrons were
+uncorrelated, the probability of finding one electron at $\bm r$ and
+another at $\bm r'$ would be the product $n(\bm r)n(\bm r')$, and their
+interaction would be the Hartree energy. Real electrons avoid each
+other, because of the Pauli principle (exchange) and because of their
+Coulomb repulsion (correlation). The pair density is therefore written
+as
+\begin{equation}
+  n^{(2)}(\bm r,\bm r')=n(\bm r)\bigl[n(\bm r')+h(\bm r,\bm r')\bigr],
+\end{equation}
+where the exchange-correlation hole $h(\bm r,\bm r')$ describes the
+depletion of density around an electron at $\bm r$. It obeys the sum rule
+\begin{equation}
+  \int d^3r'\,h(\bm r,\bm r')=-1:
+\end{equation}
+an electron sees exactly $N-1$ others. The electron--electron
+interaction becomes the Hartree energy plus the interaction of each
+electron with its own hole,
+\begin{equation}
+  V_{\mathrm{ee}}=E_{\mathrm H}+U_{\mathrm{xc}},\qquad
+  U_{\mathrm{xc}}=\frac12\int d^3r\,n(\bm r)\int d^3r'\,\frac{h(\bm r,\bm r')}{|\bm r-\bm r'|}.
+\end{equation}
+$U_{\mathrm{xc}}$ is not yet $E_{\mathrm{xc}}$. The exchange-correlation
+energy also contains the difference $T-T_s$ between the kinetic energy
+of the interacting electrons and that of the Kohn--Sham system.
+
+\paragraph{Adiabatic connection.} Both contributions are combined by
+switching on the interaction, $\hat V_{\mathrm{ee}}\to\lambda\hat
+V_{\mathrm{ee}}$, while an external potential keeps the density
+fixed~\cite{harris74_jpf4_1170,langreth75_ssc17_1425,gunnarsson76_prb13_4274}.
+At $\lambda=0$ one has the Kohn--Sham system, at $\lambda=1$ the real
+one. Integrating over $\lambda$ gives
+\begin{equation}
+  E_{\mathrm{xc}}=\int_0^1 d\lambda\,U_{\mathrm{xc}}^\lambda
+  =\frac12\int d^3r\,n(\bm r)\int d^3r'\,\frac{\bar h(\bm r,\bm r')}{|\bm r-\bm r'|},
+  \qquad
+  \bar h=\int_0^1 d\lambda\,h^\lambda ,
+  \label{eq:adiabatic}
+\end{equation}
+so the exchange-correlation energy is the electrostatic energy of the
+electrons with their coupling-constant-averaged hole; the kinetic part
+is absorbed in $\bar h$. At $\lambda=0$ the hole is the exchange hole of
+the Kohn--Sham determinant, and $U_{\mathrm{xc}}^0$ is the exact
+(Hartree--Fock-like) exchange energy $E_x$ evaluated with the
+Kohn--Sham orbitals. Eq.~\eqref{eq:adiabatic} is the starting point of
+the hybrid functionals (Chapter~\ref{chap:hybrids}). The sum rule
+explains why simple approximations of $\bar h$ work better than one
+might expect: only the spherical average of the hole enters the energy,
+and its normalization is fixed.
+
+\paragraph{Self-interaction.} For a single electron, with density
+$n_\uparrow=n$, $n_\downarrow=0$, there is no electron--electron
+interaction. The exact functional must then satisfy
+\begin{equation}
+  E_{\mathrm{xc}}[n,0]=-E_{\mathrm H}[n],\qquad E_c[n,0]=0 :
+\end{equation}
+exchange cancels the spurious interaction of the electron with itself
+in the Hartree term. Semilocal functionals violate this condition. The
+self-interaction error $E_{\mathrm H}[n]+E_{\mathrm{xc}}[n,0]$ delocalizes
+electrons, in particular the $d$ and $f$ electrons of transition-metal
+and rare-earth compounds, and reduces band gaps. Exact exchange is free
+of self-interaction; this is the motivation for the hybrid functionals
+of Chapter~\ref{chap:hybrids}.
+
 \section{Exchange-correlation functionals}
 
-\paragraph{LDA and GGA.} The local-density approximation uses the
-exchange-correlation energy per electron of the homogeneous electron gas,
-$E_{\mathrm{xc}}=\int n\,\epsilon_{\mathrm{xc}}(n)$ (PZ~\cite{perdew81_prb23_5048},
-PW92~\cite{perdew92_prb45_13244}). Generalized gradient approximations add a
-dependence on $|\nabla n|$; the default in VESPAW is
-PBE~\cite{perdew96_prl77_3865}. All functionals are selected by
+\paragraph{LDA.} The local-density approximation, proposed by Kohn and
+Sham~\cite{KohnSham1965}, takes at each point the exchange-correlation
+energy per electron $\epsilon_{\mathrm{xc}}^{\mathrm{hom}}$ of the
+homogeneous electron gas with the local density,
+\begin{equation}
+  E_{\mathrm{xc}}^{\mathrm{LDA}}=\int d^3r\,n(\bm r)\,\epsilon_{\mathrm{xc}}^{\mathrm{hom}}\bigl(n(\bm r)\bigr).
+\end{equation}
+Exchange is known analytically; correlation is parametrized from the
+quantum Monte Carlo data of Ceperley and Alder~\cite{ceperley80_prl45_566}
+(PZ~\cite{perdew81_prb23_5048}, PW92~\cite{perdew92_prb45_13244}). The LDA
+works well for many solids, but it overbinds, severely so for molecules.
+
+\paragraph{GGA.} Generalized gradient
+approximations~\cite{langreth83_prb28_1809} multiply the LDA energy density
+by an enhancement factor that depends on the density and its gradient,
+\begin{equation}
+  E_{\mathrm{xc}}^{\mathrm{GGA}}=\int d^3r\,n\,\epsilon_{x}^{\mathrm{hom}}(n)\,F_{\mathrm{xc}}(r_s,s),
+  \qquad
+  s=\frac{|\nabla n|}{2k_Fn},\qquad k_F=(3\pi^2n)^{1/3},
+\end{equation}
+with the Seitz radius $r_s=(3/4\pi n)^{1/3}$ and the reduced gradient $s$.
+GGAs are not simply the next order of a gradient expansion, which is
+poor for real densities; they are constructed to satisfy exact
+conditions such as the sum rule of the hole. They correct most of the
+overbinding of the LDA and made density-functional theory useful in
+chemistry. The default in VESPAW is PBE~\cite{perdew96_prl77_3865}.
+
+\paragraph{Selection.} All functionals are selected by
 \key{!CONTROL!DFT TYPE}, as a number or a name, e.g.\ \key{TYPE='PBE'};
 the VASP \key{GGA} tags are accepted as names. Table~\ref{tab:functionals}
 lists them.
@@ -333,7 +541,7 @@ self-consistency, and for TSCAN it did not converge at all. The
 consistency test of Sec.~\ref{sec:consistency} exposed both.
 
 \paragraph{Pitfall (October 2026).} Three errors made all meta-GGA band
-gaps too small by about 0.3~eV, e.g. 4.93 instead of 5.24~eV for SCAN MgO:
+gaps too small by about 0.3~eV, e.g.\ 4.93 instead of 5.24~eV for SCAN MgO:
 the setups were built from an atom without exchange and correlation, the
 one-center $\tau$ lacked the factor $\frac12$, and the pseudized core
 $\tau$ was missing in the plane-wave part. The energy and the
@@ -360,11 +568,11 @@ is exact and allows any spin-unpolarized exchange functional to be
 applied to a spin-polarized density. VESPAW uses it for the exchange of
 the SCAN family, on the grid and in the one-center terms. Correlation
 does not obey Eq.~\eqref{eq:spinscaling}; SCAN correlation is evaluated
-for the spin densities with the spin-interpolation of
+for the spin densities with the spin interpolation of
 Ref.~\cite{sun15_prl115_036402}: $\phi(\zeta)$ in the gradient term,
 $G_c(\zeta)$ in the single-orbital limit, and $\alpha$ divided by
 $d_s(\zeta)=[(1+\zeta)^{5/3}+(1-\zeta)^{5/3}]/2$ with the total $\tau$.
-For SCAN-L, the spin-resolved kinetic energy densities are deorbitalized
+For SCAN-L, the spin-resolved kinetic-energy densities are deorbitalized
 separately, $\tau[n_\uparrow,n_\downarrow]=\frac12(\tau[2n_\uparrow]+\tau[2n_\downarrow])$,
 as in libxc.
 
@@ -385,7 +593,7 @@ the variational quantity.
 
 \section*{Further reading}
 The original work on the subject of this chapter is found in
-Refs.~\cite{HohenbergKohn1964,KohnSham1965,Mermin1965,perdew96_prl77_3865,sun15_prl115_036402}.
+Refs.~\cite{born27_ap84_457,HohenbergKohn1964,KohnSham1965,levy79_pnas76_6062,gunnarsson76_prb13_4274,Mermin1965,perdew96_prl77_3865,sun15_prl115_036402}.
 
 % =====================================================================
 \chapter{Plane waves and Brillouin-zone sampling}\label{chap:planewaves}
@@ -478,34 +686,67 @@ the checks that make a setup trustworthy.
 
 \section{The PAW transformation}
 
-The PAW method~\cite{bloechl94_prb50_17953} maps the true all-electron
-(AE) valence orbitals $\psi_n$, which oscillate strongly near the nuclei,
-onto smooth pseudo (PS) orbitals $\tilde\psi_n$ by a linear transformation
+The PAW method~\cite{bloechl94_prb50_17953} generalizes the ideas of the
+pseudopotential~\cite{hamann79_prl43_1494} and of the linear
+augmented-wave methods~\cite{anderson75_prb12_3060}. It maps the true
+all-electron (AE) valence orbitals $\psi_n$, which oscillate strongly
+near the nuclei, onto smooth pseudo (PS) orbitals $\tilde\psi_n$ by a
+linear transformation $\ket{\psi_n}=\mathcal T\ket{\tilde\psi_n}$. The
+transformation differs from unity only inside augmentation spheres
+around the atoms, $\mathcal T=1+\sum_R\mathcal T_R$. In each sphere
+we choose AE partial waves $\phi_{R,i}$ (solutions of the atomic
+Schr\"odinger equation at reference energies) and PS partial waves
+$\tilde\phi_{R,i}$, which agree with $\phi_{R,i}$ outside an augmentation
+radius $r_c$, such that $\ket{\phi_{R,i}}=\mathcal T\ket{\tilde\phi_{R,i}}$.
+Inside the sphere a PS orbital is expanded in PS partial waves,
+$\ket{\tilde\psi_n}=\sum_i\ket{\tilde\phi_{R,i}}c_{n,i}$. Because $\mathcal T$
+is linear, the AE orbital has the same coefficients in the AE partial
+waves, $\mathcal T\ket{\tilde\psi_n}=\sum_i\ket{\phi_{R,i}}c_{n,i}$. The
+coefficients are obtained with projector functions $\pt_{R,i}$, localized
+within $r_c$ and dual to the PS partial waves,
+$\braket{\pt_{R,i}}{\tilde\phi_{R,j}}=\delta_{ij}$, as
+$c_{n,i}=\braket{\pt_{R,i}}{\tilde\psi_n}$. This gives
 \begin{equation}
+  \mathcal T=1+\sum_{R,i}\bigl(\ket{\phi_{R,i}}-\ket{\tilde\phi_{R,i}}\bigr)\bra{\pt_{R,i}},
+  \qquad
   \ket{\psi_n}=\ket{\tilde\psi_n}
   +\sum_{R,i}\bigl(\ket{\phi_{R,i}}-\ket{\tilde\phi_{R,i}}\bigr)
   \braket{\pt_{R,i}}{\tilde\psi_n}.
+  \label{eq:pawtrafo}
 \end{equation}
-Here $\phi_{R,i}$ are AE partial waves (solutions of the atomic
-Schr\"odinger equation at reference energies), $\tilde\phi_{R,i}$ the
-corresponding PS partial waves, which agree with $\phi_{R,i}$ outside an
-augmentation radius $r_c$, and $\pt_{R,i}$ projector functions, localized
-within $r_c$ and dual to the PS partial waves,
-$\braket{\pt_{R,i}}{\tilde\phi_{R,j}}=\delta_{ij}$. The index $i$ collects
-the angular momentum $(\ell,m)$ and a counter $\nu$ over partial waves of
-the same $\ell$. The number of partial waves per $\ell$ is set by
-\key{!STRUCTURE!SPECIES NPRO}.
+In words: inside each sphere the smooth part
+$\sum_i\ket{\tilde\phi_{R,i}}\braket{\pt_{R,i}}{\tilde\psi_n}$ is removed and
+replaced by its AE counterpart. The expansion is exact for complete sets
+of partial waves; in practice one or two partial waves per angular
+momentum suffice. The index $i$ collects the angular momentum $(\ell,m)$
+and a counter $\nu$ over partial waves of the same $\ell$. The number of
+partial waves per $\ell$ is set by \key{!STRUCTURE!SPECIES NPRO}.
 
-Expectation values split into a plane-wave part and one-center
-corrections,
-\begin{equation}
+\paragraph{Frozen core.} The core states are taken from the isolated
+atom and kept frozen, $\ket{\psi^c_{R,\alpha}}=\ket{\phi^c_{R,\alpha}}$, where
+$\alpha$ runs over the core states of atom $R$. They are not strictly
+localized within the sphere. Expectation values of a local operator $A$
+then split into a plane-wave part, one-center corrections and a core
+term,
+\begin{multline}
   \langle A\rangle = \sum_n f_n\bra{\tilde\psi_n}\tilde A\ket{\tilde\psi_n}
   + \sum_R\sum_{ij}D_{R,ij}\bigl(\bra{\phi_{R,j}}A\ket{\phi_{R,i}}
-  -\bra{\tilde\phi_{R,j}}\tilde A\ket{\tilde\phi_{R,i}}\bigr),
-  \qquad
+  -\bra{\tilde\phi_{R,j}}\tilde A\ket{\tilde\phi_{R,i}}\bigr)
+  + \sum_{R,\alpha}\bra{\phi^c_{R,\alpha}}A\ket{\phi^c_{R,\alpha}},
+  \\
   D_{R,ij}=\sum_n f_n\braket{\pt_{R,i}}{\tilde\psi_n}\braket{\tilde\psi_n}{\pt_{R,j}},
+\end{multline}
+with the one-center density matrix $D_{R,ij}$. For the density
+($A=\ket{\bm r}\bra{\bm r}$) this gives
+\begin{equation}
+  n(\bm r)=\tilde n(\bm r)+\sum_R\bigl(n^1_R(\bm r)-\tilde n^1_R(\bm r)\bigr),
+  \qquad
+  n^1_R=\sum_{ij}D_{R,ij}\,\phi_{R,j}\phi_{R,i}+n^c_R,
 \end{equation}
-and the total energy becomes $E=\tilde E+\sum_R(E^1_R-\tilde E^1_R)$: a
+where $\tilde n=\sum_nf_n|\tilde\psi_n|^2$ (plus the pseudized core
+density) is smooth and represented on the plane-wave grid, while the
+one-center densities $n^1_R$ and $\tilde n^1_R$ are represented on radial
+grids times spherical harmonics. The total energy becomes $E=\tilde E+\sum_R(E^1_R-\tilde E^1_R)$: a
 plane-wave term plus, for each atom, the difference of an AE and a PS
 one-center energy evaluated on radial grids. The orbitals are orthonormal
 with respect to the overlap operator
@@ -608,15 +849,79 @@ the error grows with the augmentation radius; a semicore Cu setup with
 small radii reaches 0.5\% at a high cutoff. Accurate soft $3d$ setups are
 an open problem (see the audit).
 
+\section{Core-level spectra}\label{sec:eels}
+
+Because PAW keeps the AE partial waves and the frozen core states,
+matrix elements between core and band states are available. VESPAW uses
+them for electron-energy-loss near-edge spectra (ELNES), with
+\key{!CONTROL!ANALYSE!EELS}. The same analysis applies to x-ray
+absorption near-edge spectra (XANES), which also probe the excitation of
+a core electron into empty states. The spectrum is the loss function
+\begin{equation}
+  L(\omega)=-\mathrm{Im}\bigl[\epsilon_r^{-1}(\omega)\bigr],
+  \qquad
+  \epsilon_r(\omega)=1+4\pi\frac{N}{V}\sum_{n}(1-f_n)
+  \frac{Q_n}{(\epsilon_n-\epsilon_c)^2-\omega^2-i\Gamma\omega},
+\end{equation}
+following Wooten~\cite{wooten72_book}, where $N/V$ is the number density
+of the probed atom, $\epsilon_c$ the core level and $\epsilon_n$ the
+energy of an empty Kohn--Sham state. The oscillator strengths are
+\begin{equation}
+  Q_n=2\sum_c(\epsilon_n-\epsilon_c)\,\frac13\sum_{j=1}^3
+  \bigl|\bra{\psi_c}x_j\ket{\psi_n}\bigr|^2 ,
+\end{equation}
+where $c$ runs over the states of the core shell (\key{IC}). The core
+state is localized, so the band state can be replaced by its one-center
+expansion, $\ket{\psi_n}\approx\sum_i\ket{\phi_{R,i}}\braket{\pt_{R,i}}{\tilde\psi_n}$.
+With $\phi_{R,i}(\bm r)=R_i(r)Y_{L_i}(\hat r)$ and the dipole operator
+written with real spherical harmonics, the matrix elements reduce to
+radial integrals and Gaunt coefficients
+$C_{L,L',L''}=\int d\Omega\,Y_LY_{L'}Y_{L''}$,
+\begin{equation}
+  \bra{\psi_c}x_j\ket{\psi_n}=\sqrt{\frac{4\pi}{3}}\sum_i
+  C_{L_c,p_j,L_i}\int dr\,r^3R_c(r)R_i(r)\,\braket{\pt_{R,i}}{\tilde\psi_n},
+\end{equation}
+where $p_j$ denotes the $\ell=1$ harmonic along $x_j$. The spectrum
+therefore measures the empty density of states on the probed atom with
+angular momentum $\ell_c\pm1$.
+
+\paragraph{Broadening.} The width $\Gamma$ is the sum of the core-hole
+and the band-state lifetime broadenings. The core-hole width of a
+$K$ shell is taken from Eq.~12 of
+Egerton~\cite{egerton07_ultramicroscopy107_565},
+$\Gamma_K=[-0.285+0.0216\,(E_{\mathrm{thr}}/\mathrm{eV})^{0.472}]$~eV, with
+the threshold energy $E_{\mathrm{thr}}=-\epsilon_c$; other shells use
+Eq.~14 of the same reference. The band state with energy $\epsilon$
+above the Fermi level decays with the rate $v/\lambda$, where
+$v=\sqrt{2\epsilon}$ is the free-electron velocity and $\lambda$ the
+inelastic mean free path, interpolated as
+$\lambda=A/\epsilon^2+B\sqrt\epsilon$ with $A=641$~eV$^2$\,nm and
+$B=0.096$~nm\,eV$^{-1/2}$ for inorganic compounds~\cite{seah79_surfinterfaceanal1_2}.
+The result is finally convoluted with a Gaussian for the instrumental
+resolution (\key{BROADENING[EV]}).
+
+\paragraph{Limitations.} The calculation uses the independent-particle
+approximation and ignores the core hole; its only effect is a rigid
+shift of the spectrum, which must be adjusted to the experimental
+threshold. A better approximation is a supercell calculation with half
+a core hole on the probed atom (Slater's transition-state rule), and a
+still better one is the solution of the Bethe--Salpeter
+equation~\cite{laskowski10_prb82_205104}. The independent-particle
+approximation is adequate for the oxygen $K$ edge ($1s\to2p$), where the
+core hole is strongly screened~\cite{davoli86_prb33_2979}. It is not
+adequate for transition-metal $L_{2,3}$ edges, whose shape is dominated
+by multiplet effects from the overlap of the $2p$ hole with the $3d$
+electrons.
+
 
 \section*{Further reading}
 The original work on the subject of this chapter is found in
-Refs.~\cite{bloechl94_prb50_17953,KresseJoubert1999}.
+Refs.~\cite{bloechl94_prb50_17953,KresseJoubert1999,egerton07_ultramicroscopy107_565}.
 
 % =====================================================================
 \chapter{Local hybrid functionals}\label{chap:hybrids}
 \minitoc
-\section*{Introduction}
+\section{Introduction}
 % =====================================================================
 
 Hybrid functionals admix a fraction $a_x$ of exact exchange and cure
@@ -626,6 +931,35 @@ expensive than a GGA. Local hybrids of the \pbezero\
 type~\cite{bloechl11_prb84_205101,sotoudeh17_prb95_235150} keep only the
 onsite part of the exchange correction, evaluated in a basis of local
 orbitals, at nearly semilocal cost.
+
+\section{Hybrid functionals}
+
+The adiabatic connection, Eq.~\eqref{eq:adiabatic}, writes the
+exchange-correlation energy as an integral of $U_{\mathrm{xc}}^\lambda$
+from the non-interacting ($\lambda=0$) to the fully interacting
+($\lambda=1$) system. At $\lambda=0$ the integrand is the exact exchange
+energy of the Kohn--Sham determinant; near $\lambda=1$ a semilocal
+functional is a good approximation. Becke~\cite{becke93_jcp98_1372}
+approximated the integral by the trapezoidal rule,
+$E_{\mathrm{xc}}\approx\frac12E_x^{\mathrm{HF}}+\frac12U_{\mathrm{xc}}^{\lambda=1}$,
+and obtained the ``half-and-half'' functional. If the integrand is a
+convex rather than a straight function of $\lambda$, a smaller weight of
+exact exchange is appropriate. The general form of a hybrid is
+\begin{equation}
+  E_{\mathrm{xc}}^{\mathrm{hybrid}}=E_{\mathrm{xc}}^{\mathrm{GGA}}
+  +a_x\bigl(E_x^{\mathrm{HF}}-E_x^{\mathrm{GGA}}\bigr).
+  \label{eq:hybrid}
+\end{equation}
+Perdew, Ernzerhof and Burke~\cite{perdew96_jcp105_9982} argued from
+perturbation theory that $a_x=\frac14$ is a good choice with PBE, which
+gives PBE0~\cite{adamo99_jcp110_6158}. The most widely used hybrid in
+chemistry, B3LYP~\cite{stephens94_jpc98_11623}, is a generalization of
+Becke's three-parameter form~\cite{becke93_jcp98_5648}. Hybrids improve
+binding energies, reaction energies and band gaps over GGAs. In
+transition-metal oxides they open the gaps that semilocal functionals
+close, because exact exchange stabilizes occupied orbitals relative to
+empty orbitals of the same character, and removes the self-interaction
+of the localized $d$ and $f$ electrons.
 
 \section{Local orbitals}
 
@@ -638,11 +972,17 @@ partial wave $\phi$ and its energy derivative $\dot\phi$,
   K^{\mathrm{aug}} = \phi\,k_\phi+\dot\phi\,k_{\dot\phi},
 \end{equation}
 matched to a Hankel function with $\kappa^2$ set by \key{K2}. In the
-spheres of the neighbours it is continued by screened Bessel functions
+spheres of the neighbors it is continued by screened Bessel functions
 $\bar J^{\mathrm{aug}}=\dot\phi\,j_{\dot\phi}$ with the structure constants
 $\bar S$. Exponential tails (\key{TAILLAMBDA}, \key{RTAIL/RCOV}) and a
 cutoff (\key{RTAILCUT/RCOV}) make the orbitals short ranged. The
 orbitals considered per $\ell$ are selected by \key{NOFL}.
+
+The construction follows the tight-binding linear muffin-tin orbital
+method~\cite{anderson75_prb12_3060,andersen84_prl53_2571}: only the
+nodeless scattering partial waves are admitted on the neighboring
+sites, the same framework of nodeless partial waves that is used for
+the augmentation~\cite{bloechl12_arxiv1210_5937}.
 
 \section{Projection onto the local orbitals}\label{sec:projection}
 
@@ -692,6 +1032,21 @@ PAW Hamiltonian $\Delta H$ (derivative with respect to the full one-center
 density) and an operator in the local-orbital basis (derivative with
 respect to $D$).
 
+\paragraph{Design choices.} In contrast to other local
+hybrids~\cite{novak06_pssb243_563,tran06_prb74_155108}, which correct
+only the $d$ or $f$ shell of selected atoms, \pbezero\ includes the
+correction on all atoms and for all local orbitals that contribute to
+the valence or contain core states, including the exchange between
+core and valence electrons. Applying the correction to a subset of
+orbitals would shift them in energy relative to the uncorrected ones;
+including all orbitals avoids such artificial shifts. Because the
+correction is onsite, the mixing factor can be chosen per atom, which
+reflects an effective local dielectric screening. The common value
+$a_x=0.25$ is not always appropriate: in Pr manganites it made the
+observed configuration of the Pr $4f$ shell unstable, and the mixing
+was adjusted per species to reproduce the observed spectral
+features~\cite{sotoudeh17_prb95_235150}.
+
 \section{\pbeslzero}\label{sec:pbesl0r}
 
 \pbeslzero\ (called \scanzero\ before October 2026) replaces the semilocal
@@ -727,7 +1082,7 @@ damped dynamics reach the same state (Sec.~\ref{sec:consistency}).
 
 \section{\scanzero}\label{sec:scan0r}
 
-\scanzero\ uses SCAN with the orbital kinetic energy density everywhere,
+\scanzero\ uses SCAN with the orbital kinetic-energy density everywhere,
 for the plane-wave density and in the spheres, for exchange and
 correlation, and replaces a fraction $a_x$ of the onsite SCAN exchange of
 the local orbitals by exact exchange:
@@ -749,7 +1104,7 @@ r$^2$SCAN everywhere and in the double counting.
 
 \section*{Further reading}
 The original work on the subject of this chapter is found in
-Refs.~\cite{adamo99_jcp110_6158,bloechl11_prb84_205101,sotoudeh17_prb95_235150}.
+Refs.~\cite{becke93_jcp98_1372,perdew96_jcp105_9982,adamo99_jcp110_6158,bloechl11_prb84_205101,sotoudeh17_prb95_235150}.
 
 % =====================================================================
 \chapter{Self-consistency: the variational optimizer}\label{chap:variational}
@@ -811,7 +1166,7 @@ positive-definite preconditioned version $K\bm r$, is a descent
 direction; $\chi$ never has to be built. The Kerker filter
 $K(G)=G^2/(G^2+q_0^2)$ is applied to the plane-wave part of the residual,
 with $q_0^2$ set by \key{MIXG0SQ} (default 1.5~bohr$^{-2}$). The default is
-made for solids. For molecules and slabs with large vacuum it damps the
+chosen for solids. For molecules and slabs with large vacuum it damps the
 long-wavelength components so strongly that the gains of a step fall
 below the noise of the iterative eigensolver, and the line search
 stalls; use $q_0^2\approx0.05$--0.1 there.
@@ -924,7 +1279,7 @@ wave functions, using only the action of the Hamiltonian on them. In
 the original Car--Parrinello approach this is done by a fictitious
 dynamics of the wave functions. This chapter describes the iterative
 eigensolvers of VESPAW and the damped dynamics of CP-PAW, and what each
-of them requires to return reliable, orthonormal eigenstates.
+of them requires to return reliable orthonormal eigenstates.
 
 % =====================================================================
 
@@ -970,20 +1325,35 @@ of 4.23~eV). Take band gaps of hybrid calculations from Davidson.
 
 \key{OPTIMIZER='CG'}. Band-by-band preconditioned conjugate-gradient
 minimization of the Rayleigh quotient with orthogonalization to the
-lower bands, followed by a subspace rotation. Reliable, slower than the
-block methods for many bands.
+lower bands, followed by a subspace rotation. It is reliable, but slower
+than the block methods for many bands.
 
 \section{Car--Parrinello dynamics with friction}
 
 The original CP-PAW optimizer (\key{OPTIMIZER='MD'}, the default when no
 eigensolver is chosen) treats the wave-function coefficients as classical
-degrees of freedom with a fictitious mass~\cite{CarParrinello1985},
+degrees of freedom with a fictitious mass $m_\psi$~\cite{CarParrinello1985}.
+Instead of solving the electronic problem at each atomic configuration,
+as in Born--Oppenheimer dynamics, Car and Parrinello propagate orbitals
+and nuclei together with the Lagrangian
+\begin{equation}
+  \mathcal L=\sum_n f_n\,m_\psi\braket{\dot{\tilde\psi}_n}{\dot{\tilde\psi}_n}
+  +\sum_I\tfrac12M_I\dot{\bm R}_I^2
+  -E\bigl[\{\tilde\psi_n\},\{\bm R_I\}\bigr]
+  +\sum_{nm}\Lambda_{mn}\bigl(\bra{\tilde\psi_n}\hat O\ket{\tilde\psi_m}-\delta_{nm}\bigr).
+\end{equation}
+The terms are the fictitious kinetic energy of the orbitals, the kinetic
+energy of the nuclei, the total energy, and the orthonormality
+constraint with Lagrange multipliers $\Lambda$. The Euler--Lagrange
+equations give Newton's equations for the nuclei, with the forces of
+Chapter~\ref{chap:forces}, and, after division by $f_n$ and absorbing
+the occupations into $\Lambda$, the equation of motion of the orbitals
+with an added friction term,
 \begin{equation}
   m_\psi\ddot{\tilde\psi}_n=-\tilde H\tilde\psi_n
   +\sum_m\hat O\tilde\psi_m\Lambda_{mn}-\gamma\,m_\psi\dot{\tilde\psi}_n,
 \end{equation}
-with Lagrange multipliers $\Lambda$ that keep the orbitals orthonormal and
-a friction $\gamma$ (\key{!PSIDYN FRIC}). With friction the dynamics
+with a friction $\gamma$ (\key{!PSIDYN FRIC}). With friction the dynamics
 relaxes into the ground state. The ``autopilot'' (\key{!PSIDYN!AUTO})
 lowers the friction when the energy decreases and raises it when it
 increases. Damped dynamics is slow but very robust, converges to the
