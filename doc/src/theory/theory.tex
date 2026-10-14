@@ -124,7 +124,7 @@ of the inherited source files predates the GPL release.
 Chapters~\ref{chap:dft} to~\ref{chap:paw} summarize the physics that
 VESPAW implements: density-functional theory, plane waves and the PAW
 method, including core-level spectra. Chapter~\ref{chap:hybrids} treats
-hybrid and local hybrid functionals.
+hybrid and local hybrid functionals and DFT+$U$.
 Chapters~\ref{chap:variational} and~\ref{chap:eigensolvers} describe how
 the Kohn--Sham equations are solved, which is where VESPAW differs most
 from other codes. Chapter~\ref{chap:forces} covers forces, stress and
@@ -1101,10 +1101,53 @@ spin-polarized correlation of Chapter~\ref{chap:dft} apply as for SCAN.
 With \key{TYPE='R2SCAN'} the same construction gives r$^2$SCAN0r, with
 r$^2$SCAN everywhere and in the double counting.
 
+\section{DFT+$U$}\label{sec:dftu}
+
+DFT+$U$ is the simplest onsite correction. Instead of exact exchange it
+adds a Hubbard-like penalty for fractional occupations of one shell
+of angular momentum $\ell$ on selected atoms. VESPAW uses the rotationally
+invariant form of Dudarev \emph{et al.}~\cite{dudarev98_prb57_1505},
+\begin{equation}
+  E_U=\frac{U-J}{2}\sum_R\mathrm{Tr}\bigl[\mathsf n_R-\mathsf n_R\mathsf n_R\bigr],
+  \label{eq:dftu}
+\end{equation}
+in which only the difference $U-J$ enters. The penalty vanishes for an
+occupation matrix with eigenvalues 0 and 1 and is largest for
+half-filled orbitals, so it favors integer occupations and opens gaps
+in Mott insulators. The occupation matrix of the shell is obtained from
+the one-center density matrix,
+\begin{equation}
+  n_{R,m s,m's'}=\sum_{\nu\nu'}Q_{R,\nu\nu'}\,D_{R,(\ell m\nu s),(\ell m'\nu' s')},
+  \qquad
+  Q_{R,\nu\nu'}=\int_0^{r_U}dr\,r^2\,R_{\nu}(r)R_{\nu'}(r),
+\end{equation}
+with the radial parts $R_\nu$ of the AE partial waves of the shell,
+integrated up to the radius $r_U$ (\key{RCUT/RCOV}). This is the
+occupation matrix of VASP (\texttt{LDAUTYPE=2}). Because $\mathsf n$ is
+taken as a full spinor matrix, the same expression covers
+non-spin-polarized, collinear and non-collinear calculations. The
+correction enters the one-center Hamiltonian,
+\begin{equation}
+  \Delta H_{R,(\ell m\nu s),(\ell m'\nu' s')}\mathrel{+}=
+  Q_{R,\nu\nu'}\,\frac{\partial E_U}{\partial n_{R,m's',ms}}
+  =Q_{R,\nu\nu'}\,(U-J)\Bigl[\tfrac12\delta_{mm'}\delta_{ss'}-n_{R,ms,m's'}\Bigr],
+\end{equation}
+so that DFT+$U$ is part of $\vth$ and is handled by the variational
+optimizer without special treatment. It is selected per species with
+\key{!STRUCTURE!SPECIES!DFTU L= U[EV]= J[EV]=}. For NiO with $U-J=6.3$~eV
+on the Ni $d$ shell the PBE+$U$ gap is 3.12~eV.
+
+Compared with the local hybrids, DFT+$U$ acts on one shell only, needs
+a parameter that is not fixed by theory, and its result depends on
+the definition of the occupation matrix (here the integration radius),
+so values of $U$ cannot be transferred between codes without care.
+\pbezero\ corrects all orbitals, and its single parameter $a_x$ has the
+meaning of an inverse screening.
+
 
 \section*{Further reading}
 The original work on the subject of this chapter is found in
-Refs.~\cite{becke93_jcp98_1372,perdew96_jcp105_9982,adamo99_jcp110_6158,bloechl11_prb84_205101,sotoudeh17_prb95_235150}.
+Refs.~\cite{becke93_jcp98_1372,perdew96_jcp105_9982,adamo99_jcp110_6158,bloechl11_prb84_205101,sotoudeh17_prb95_235150,dudarev98_prb57_1505}.
 
 % =====================================================================
 \chapter{Self-consistency: the variational optimizer}\label{chap:variational}
@@ -1191,15 +1234,64 @@ The second step does not change any energy, but without it $\vth$ keeps
 its starting gauge while the true potential moves: eigenvalues and Fermi
 level are then offset (0.49~eV in Si), and with them the Lagrange
 multipliers in forces and stress (Chapter~\ref{chap:forces}).
+In cells with much vacuum the mean potential of the output state can
+move by hartrees during the iteration. An offset larger than 0.5~H is
+therefore removed already inside the line search, and the stored
+eigenvalues are shifted with $\vth$; otherwise the preconditioned
+eigensolvers start from eigenvalues that lie far off and stall (H$_2$O
+layer in an 18~\AA\ cell: eigenvalues 66~eV too low, energy 75~mH too
+high).
 
 \section{Line search and acceptance}
 
-Steps are proposed by an Anderson extrapolation built from
-\emph{accepted} points only. A trial $\vth'$ is accepted if
-$\mathcal A(\vth')\le\mathcal A_{\mathrm{best}}+\epsilon$; otherwise the
-step is halved towards the best point. After five consecutive rejections
-the best point is re-evaluated (``re-anchoring''), because its energy may
-stem from an eigensolution that was not fully converged.
+\paragraph{Proposal.} Steps are proposed by an Anderson
+extrapolation~\cite{Anderson1965} built from \emph{accepted} points only,
+with a history of \key{MIXNHISTORY} points (default 4). Each history
+entry is a pair $(\vth_k,K\bm r_k)$; the proposal is
+$\vth+\beta K\bm r$, corrected by the Anderson combination of the earlier
+pairs. The step length $\beta$ starts at 0.3 and stays between 0.02 and
+0.5. It grows by a factor 1.2 after each accepted step, and by 1.5
+within a streak of at least three accepted steps. If the Anderson step
+is more than ten times longer than the plain step $\beta K\bm r$, the
+plain step is used instead, because it is a descent direction.
+
+\paragraph{Acceptance.} A trial point $\vth'$ is accepted if
+\begin{equation}
+  \mathcal A(\vth')\le\mathcal A_{\mathrm{acc}}+\epsilon,
+  \qquad \epsilon=10^{-7}~\mathrm H,
+\end{equation}
+where $\mathcal A_{\mathrm{acc}}$ is the energy of the \emph{last
+accepted} point. The slack $\epsilon$ absorbs the noise of the iterative
+eigensolver. It is measured from the last accepted energy and not from
+the lowest one: with the lowest energy as reference, a single
+evaluation that came out low by chance blocked all later steps of noisy
+runs (H$_2$O in vacuum stalled at a residual of $10^{-3}$). The price is
+that a stalled run can creep upward by up to $\epsilon$ per accepted
+step, so the accepted energies are monotone only within $\epsilon$.
+
+\paragraph{Rejection.} A rejected trial point is not added to the
+history. The response depends on the number of consecutive rejections:
+\begin{enumerate}
+\item after the first, the next trial is the midpoint between the
+  rejected point and the last accepted point;
+\item after the second, the Anderson history is discarded, $\beta$ is
+  halved, and the plain damped step $\beta K\bm r$ is taken from the last
+  accepted point;
+\item further rejections halve the step towards the last accepted
+  point;
+\item after five consecutive rejections, the last accepted point is
+  evaluated again and accepted whatever its energy (``re-anchoring''),
+  because its stored energy may stem from eigenstates that were less
+  converged than the present ones.
+\end{enumerate}
+$\beta$ is halved once per rejection episode, not at every rejection;
+halving it at every backtracking step made it collapse to its lower
+bound, from which it needed some 20 accepted steps to recover (fcc Al:
+77 instead of 14 iterations). A rejection right after a single accepted
+backtracking step also halves $\beta$. Without this rule the iteration
+can fall into a period-2 cycle, in which the full step always overshoots
+and its half is always accepted (NiO: half of the trial points
+rejected).
 
 \begin{algorithm}[t]
 \caption{Hamiltonian-space variational SCF (Route 1).}
@@ -1209,21 +1301,30 @@ stem from an eigensolution that was not fully converged.
   \State diagonalize $\tilde H[\vth]$ (Davidson, RMM-DIIS or CG); Fermi occupations at fixed $N$
   \State evaluate $\mathcal A(\vth)$ at the output state; build $\vout$
   \State $\bm r\gets\vout-\vth$; project out $\bm s$
-  \If{$\mathcal A(\vth)\le\mathcal A_{\mathrm{best}}+\epsilon$}
-    \State accept; add $(\vth,K\bm r)$ to the history; stop if converged
-    \State $\vth\gets$ Anderson proposal
+  \If{$\mathcal A(\vth)\le\mathcal A_{\mathrm{acc}}+\epsilon$}
+    \State accept: $\mathcal A_{\mathrm{acc}}\gets\mathcal A(\vth)$; add $(\vth,K\bm r)$ to the history; stop if converged
+    \State $\vth\gets$ Anderson proposal with step length $\beta$
   \Else
-    \State $\vth\gets\frac12(\vth+\vth_{\mathrm{best}})$ \Comment{re-anchor after 5 rejections}
+    \State backtrack towards the last accepted point; drop the history after two rejections
+    \State re-evaluate the last accepted point after five rejections
   \EndIf
   \State re-gauge $\vth$ along $\bm s$ to the mean grid potential of $\vout$
 \EndLoop
 \end{algorithmic}
 \end{algorithm}
 
-Convergence is reached when the mean-square grid residual is below
-\key{MIXTOL} (and the one-center residual below its square root), or when
-two consecutive accepted energies differ by less than \key{EDIFF}. Route 1
-is selected by \key{!PSIDYN MIXER='VARIATIONAL'} together with
+\paragraph{Convergence.} The run stops when the mean-square grid
+residual of an accepted point is below \key{MIXTOL} and the largest
+one-center residual (of $\Delta H$ and $v_\tau$) below its square root;
+the grid alone can converge while $\Delta H$ still lags, leaving the energy
+tens of microhartree high. It also stops after two consecutive accepted
+steps that each lowered the energy by less than \key{EDIFF}, provided
+that both were full-length steps ($\beta\ge0.25$) not preceded by a
+rejection, because after backtracking a small gain only reflects a
+short step. Neither criterion proves that the state is the minimum; the
+certificates of Sec.~\ref{sec:certificates} test that.
+
+Route 1 is selected by \key{!PSIDYN MIXER='VARIATIONAL'} together with
 \key{OPTIMIZER='DAV'}, \key{'RMM'} or \key{'CG'}; it is the default mixer.
 
 \paragraph{Hybrid operators.} The onsite hybrid operator of
@@ -1254,17 +1355,101 @@ reaches the minimum.
 The variational optimizer minimizes the energy. Damped Car--Parrinello
 dynamics (Chapter~\ref{chap:eigensolvers}) and density mixing converge to
 a self-consistent state. The two coincide only if the Hamiltonian is the
-derivative of the energy. Agreement between them, to $10^{-6}$~H or
-better, is therefore a sharp test of any new functional or
-implementation: a missing potential term shows up as the variational
-optimizer finding energies \emph{below} the self-consistent state without
-converging. The regression suite (Chapter~\ref{chap:code}) applies this
-test to every case.
+derivative of the energy. A missing potential term often shows up as
+the variational optimizer finding energies \emph{below} the
+self-consistent state without converging, or as many rejected steps.
+The regression suite (Chapter~\ref{chap:code}) therefore compares
+optimizers in every case.
+
+The test is sensitive but not sufficient. When the Hamiltonian deviates
+from the derivative only a little, all optimizers follow the same wrong
+Hamiltonian and agree with each other. In MgO with \scanzero, a
+double-counting term that subtracted the potential of the core
+kinetic-energy density (Chapter~\ref{chap:dft}) left the energy correct
+but the Hamiltonian inconsistent. Pulay and Anderson mixing, Route~1
+with Davidson and RMM-DIIS, and friction dynamics all reported
+convergence and agreed within 0.25~meV, at a state 7.5~meV above the
+minimum with a band gap 42~meV too small. Route~1 rejected only one to
+nine steps. For a charged cell and for NiO the signal was strong, with
+more than a third of the steps rejected. The direct test is the Janak
+certificate of the next section.
+
+\section{Certificates of a converged state}\label{sec:certificates}
+
+A small residual and a small change of the energy are necessary
+conditions for convergence, but they are not sufficient. They are also
+fulfilled by a calculation that has stalled, and by the self-consistent
+solution of a Hamiltonian that is not the derivative of the reported
+energy. The variational formulation provides two tests of a final
+state, which can be applied to the result of any optimizer, and of any
+code.
+
+\paragraph{C1: descent probe.} The final state is used as the start of
+Route~1. Because Route~1 accepts only steps that do not raise
+$\mathcal A$ (within $\epsilon$), a decrease of the energy by more than
+the tolerance proves that the state was not stationary, and it yields a
+lower upper bound. If the first accepted steps change $\mathcal A$ only
+within the tolerance, the state is stationary with respect to $\vth$
+for the Hamiltonian that the code constructs. In VESPAW the probe is a
+restart (\key{START=F}) with \key{OPTIMIZER='DAV' MIXER='VARIATIONAL'}.
+
+\paragraph{C2: frozen-orbital Janak test.} If the Hamiltonian is the
+derivative of the energy, the derivative of the energy with respect to
+the occupation $f_n$ of an eigenstate, at fixed orbitals, equals its
+eigenvalue~\cite{janak78_prb18_7165},
+\begin{equation}
+  \Delta_n=\frac{\partial\mathcal A}{\partial f_n}\Big|_{\psi}-\epsilon_n
+  =\bra{\psi_n}\hat H_{\mathcal A}-\tilde H[\vth]\ket{\psi_n}
+  \label{eq:janak}
+\end{equation}
+must vanish, where $\hat H_{\mathcal A}$ is the functional derivative of the
+implemented energy and $\tilde H[\vth]$ the Hamiltonian whose eigenvalues
+are reported. The derivative is evaluated for the lowest unoccupied and
+the highest occupied state by the second-order one-sided difference
+\begin{equation}
+  \frac{\partial\mathcal A}{\partial f_n}\approx
+  \frac{-3\mathcal A(0)+4\mathcal A(q)-\mathcal A(2q)}{2q},
+\end{equation}
+with an occupation change $q=+0.01$ for the lowest unoccupied and
+$q=-0.01$ for the highest occupied state.
+The energies are those of the \emph{frozen} orbitals, without
+self-consistency. In VESPAW each energy is one step of a restart with
+the electron number changed by \key{!STRUCTURE!OCCUPATIONS CHARGE[E]},
+\key{!CONTROL!GENERIC NSTEP=1} and \key{!PSIDYN STOP=T}. The test costs four energy
+evaluations. For a Mermin ensemble the derivative of the entropy term
+has to be subtracted.
+
+\paragraph{What they detect.} The two tests are complementary.
+\begin{itemize}
+\item C1 detects a state that is not stationary, but it inherits an
+  error of the Hamiltonian, because the probe uses the same Hamiltonian.
+  In the MgO example above it passed ($|\Delta\mathcal A|\le0.23$~meV).
+\item C2 detects an inconsistency between energy and Hamiltonian. In the
+  MgO example it failed by $-92$ and $-190$~meV for the lowest unoccupied
+  and the highest occupied state, against about 1~meV for the correct
+  code. It does not detect a state that is unconverged only in parts that
+  do not affect the frontier states. A density mixer whose residual
+  included the corner components of the FFT box, which the Kerker filter
+  never mixes, stopped 29~meV above the minimum with an unrelaxed
+  one-center density matrix; C2 passed and C1 lowered the energy by
+  29.45~meV.
+\item Neither test detects a functional that is implemented incorrectly
+  but consistently, together with its derivative. The factor-two error
+  in the one-center kinetic-energy density (Chapter~\ref{chap:dft}) passed
+  both; it was found by checking $\int\tau$ against the kinetic energy and
+  by comparing band gaps with another code.
+\end{itemize}
+The certificates thus establish that a state is a stationary point of
+the implemented functional, not that the functional is the intended one,
+nor that the stationary point is the global minimum. They are not
+specific to VESPAW: applied to VASP, C1 showed that antiferromagnetic NiO
+with PBE+$U$ and the default \texttt{LMAXMIX=2} stops 56~$\mu$eV above
+the minimum, while C2 passed within 1~meV.
 
 
 \section*{Further reading}
 The original work on the subject of this chapter is found in
-Refs.~\cite{Gonze1996,MarzariVanderbiltPayne1997,FreysoldtBoeckNeugebauer2009,VariationalDraft}.
+Refs.~\cite{Gonze1996,janak78_prb18_7165,MarzariVanderbiltPayne1997,FreysoldtBoeckNeugebauer2009,VariationalDraft}.
 
 % =====================================================================
 \chapter{Eigensolvers and dynamics}\label{chap:eigensolvers}
@@ -1408,7 +1593,7 @@ gauge offset of the previous chapter. Both are now fixed, and forces
 agree with finite differences of the energy to $10^{-4}$ relative
 (regression case \texttt{si\_forces}).
 
-\section{Stress}
+\section{Stress}\label{sec:stress}
 
 The stress tensor is the derivative of the energy with respect to a
 homogeneous strain $\epsilon$,
@@ -1439,6 +1624,61 @@ Atomic motion is controlled by \key{!CONTROL!RDYN}. With friction
 friction they follow Newton's equations. The cell shape can be relaxed or
 propagated with \key{!CONTROL!CELL MOVE=T}~\cite{NielsenMartin1985}.
 
+\paragraph{L-BFGS relaxation.} With \key{!RDYN OPTIMIZER='LBFGS'} the
+geometry is optimized by the limited-memory BFGS
+method~\cite{nocedal80_mc35_773,liu89_mp45_503}, a quasi-Newton method
+that builds an approximate inverse Hessian from the last \key{NMEM}
+(default 10) pairs of steps and force changes. The electrons are
+converged at each geometry with an eigensolver and Route~1 or a density
+mixer, so this is a Born--Oppenheimer optimization. A moving cell is
+optimized together with the atoms. The variables are
+\begin{equation}
+  \bm x=\bigl(\bm u_1,\dots,\bm u_M,\;L(\mathsf F-\mathbf 1)\bigr),
+  \qquad \bm u_I=\mathsf F^{-1}\bm R_I,
+\end{equation}
+where $\mathsf F=\mathsf T\mathsf T_0^{-1}$ is the deformation of the
+cell $\mathsf T$ relative to the reference cell $\mathsf T_0$ of the input,
+and $\bm u_I$ are the undeformed positions. The generalized forces are
+$\mathsf F^{\mathrm T}\bm F_I$ for the atoms and
+$[\mathsf S-V(P\mathbf 1+\bm\sigma_{\mathrm{ext}})]\mathsf F^{-\mathrm T}/L$ for
+the cell, with the internal stress $\mathsf S=-\partial E/\partial\epsilon$
+and a target pressure $P$ and stress $\bm\sigma_{\mathrm{ext}}$
+(\key{!CELL P[GPA]}, \key{STRESS[GPA]}). For a pure pressure they are
+the gradient of the enthalpy $H=E+PV$. The target acts on the actual
+cell (a true, Cauchy stress), so the result does not depend on the
+starting cell. The length $L=\sqrt{3B_0V_0/h}$, with a bulk modulus $B_0$
+and the curvature $h$ of the initial Hessian, makes the first step of a
+hydrostatic strain exact and balances atom and cell steps.
+
+The method requires accurate energies. Near the minimum an L-BFGS step
+lowers the energy only by about $F^2/2h$, which for small forces is
+comparable to the default SCF tolerance; the energy test and the
+curvature pairs then turn into noise. After each step \key{EDIFF} and
+\key{MIXTOL} are therefore tightened to 1\% of the predicted energy
+decrease, but not below $10^{-9}$~H. Four safeguards make the
+optimization robust:
+\begin{enumerate}
+\item a step that raises the energy (enthalpy) by more than the noise is
+  halved back towards the last accepted point;
+\item a pair without positive curvature is not stored, and the history
+  is cleared;
+\item a direction that is not downhill is replaced by steepest descent;
+\item a trust radius limits the displacement of every atom, starting at
+  \key{MAXSTEP[AA]}, halved at every backtrack and doubled after a
+  successful step.
+\end{enumerate}
+The optimization stops when the largest force is below
+\key{FMAX[EV/AA]} and, with a moving cell, the largest deviation of the
+stress from its target below \key{!CELL SMAX[GPA]}.
+
+\paragraph{Pitfall.} For molecules and slabs in vacuum the variational
+mixer leaves an energy error of about $10^{-5}$~H that depends on the
+geometry. This stalls L-BFGS near 0.05~eV/\AA; use
+\key{MIXER='PULAY'} there. A cell relaxation needs a higher cutoff than the
+energy, because the stress converges more slowly with the cutoff
+(Pulay stress, Sec.~\ref{sec:stress}): for LiMn$_2$O$_4$ with \pbezero\ the pressure
+at a fixed cell was $-17.1$, $-2.3$ and $-1.5$~GPa at 50, 65 and 80~Ry.
+
 \paragraph{Car--Parrinello vs Born--Oppenheimer MD.} In Car--Parrinello
 MD the wave functions are propagated together with the atoms and stay
 close to the ground state if their fictitious mass is small enough
@@ -1456,7 +1696,7 @@ ions into the fictitious electronic motion.
 
 \section*{Further reading}
 The original work on the subject of this chapter is found in
-Refs.~\cite{NielsenMartin1985,Nose1984,BloechlParrinello1992,Bloechl2002}.
+Refs.~\cite{NielsenMartin1985,Nose1984,BloechlParrinello1992,Bloechl2002,liu89_mp45_503}.
 
 % =====================================================================
 \chapter{Structure of the code}\label{chap:code}
