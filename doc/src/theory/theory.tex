@@ -14,6 +14,8 @@
 \usepackage[numbers,sort&compress]{natbib}
 \usepackage[colorlinks=true,linkcolor=blue!50!black,citecolor=green!40!black,urlcolor=blue!60!black]{hyperref}
 \usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,calc}
 
 \newcommand{\vth}{\bm\theta}
 \newcommand{\vout}{\bm v_{\mathrm{out}}}
@@ -50,6 +52,84 @@
 \frontmatter
 \maketitle
 \tableofcontents
+
+\chapter*{List of symbols}
+\addstarredchapter{List of symbols}
+\markboth{LIST OF SYMBOLS}{}
+
+Hartree atomic units are used ($\hbar=m_e=e=1$, $c\approx137.036$).
+Where a symbol has two meanings, the context decides; both are listed.
+The number of the section or equation that introduces a symbol is given in parentheses.
+
+\newcommand{\symgroup}[1]{\par\medskip\noindent\textbf{#1}\par\nopagebreak\smallskip\nopagebreak}
+\newenvironment{symtab}{\noindent\begin{tabular}{@{}p{3.3cm}p{11.2cm}@{}}}{\end{tabular}\par}
+
+\symgroup{Electrons and density functionals}
+\begin{symtab}
+$\psi_n$, $\epsilon_n$, $f_n$ & Kohn--Sham orbital, eigenvalue, occupation \\
+$n$, $n_\uparrow$, $n_\downarrow$, $\bm m$ & density, spin densities, magnetization \\
+$\tau$ & kinetic-energy density (meta-GGA) \\
+$e_{\mathrm{xc}}$, $v_{\mathrm{xc}}$, $v_\tau$ & XC energy density, XC potential, $\partial e_{\mathrm{xc}}/\partial\tau$ \\
+$E$, $A$, $S$ & total energy, Mermin free energy $E-TS$, entropy (\ref{eq:mermin}) \\
+$T$, $\mu$, $N$ & electronic temperature, Fermi level, number of electrons \\
+$\bm\sigma$ & Pauli matrices \\
+$a_x$ & fraction of exact exchange in (local) hybrids \\
+$U$, $J$, $\mathsf n_R$ & Hubbard parameters, on-site occupation matrix (\ref{sec:dftu}) \\
+\end{symtab}
+
+\symgroup{Crystal and basis}
+\begin{symtab}
+$\bm T$, $\bm b_i$ & lattice vectors, reciprocal lattice vectors \\
+$V$, $\mathcal S$, $L_3$ & cell volume; base area and height of a slab cell (\ref{sec:dipole}) \\
+$\bm k$, $\bm G$ & Bloch vector, reciprocal lattice vector \\
+$E_{\mathrm{cut}}$ & plane-wave cutoff (\key{EPWPSI}, in Ry) \\
+$\{\mathsf M|\bm t\}$ & space-group operation (\ref{sec:symmetry}) \\
+$m$, $s_0$ & dipole moment of a slab, position of the potential step (\ref{sec:dipole}) \\
+\end{symtab}
+
+\symgroup{PAW method}
+\begin{symtab}
+$R$, $\bm R$ & atom index, atomic position \\
+$\tilde\psi_n$ & pseudo (PS) orbital, expanded in plane waves \\
+$\mathcal T$ & PAW transformation, $\psi_n=\mathcal T\tilde\psi_n$ (\ref{eq:pawtrafo}) \\
+$\phi_{R,i}$, $\tilde\phi_{R,i}$, $\pt_{R,i}$ & AE and PS partial waves, projector functions \\
+$i=(\ell,m,\nu)$ & angular momentum and counter of partial waves \\
+$r_c$ & augmentation radius \\
+$D_{R,ij}$ & one-center density matrix \\
+$\Delta H_{R,ij}$, $\Delta O_{R,ij}$ & one-center Hamiltonian and overlap matrices \\
+$\tilde H$, $\hat O$, $\tilde v$ & PS Hamiltonian, overlap operator, PS potential \\
+$n^1_R$, $\tilde n^1_R$ & AE and PS one-center densities \\
+$\hat n_R$ & compensation charge (including nucleus and core) \\
+$n^c_R$, $\tilde n^c_R$ & AE core density, pseudized core density \\
+$\bar v_R$ & local pseudopotential \\
+$M(r)$, $d_{\mathrm{rel}}$ & relativistic mass, $1/M-1$ (\ref{eq:scalarrel}) \\
+$E_\nu$ & energy at which $M$ is evaluated for the partial waves \\
+$\xi(r)$, $\Xi_{R,\nu\nu'}$ & spin--orbit function and its radial integrals (\ref{sec:relativity}) \\
+$\chi_a$ & local orbitals of the hybrid functionals (\ref{sec:projection}) \\
+\end{symtab}
+
+\symgroup{Self-consistency}
+\begin{symtab}
+$\vth$ & parameters of the trial Hamiltonian (\ref{sec:route1}) \\
+$\mathcal A(\vth)$ & free energy of the state produced by $\vth$ \\
+$\vout[\vth]$, $\bm r$ & output parameters, residual $\vout-\vth$ \\
+$\chi$ & static independent-particle response \\
+$K$, $q_0$ & Kerker preconditioner and its wave vector \\
+$\bm s$ & gauge direction (\ref{sec:gauge}) \\
+$\beta$ & step length of the line search (\ref{sec:linesearch}) \\
+$\mathcal A_{\mathrm{acc}}$, $\epsilon$ & last accepted free energy, acceptance slack \\
+$\Delta_n$ & frozen-orbital Janak test, $\partial\mathcal A/\partial f_n-\epsilon_n$ (\ref{eq:janak}) \\
+\end{symtab}
+
+\symgroup{Forces, stress and relaxation}
+\begin{symtab}
+$\bm F_R$ & force on atom $R$ (\ref{eq:pawforce}) \\
+$\Lambda_{mn}$ & Lagrange multipliers of the orthonormality constraint \\
+$\epsilon_{\alpha\beta}$, $\sigma_{\alpha\beta}$ & strain, stress (\ref{sec:stress}) \\
+$\mathsf S$, $P$, $\bm\sigma_{\mathrm{ext}}$ & internal stress $-\partial E/\partial\epsilon$, target pressure and stress \\
+$\mathsf F$, $\bm u_I$ & cell deformation, undeformed positions (L-BFGS) \\
+$L$, $B_0$, $h$ & cell length scale, bulk modulus, initial curvature (L-BFGS) \\
+\end{symtab}
 
 \mainmatter
 % =====================================================================
@@ -108,9 +188,14 @@ VESPAW adds
   density), and the
   local hybrids \pbeslzero\ and \scanzero, which build on \pbezero\
   (Chapters~\ref{chap:dft} and~\ref{chap:hybrids});
+\item DFT+$U$, spin--orbit coupling and consistent scalar-relativistic
+  setups (Chapters~\ref{chap:paw} and~\ref{chap:hybrids}), the dipole
+  correction for slabs and space-group symmetry
+  (Chapter~\ref{chap:planewaves});
+\item L-BFGS relaxation of atoms and cell (Chapter~\ref{chap:forces});
 \item quality checks for PAW setups, an audited setup library
-  (Chapter~\ref{chap:paw}) and a regression suite
-  (Chapter~\ref{chap:code}).
+  (Chapter~\ref{chap:paw}), MPI support for all of the above and a
+  regression suite (Chapter~\ref{chap:code}).
 \end{itemize}
 
 \paragraph{License.} CP-PAW is distributed under the GNU General Public
@@ -123,7 +208,7 @@ of the inherited source files predates the GPL release.
 
 Chapters~\ref{chap:dft} to~\ref{chap:paw} summarize the physics that
 VESPAW implements: density-functional theory, plane waves and the PAW
-method, including core-level spectra. Chapter~\ref{chap:hybrids} treats
+method, including relativistic effects and core-level spectra. Chapter~\ref{chap:hybrids} treats
 hybrid and local hybrid functionals and DFT+$U$.
 Chapters~\ref{chap:variational} and~\ref{chap:eigensolvers} describe how
 the Kohn--Sham equations are solved, which is where VESPAW differs most
@@ -136,7 +221,8 @@ Input keywords are written in \key{bold typewriter}; their complete
 description is in the input manual. Hartree atomic units are used
 throughout unless stated otherwise, while cutoff energies are given in
 Rydberg, as in the input. The program reports its results in eV, \AA{}
-and GPa.
+and GPa. The symbols used throughout are collected in the list of
+symbols after the table of contents.
 
 \paragraph{Pitfalls.} Many sections end with a short list of pitfalls.
 They record errors that were actually found in the code and fixed. I
@@ -558,7 +644,22 @@ with the energy and stalled the variational optimizer.
 Collinear spin polarization (\key{!STRUCTURE!OCCUPATIONS NSPIN=2}) uses two
 sets of orbitals and the spin densities $n_\uparrow,n_\downarrow$; the
 code works internally with total and spin density $(n,m)$.
-Non-collinear magnetism uses two-component spinors. For exchange, the
+Non-collinear magnetism (\key{NSPIN=3}) uses two-component spinors
+$\psi_n=(\psi_{n\uparrow},\psi_{n\downarrow})$. The density becomes a
+$2\times2$ matrix, which is stored as $(n,m_x,m_y,m_z)$,
+\begin{equation}
+  \rho_{ss'}(\bm r)=\sum_nf_n\psi_{ns}(\bm r)\psi^*_{ns'}(\bm r)
+  =\tfrac12\bigl(n\,\mathbf 1+\bm m\cdot\bm\sigma\bigr)_{ss'},
+\end{equation}
+with the Pauli matrices $\bm\sigma$, and the Hamiltonian has the form
+$H=H_0\mathbf 1+\bm B\cdot\bm\sigma$. The one-center density matrices
+$D_{R,ij}$ and the matrices $\Delta H_{R,ij}$ of Chapter~\ref{chap:paw}
+acquire the same four components. The exchange-correlation energy is
+evaluated locally with $n$ and $|\bm m|$, and the exchange-correlation
+field points along the local magnetization. Time reversal does not map a
+spinor at $\bm k$ onto one at $-\bm k$ in a magnetic system, so the full
+$k$-point mesh is used. Spin--orbit coupling
+(Sec.~\ref{sec:relativity}) requires this mode. For exchange, the
 spin-scaling relation
 \begin{equation}
   E_x[n_\uparrow,n_\downarrow]=\tfrac12\bigl(E_x[2n_\uparrow]+E_x[2n_\downarrow]\bigr)
@@ -648,21 +749,148 @@ prints an estimate (Sec.~\ref{sec:kintable}).
 Brillouin-zone integrals are replaced by sums over a Monkhorst--Pack
 mesh~\cite{MonkhorstPack1976}, \key{!STRUCTURE!KPOINTS DIV=$n_1$ $n_2$
 $n_3$}, with an optional shift, or by a target density \key{R}.
-Symmetry and time reversal ($\psi_{-\bm k}=\psi_{\bm k}^*$) reduce the
-number of irreducible points. Metals need dense meshes together with a
+Time reversal ($\psi_{-\bm k}=\psi_{\bm k}^*$) halves the mesh for
+collinear spin; the space group reduces it further
+(Sec.~\ref{sec:symmetry}). Metals need dense meshes together with a
 finite electronic temperature; insulators converge quickly.
 
-\section{The $\Gamma$ point}
+\section{Space-group symmetry}\label{sec:symmetry}
+
+With \key{!STRUCTURE!KPOINTS SYMMETRY=T} the code uses the space group of
+the structure. An operation $\{\mathsf M|\bm t\}$ maps $\bm r$ onto
+$\mathsf M\bm r+\bm t$. The operations are found from the lattice and the
+atoms: $\mathsf M$ must leave the metric of the lattice invariant, and
+every atom must be mapped onto an atom of the same species. Atoms of one
+species that carry different orbital-potential seeds
+(\key{!ORBPOT}, e.g.\ the two Ni sublattices of antiferromagnetic NiO)
+count as different, so that the symmetry of the magnetic order, not that
+of the lattice, is used.
+
+The mesh is then reduced to its irreducible wedge. Each irreducible point
+$\bm k$ carries the weight of its star $\{\mathsf M\bm k\}$. Quantities
+built from a sum over the irreducible points have the full symmetry only
+after symmetrization, which follows the scheme of VASP:
+\begin{itemize}
+\item the pseudo density, $\tilde n(\bm r)=\frac1{N_{\mathrm{op}}}\sum_g
+  \tilde n_{\mathrm{IBZ}}(\mathsf M_g\bm r+\bm t_g)$, exactly on the
+  real-space grid when every operation maps grid points onto grid
+  points, otherwise in reciprocal space, where the coefficient at
+  $\mathsf M^{\mathrm T}\bm G$ is $\tilde n(\bm G)e^{i\bm G\cdot\bm t}$;
+\item the one-center density matrices,
+  $D_{R'}=\frac1{N_{\mathrm{op}}}\sum_g U_g D_R U_g^{\mathrm T}$ with $R'$
+  the image of atom $R$ and $U_g$ the rotation matrix of the real
+  spherical harmonics (times $(-1)^\ell$ for improper operations);
+\item forces, which transform as vectors, and the stress, which transforms
+  as a tensor.
+\end{itemize}
+A symmetric run must reproduce the full-mesh run; the regression cases
+\texttt{symmetry\_al} (48 operations, grid symmetrized in real space) and
+\texttt{symmetry\_si} (displaced Si, 8 operations with non-lattice
+translations, symmetrized in reciprocal space) check energies, forces and
+stress. Symmetry is not available with non-collinear spin, onsite
+hybrids or delocalized SCAN.
+
+\paragraph{Pitfalls.} Two bugs that the symmetry code uncovered also
+affected ordinary runs. At time-reversal-invariant $k$-points, two real
+bands are packed into one complex array (Sec.~\ref{sec:gamma}); exactly
+degenerate bands came out of the subspace diagonalization as complex
+mixtures and were destroyed by the packing, which led to energies below
+the minimum. The subspace matrices are now made real at these points.
+The strain derivative of the projectors was not symmetric, so the
+off-diagonal stress was wrong; this was found by comparing per-$k$
+contributions across the members of a star, which must transform into
+each other. A dense metallic mesh with symmetry (fcc Al, $12^3$) still
+needs several times more line-search iterations than the full mesh,
+although it converges to the same energy; the cause is open.
+
+\section{The $\Gamma$ point}\label{sec:gamma}
 
 At $\bm k=0$ the wave functions can be chosen real. CP-PAW exploits this
 by packing two real bands into one complex array (``super wave
 functions''), which halves the number of FFTs. An alternative half-sphere
 storage (\key{GAMMASUPER}) is experimental and not yet correct.
 
+\section{Slabs, molecules and the dipole correction}\label{sec:dipole}
+
+Molecules and surfaces are treated in a periodic cell with vacuum
+between the images. A slab with different top and bottom surfaces, or with
+an adsorbate on one side, carries a dipole moment per area. The periodic
+boundary conditions force the potential to be periodic, so the images
+create an artificial uniform field across the vacuum and across the slab,
+which shifts work functions and adsorption energies and converges only
+slowly with the thickness of the vacuum. The dipole correction of
+Neugebauer and Scheffler~\cite{neugebauer92_prb46_16067}, in the form of
+Bengtsson~\cite{bengtsson99_prb59_12301}, removes this field
+(\key{!CONTROL!DFT DIPOLECORR=T}).
+
+The slab normal is the third lattice vector, $L_3=V/\mathcal S$ is the height
+of the cell, $V$ its volume and $\mathcal S$ the area of its base. A sawtooth function
+$z(s)=L_3\bigl(\{s-s_0\}-\frac12\bigr)$, where $s$ is the fractional
+coordinate along the normal and $\{\cdot\}$ the fractional part, is
+continuous everywhere except for a step at $s_0$, which is placed in the
+middle of the largest gap between atomic planes. With the dipole moment of
+the total charge density $\rho$ (electrons, nuclei and compensation
+charges)
+\begin{equation}
+  m=\int_V d^3r\,\rho(\bm r)\,z(\bm r),
+\end{equation}
+the correction adds
+\begin{equation}
+  E_{\mathrm{dip}}=\frac{2\pi m^2}{V},\qquad
+  v_{\mathrm{dip}}(\bm r)=\frac{4\pi m}{V}\,z(\bm r)
+  \label{eq:dipole}
+\end{equation}
+to the electrostatic energy and potential. The linear potential cancels
+the artificial field, and the potential jumps by $4\pi m/\mathcal S$ at the step
+(Fig.~\ref{fig:dipole}). The sawtooth has nonzero Fourier coefficients
+only on the line $\bm G=h\bm b_3$, $z(h)=iL_3/(2\pi h)\,e^{-2\pi ihs_0}$,
+so both $m$ and $v_{\mathrm{dip}}$ are computed in reciprocal space at
+negligible cost. The potential step is printed as
+\texttt{DIPOLE POTENTIAL STEP}; it is the difference of the work
+functions of the two surfaces. Forces include the correction, because it
+acts on the compensation charges through the electrostatic potential.
+The stress is not corrected.
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[x=1.15cm,y=1cm,>=stealth]
+  % slab
+  \fill[gray!25] (2.2,-1.6) rectangle (4.6,1.6);
+  \node at (3.4,1.85) {\small slab};
+  \draw[->] (-0.2,0)--(8.4,0) node[right] {$s$};
+  \draw[->] (0,-1.7)--(0,1.9) node[above] {$v$};
+  % step position
+  \draw[dashed] (6.6,-1.6)--(6.6,1.6);
+  \node[below] at (6.6,-1.6) {\small $s_0$};
+  % uncorrected (periodic) potential: field across vacuum
+  \draw[thick,gray] (0,0.55)--(2.2,-0.05) .. controls (2.8,-1.1) and (4.0,0.9) .. (4.6,0.35)--(8,-0.55);
+  % corrected
+  \draw[thick,blue!60!black] (0,-0.75)--(2.2,-0.75) .. controls (2.8,-1.45) and (4.0,0.55) .. (4.6,0.75)--(6.6,0.75);
+  \draw[thick,blue!60!black] (6.6,-0.75)--(8,-0.75);
+  \draw[<->] (7.3,-0.75)--(7.3,0.75);
+  \node[above] at (7.3,0.8) {\small $4\pi m/\mathcal S$};
+  \node[gray,right] at (0.05,0.85) {\small periodic};
+  \node[blue!60!black,right] at (0.05,-1.1) {\small corrected};
+\end{tikzpicture}
+\caption{Planar average of the electrostatic potential across a polar
+slab (schematic). Without the correction (gray) the periodic images
+create a uniform field in the vacuum. The sawtooth potential of
+Eq.~\eqref{eq:dipole} makes the potential flat in the vacuum on both
+sides and moves the jump to the step at $s_0$ (blue).}
+\label{fig:dipole}
+\end{figure}
+
+The regression case \texttt{h2o\_dipole} is a polar water layer in an
+18~\AA\ cell. $E_{\mathrm{dip}}$ is 1.36~mH at 12~\AA\ and 0.89~mH at
+18~\AA, and scales with $1/V$ as it should. The same case guards
+the variational optimizer in a large vacuum (Sec.~\ref{sec:gauge}), where
+$\vth$ is set to the output potential at points without density and the
+mean potential can move by hartrees during the iteration.
+
 
 \section*{Further reading}
 The original work on the subject of this chapter is found in
-Refs.~\cite{Payne1992,MonkhorstPack1976}.
+Refs.~\cite{Payne1992,MonkhorstPack1976,neugebauer92_prb46_16067,bengtsson99_prb59_12301}.
 
 % =====================================================================
 \chapter{The projector augmented-wave method}\label{chap:paw}
@@ -716,11 +944,40 @@ $c_{n,i}=\braket{\pt_{R,i}}{\tilde\psi_n}$. This gives
 \end{equation}
 In words: inside each sphere the smooth part
 $\sum_i\ket{\tilde\phi_{R,i}}\braket{\pt_{R,i}}{\tilde\psi_n}$ is removed and
-replaced by its AE counterpart. The expansion is exact for complete sets
+replaced by its AE counterpart (Fig.~\ref{fig:paw}). The expansion is exact for complete sets
 of partial waves; in practice one or two partial waves per angular
 momentum suffice. The index $i$ collects the angular momentum $(\ell,m)$
 and a counter $\nu$ over partial waves of the same $\ell$. The number of
 partial waves per $\ell$ is set by \key{!STRUCTURE!SPECIES NPRO}.
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[x=2.3cm,y=1.5cm]
+  \fill[gray!12] (0,-1.25) rectangle (1.6,1.35);
+  \draw[->] (0,0)--(4.25,0) node[right] {$r$};
+  \draw[->] (0,-1.25)--(0,1.5);
+  \draw[dashed] (1.6,-1.25)--(1.6,1.35) node[above] {$r_c$};
+  \node at (0.8,-1.05) {\small sphere};
+  \draw[very thick,blue!60!black,domain=0:1.6,samples=160]
+    plot (\x,{sin((1.1*\x+0.3) r)*exp(-0.25*\x)
+             +0.75*sin((4*pi*\x/1.6) r)*(1-\x/1.6)^2});
+  \draw[very thick,blue!60!black,domain=1.6:4.1,samples=80]
+    plot (\x,{sin((1.1*\x+0.3) r)*exp(-0.25*\x)});
+  \draw[thick,dashed,orange!85!black,domain=0:4.1,samples=120]
+    plot (\x,{sin((1.1*\x+0.3) r)*exp(-0.25*\x)});
+  \node[blue!60!black] at (0.52,1.25) {$\psi$ (AE)};
+  \node[orange!85!black] at (2.75,1.0) {$\tilde\psi$ (PS)};
+  \node[align=left,font=\small] at (3.2,-0.85)
+    {$\psi=\tilde\psi$ outside the spheres};
+\end{tikzpicture}
+\caption{The PAW transformation, Eq.~\eqref{eq:pawtrafo} (schematic).
+Outside the augmentation sphere the true wave function $\psi$ (solid) and
+the smooth pseudo wave function $\tilde\psi$ (dashed) coincide. Inside,
+$\psi$ oscillates, because it is orthogonal to the core states, while
+$\tilde\psi$ stays smooth and can be expanded in few plane waves. The
+difference is carried by the partial waves on radial grids.}
+\label{fig:paw}
+\end{figure}
 
 \paragraph{Frozen core.} The core states are taken from the isolated
 atom and kept frozen, $\ket{\psi^c_{R,\alpha}}=\ket{\phi^c_{R,\alpha}}$, where
@@ -772,9 +1029,9 @@ the smooth density $\tilde n+\hat n$ on the plane-wave grid. The
 one-center expansions are truncated at $\ell\le$ \key{LRHOX}. Core
 electrons are frozen in their atomic state. For the exchange-correlation
 energy, which is non-linear in the density, a pseudized core density
-(\key{!CORE POW RC}) is added to the smooth density. The local
-pseudopotential is constructed by pseudizing the AE potential inside a
-radius (\key{!POT POW RC}).
+$\tilde n^c_R$ (\key{!CORE POW RC}) is added to the smooth density. The
+local pseudopotential $\bar v_R$ is constructed by pseudizing the AE
+potential inside a radius (\key{!POT POW RC}).
 
 \section{Setup construction}\label{sec:setups}
 
@@ -836,6 +1093,73 @@ the cutoff, from 20~eV to about 290~Ry, and suggests \texttt{ENMAX} and
 \texttt{ENMIN} (errors of 6 and 13~meV), or states that they are not
 reached. The PS orbitals are tapered to zero before the box wall to avoid
 a spurious kink.
+
+\section{Relativistic effects}\label{sec:relativity}
+
+Relativistic effects are large only close to the nucleus, where the
+kinetic energy of the electrons is large. In PAW this region lies inside
+the augmentation spheres, so relativity enters through the partial waves
+and the one-center terms. The plane-wave part stays non-relativistic.
+
+\paragraph{Scalar-relativistic partial waves.} Dropping spin--orbit
+coupling from the Dirac equation leaves the scalar-relativistic equation
+of Koelling and Harmon~\cite{koelling77_jpc10_3107} for the large
+component,
+\begin{equation}
+  \Bigl[-\tfrac12\nabla\cdot\frac1{M(r)}\nabla+v(r)\Bigr]\phi=\epsilon\phi,
+  \qquad M(r)=1+\frac{\epsilon-v(r)}{2c^2},
+  \label{eq:scalarrel}
+\end{equation}
+which contains the mass-velocity and Darwin terms; the code stores
+$d_{\mathrm{rel}}=1/M-1$. Because $M$ depends on the energy, every state
+of the atom has its own operator. This is fine for the self-consistent
+atom, which is solved fully scalar-relativistically. For the partial waves
+it is not: partial waves of one $\ell$ at different energies would see
+different kinetic-energy operators, and the one-center kinetic-energy
+matrix $\braket{\phi_i}{\hat T|\phi_j}$ would not be symmetric. VESPAW
+therefore uses one energy-independent $M$ per angular momentum, evaluated
+at $E_\nu$, the highest valence level of that $\ell$. The valence levels of
+the atom are then reproduced to $2\times10^{-4}$~eV, deep semicore levels to
+tens of meV (Pt $5s$: 53~meV, Rh $4s$: 30~meV). The generator prints the
+comparison for every level (\texttt{SETUP LEVEL CHECK}). Symmetrizing the
+energy-dependent matrix instead had placed the Pt $5s$ level 11.7~eV off,
+and the Pt and Rh setups could not be built. The zeroth-order regular
+approximation (ZORA~\cite{vanlenthe93_jcp99_4597}, \key{!AUGMENT ZORA=T})
+sets $E_\nu=0$; it contracts the lattice constant of Cu by 0.4\%. The
+default is the scalar-relativistic treatment, as in VASP.
+
+\paragraph{Spin--orbit coupling.} The spin--orbit term that was dropped
+from Eq.~\eqref{eq:scalarrel} is, for a spherical potential,
+\begin{equation}
+  \hat H_{\mathrm{SO}}=\xi(r)\,\bm L\cdot\bm S,\qquad
+  \xi(r)=\frac1{2M^2c^2}\,\frac1r\frac{dv}{dr},
+  \qquad M=1-\frac{v}{2c^2}.
+\end{equation}
+It is largest near the nucleus, so it is evaluated in the spheres only,
+between AE partial waves and with the spherical AE potential of the
+isolated atom. It adds a spinor term to the one-center Hamiltonian,
+\begin{equation}
+  \Delta H^{\mathrm{SO}}_{R,(\nu\ell m s),(\nu'\ell m's')}
+  =\Xi_{R,\nu\nu'}\,\bra{\ell m}\bm L\ket{\ell m'}\cdot
+  \tfrac12\bm\sigma_{ss'},
+  \qquad
+  \Xi_{R,\nu\nu'}=\int_0^{r_c}dr\,r^2\,\phi_{R,\nu}(r)\,\xi(r)\,\phi_{R,\nu'}(r),
+\end{equation}
+with $r_c$ the covalent radius and $\ell\le3$. The energy is
+$\mathrm{Tr}[D\,\Delta H^{\mathrm{SO}}]$, so the term enters the
+self-consistent spinor calculation like any other part of $\Delta H$; there
+is no second variation. Spin--orbit coupling requires non-collinear spin
+(\key{!CONTROL!DFT SPINORBIT=T} with \key{NSPIN=3}). The partial waves are
+scalar-relativistic, so the $p_{1/2}$ and $p_{3/2}$ radial functions are
+the same, as in VASP. For Si the valence band at $\Gamma$ splits by
+$\Delta_{\mathrm{so}}=48$~meV (experiment 44~meV; regression case
+\texttt{si\_soc}).
+
+\paragraph{Pitfall.} The spin-flip block of the spinor Hamiltonian in
+CP-PAW was built as $\Delta H_{\downarrow\uparrow}=(\Delta H_{\uparrow\downarrow})^*$, which is
+correct only when $\Delta H_x$ and $\Delta H_y$ are real. Spin--orbit
+coupling makes them complex; the block was then anti-Hermitian and the
+coupling silently absent. It is now built as $\Delta H_x+i\Delta H_y$.
 
 \section{The setup library}
 
@@ -916,7 +1240,7 @@ electrons.
 
 \section*{Further reading}
 The original work on the subject of this chapter is found in
-Refs.~\cite{bloechl94_prb50_17953,KresseJoubert1999,egerton07_ultramicroscopy107_565}.
+Refs.~\cite{bloechl94_prb50_17953,KresseJoubert1999,koelling77_jpc10_3107,egerton07_ultramicroscopy107_565}.
 
 % =====================================================================
 \chapter{Local hybrid functionals}\label{chap:hybrids}
@@ -1198,6 +1522,7 @@ Because $\psi_n(\vth)$ and $f_n(\vth)$ form an admissible ensemble,
 $\mathcal{A}(\vth)$ is an upper bound of the minimum of $A$ for every
 $\vth$. At self-consistency, where $\vth$ equals the parameters
 $\vout[\vth]$ built from the output state, the bound is attained.
+Figure~\ref{fig:route1} shows one iteration.
 Following Gonze~\cite{Gonze1996},
 \begin{equation}
   \frac{\partial \mathcal{A}}{\partial \vth}
@@ -1214,7 +1539,35 @@ long-wavelength components so strongly that the gains of a step fall
 below the noise of the iterative eigensolver, and the line search
 stalls; use $q_0^2\approx0.05$--0.1 there.
 
-\section{The gauge direction}
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[
+  box/.style={draw,rounded corners=2pt,align=center,font=\small,
+              minimum height=1.05cm,text width=3.1cm,fill=blue!4},
+  arr/.style={-{Stealth[length=2mm]},thick},
+  node distance=0.55cm and 0.7cm]
+  \node[box] (th) {Hamiltonian\\ parameters $\vth$};
+  \node[box,right=of th] (eig) {eigensolver\\ $\tilde H[\vth]\tilde\psi_n=\epsilon_n\hat O\tilde\psi_n$};
+  \node[box,right=of eig] (occ) {occupations $f_n$\\ at fixed $N$};
+  \node[box,below=of occ] (dens) {density $\tilde n$, $D_R$\\ $\to\vout[\vth]$, $\mathcal A(\vth)$};
+  \node[box,left=of dens] (acc) {accept if\\ $\mathcal A\le\mathcal A_{\mathrm{acc}}+\epsilon$};
+  \node[box,left=of acc] (prop) {proposal\\ $\vth+\beta K\bm r$ + Anderson};
+  \draw[arr] (th)--(eig);
+  \draw[arr] (eig)--(occ);
+  \draw[arr] (occ)--(dens);
+  \draw[arr] (dens)--(acc);
+  \draw[arr] (acc)--(prop);
+  \draw[arr] (prop)--(th);
+\end{tikzpicture}
+\caption{One iteration of Route~1. The eigensolver and the occupations
+turn the trial Hamiltonian $\vth$ into an admissible ensemble, whose free
+energy $\mathcal A(\vth)$ is an upper bound of the minimum. The residual
+$\bm r=\vout-\vth$ is a descent direction. A rejected point is replaced by
+a backtrack (Sec.~\ref{sec:linesearch}).}
+\label{fig:route1}
+\end{figure}
+
+\section{The gauge direction}\label{sec:gauge}
 
 A uniform shift $\tilde H\to\tilde H+c\hat O$ shifts all eigenvalues and
 the Fermi level by $c$ and leaves orbitals and occupations unchanged. In
@@ -1242,7 +1595,7 @@ eigensolvers start from eigenvalues that lie far off and stall (H$_2$O
 layer in an 18~\AA\ cell: eigenvalues 66~eV too low, energy 75~mH too
 high).
 
-\section{Line search and acceptance}
+\section{Line search and acceptance}\label{sec:linesearch}
 
 \paragraph{Proposal.} Steps are proposed by an Anderson
 extrapolation~\cite{Anderson1965} built from \emph{accepted} points only,
@@ -1575,16 +1928,42 @@ to its position. At a stationary point of the energy the orbital
 response drops out (Hellmann--Feynman~\cite{Feynman1939}). In PAW the
 projectors, the compensation charges and the one-center terms move with
 the atom, and the orthonormality constraint depends on the positions
-through $\hat O$:
-\begin{equation}
-  \bm F_R=-\frac{\partial E}{\partial\bm R}\Big|_{\mathrm{explicit}}
-  -\sum_{nm}\Lambda_{mn}\,\bra{\tilde\psi_n}\frac{\partial\hat O}{\partial\bm R}\ket{\tilde\psi_m}
-  \times(\text{occupation weights}),
-\end{equation}
-where the first term contains the derivatives of $\Delta H$, the projectors
-and the compensation charges. In Car--Parrinello dynamics $\Lambda$ comes
-from the orthonormality constraint. For the eigensolvers the orbitals are
-Ritz vectors, and $\Lambda=\mathrm{diag}(\epsilon_n)$.
+through $\hat O$. The derivative of the Lagrangian
+$E-\sum_{nm}\Lambda_{mn}\bigl(\bra{\tilde\psi_n}\hat O\ket{\tilde\psi_m}-\delta_{nm}\bigr)$
+at fixed $\tilde\psi_n$ gives
+\begin{multline}
+  \bm F_R=
+  -\int d^3r\,\Bigl[\tilde v_{\mathrm H}(\bm r)\,
+  \frac{\partial\hat n_R(\bm r)}{\partial\bm R}
+  +\tilde\mu_{\mathrm{xc}}(\bm r)\,\frac{\partial\tilde n^c_R(\bm r)}{\partial\bm R}
+  +\tilde n(\bm r)\,\frac{\partial\bar v_R(\bm r)}{\partial\bm R}\Bigr]
+  \\
+  -2\,\mathrm{Re}\sum_{n}\sum_{ij}
+  \bra{\tilde\psi_n}\frac{\partial\pt_{R,i}}{\partial\bm R}\Bigr\rangle
+  \Bigl[\Delta H_{R,ij}\,f_n\braket{\pt_{R,j}}{\tilde\psi_n}
+  -\Delta O_{R,ij}\sum_m\braket{\pt_{R,j}}{\tilde\psi_m}\Lambda_{mn}\Bigr].
+  \label{eq:pawforce}
+\end{multline}
+The first line is the force of the plane-wave potentials on the charges
+that move with the atom: the electrostatic potential $\tilde v_{\mathrm H}$
+of $\tilde n+\hat n$ on the compensation charge $\hat n_R$ (which, in
+CP-PAW, also carries the nuclear and core charge, so the ion--ion
+interaction is included), the exchange-correlation potential
+$\tilde\mu_{\mathrm{xc}}$ on the pseudized core density $\tilde n^c_R$, and
+the local potential $\bar v_R$ on the pseudo density. The compensation
+charges of neighboring atoms overlap; their direct interaction, which the
+plane-wave grid cannot resolve, is added analytically. The second line is
+the projector term. The one-center energies depend on the atom only
+through the density matrices $D_R$, so moving the projectors changes the
+energy by $\Delta H$ times the change of $D_R$, and the overlap constraint
+by $\Delta O$ times the change of $\bra{\tilde\psi_n}\hat O\ket{\tilde\psi_m}$.
+The multipliers contain the occupations,
+$\Lambda_{mn}=\frac12(f_m+f_n)\bra{\tilde\psi_m}\tilde H\ket{\tilde\psi_n}$.
+In Car--Parrinello dynamics $\Lambda$ comes from the orthonormality
+constraint. For the eigensolvers the orbitals are Ritz vectors, and
+$\Lambda_{mn}=f_n\epsilon_n\delta_{mn}$. With non-collinear spinors,
+$\Delta H$ and the projections carry spin indices, and the sum runs over
+them as well.
 
 \paragraph{Pitfalls.} Before September 2026 the eigensolvers did not set
 $\Lambda$ at all, so the constraint term was missing (0.5\% error in the
@@ -1731,6 +2110,9 @@ File & Content \\
 \texttt{vespaw\_dft.f90} & exchange-correlation functionals \\
 \texttt{vespaw\_atoms.f90}, \texttt{vespaw\_cell.f90} & ionic and cell dynamics \\
 \texttt{vespaw\_occupations.f90} & occupations, Mermin \\
+\texttt{vespaw\_onsite.f90} & DFT+$U$, spin--orbit coupling \\
+\texttt{vespaw\_kpoints.f90} & $k$-point mesh, space-group symmetry \\
+\texttt{vespaw\_schroedinger.f90} & radial (scalar-relativistic) equations \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -1757,6 +2139,44 @@ data in a Fortran module and is accessed through \texttt{OBJECT\$SET},
 \item Reports (\texttt{PRINFO}), capture of forces and stress, and the
   switch of all dynamical variables to the next step.
 \end{enumerate}
+
+\section{Parallelization}\label{sec:mpi}
+
+VESPAW inherits the MPI parallelization of CP-PAW. The tasks are divided
+into $k$-point groups. Each $k$-point, with all its bands and spins,
+belongs to one group, and the points are distributed so that the groups
+have similar work (a point with super wave functions counts half). Inside
+a group the plane-wave coefficients and the real-space grid are split
+into sheets of planes along the first lattice vector, and the fast Fourier
+transforms are distributed over the tasks of the group. The density and
+the plane-wave potential live on a second layout, in which the grid is
+split over \emph{all} tasks. Densities and one-center density matrices are
+summed over the $k$-groups; forces and stress over all tasks.
+
+The methods added in VESPAW were written for one task and had to be made
+consistent with this layout:
+\begin{itemize}
+\item the eigensolvers loop over the local $k$-points of their group, and
+  the sums in their subspace matrices and projections run over the tasks
+  of that group;
+\item the variational mixer, the Pulay and Anderson mixers and Route~2
+  work on the density layout: the potential is moved from the
+  wave-function layout, mixed, and moved back, and every scalar product of
+  grid functions is summed over all tasks;
+\item the symmetrization of the density assembles the full grid on every
+  task, symmetrizes it, and keeps the local sheets.
+\end{itemize}
+A run on several tasks must reproduce the serial run. This holds to
+$10^{-9}$~H or better for Si, Al, NiO with $U$ and with the hybrids,
+spin--orbit coupling, the dipole slab, symmetry and the Si$_8$ $\Gamma$ case.
+The regression suite runs under MPI with
+\texttt{VESPAW\_REGRESSION\_NP=4}.
+
+The MPI executable is built with \texttt{make fast\_parallel\_new}
+(\texttt{vespaw\_fast\_mpi.x}). Linear algebra and the one-center SCAN
+terms also use threads. With MPI, set \texttt{OMP\_NUM\_THREADS=1} and
+\texttt{OPENBLAS\_NUM\_THREADS=1}, unless there are more cores than
+tasks.
 
 \section{Input}
 
