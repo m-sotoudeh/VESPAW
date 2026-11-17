@@ -21,8 +21,11 @@ preferred-citation:
   authors:
     - family-names: Sotoudeh
       given-names: Mohsen
-  title: "The Kohn-Sham Hamiltonian as the variational object"
+  title: "Detecting False Self-Consistency in Density-Functional Calculations"
   year: 2026
+  doi: "10.48550/arXiv.2611.20789"
+  url: "https://arxiv.org/abs/2611.20789"
+  notes: "arXiv:2611.20789 [cond-mat.mtrl-sci]"
 references:
   - type: article
     authors:

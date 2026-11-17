@@ -128,8 +128,10 @@ If you use VESPAW, please cite
 - the software: M. Sotoudeh, *VESPAW: variational electronic structure
   with projector augmented waves*, Zenodo,
   [doi:10.5281/zenodo.23295633](https://doi.org/10.5281/zenodo.23295633);
-- the variational self-consistency method: M. Sotoudeh, *The Kohn–Sham
-  Hamiltonian as the variational object* (manuscript in preparation, 2026);
+- the variational self-consistency method and the C1/C2 certificates:
+  M. Sotoudeh, *Detecting false self-consistency in density-functional
+  calculations*, arXiv:2611.20789 (2026),
+  [doi:10.48550/arXiv.2611.20789](https://doi.org/10.48550/arXiv.2611.20789);
 - the PAW method: P. E. Blöchl, Phys. Rev. B **50**, 17953 (1994);
 - for the local hybrids: M. Sotoudeh *et al.*, Phys. Rev. B **95**,
   235150 (2017); P. E. Blöchl, C. F. J. Walther and Th. Pruschke,
