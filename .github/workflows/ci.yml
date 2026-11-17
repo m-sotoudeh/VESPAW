@@ -23,7 +23,7 @@ jobs:
             os: ubuntu-24.04
             toolchain: system
           - name: macOS arm64 (Homebrew)
-            os: macos-14
+            os: macos-15
             toolchain: brew
     env:
       OMP_NUM_THREADS: 2

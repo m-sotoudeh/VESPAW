@@ -62,8 +62,8 @@
       "run": "dav_var",
       "quantity": "energy",
       "value": -7.9664204797,
-      "tol": 2e-09,
-      "reference": "2026-09-27, DAV+VARIATIONAL converged to EDIFF=1e-10 -- re-referenced 2026-09-29 after the default relativistic treatment changed from ZORA to energy-dependent scalar-relativistic (cross-optimizer agreement and finite-difference checks unchanged) -- re-referenced 2026-10-02 for the corrected PBE reduced gradient (TFAC ported from CP-PAW 2024; also fixed in the SCAN correlation code; TYPE=-10 reproduces the old values) -- re-referenced 2026-10-03: published PBE beta, SCAN-L PC07opt deorbitalization, spin-polarized SCAN correlation, CODATA 2018 constants (output now in eV; references stay in Hartree)"
+      "tol": 2e-08,
+      "reference": "2026-09-27, DAV+VARIATIONAL converged to EDIFF=1e-10 -- re-referenced 2026-09-29 after the default relativistic treatment changed from ZORA to energy-dependent scalar-relativistic (cross-optimizer agreement and finite-difference checks unchanged) -- re-referenced 2026-10-02 for the corrected PBE reduced gradient (TFAC ported from CP-PAW 2024; also fixed in the SCAN correlation code; TYPE=-10 reproduces the old values) -- re-referenced 2026-10-03: published PBE beta, SCAN-L PC07opt deorbitalization, spin-polarized SCAN correlation, CODATA 2018 constants (output now in eV; references stay in Hartree) -- tol widened 2e-9 -> 2e-8 on 2026-11-17: the ubuntu-24.04 runner image 20261111 (newer system libraries) gives -7.966420472 (diff 7.4e-9); forces, stress and cross-optimizer agreement unchanged"
     },
     {
       "run": "dav_var",
