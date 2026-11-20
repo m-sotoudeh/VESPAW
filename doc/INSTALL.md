@@ -84,6 +84,20 @@ sufficient; the serial HDF5 Fortran libraries are in
   For a serial run with threads, set both variables to the number of
   cores. Homebrew's OpenBLAS follows `OMP_NUM_THREADS`, the conda-forge
   build follows `OPENBLAS_NUM_THREADS`.
+- **MPI runs stop at the first orthogonalization on a cluster node.**
+  The run stops before the first energy with `LIB_LAPACK_ZHEGV`
+  (leading minor not positive definite) or `WAVES_CHOLESKYORTHO`
+  (overlap not positive definite), while the same build runs on a
+  workstation. On JUSTUS 2 (Open MPI 5.0.11 from conda-forge, libfabric
+  2.7) Open MPI selects the libfabric (`ofi`) transport also between
+  tasks on the same node, and the tasks then hold different matrices.
+  Shared memory gives the serial energies. For runs on one node, set
+  before `mpirun`:
+  ```sh
+  export OMPI_MCA_pml=ob1 OMPI_MCA_btl=self,sm
+  ```
+  `export OMPI_MCA_mtl=^ofi` has the same effect. Runs over several
+  nodes have not been tested with these settings.
 - **The preprocessor crashes on a new source file.** `f90pp_tmplts.x`
   fails on a few files that use no templates; `build/Makefile_bare.in`
   compiles those with `-notemplates`. Add the same rule for the new file.
