@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.0.3 — 2026-11-21
+
+- Onsite hybrids: the swap term of PBE-SL0r is now applied also at
+  `a_x=0`. Before, it was skipped when the admixture was zero, which
+  made the PBE-SL0r total energy jump between `a_x=0` and small `a_x`
+  (MnO by 12 eV).
+  Results of PBE-SL0r at `a_x=0` change. All other results are unchanged.
+- Onsite hybrids with MPI: the onsite energy loop is split over the MPI
+  tasks and the transformation to the tight-binding orbitals is cached
+  per k-point. An 80-atom CaMnO₃ supercell with SCAN0r runs 1.5 times
+  faster per iteration on 48 cores, with energies equal to within
+  5×10⁻¹⁰ Ha.
+- Diagnostic environment variable `VESPAW_DIAG_NOSWAP` (any nonempty
+  value) omits the swap term.
+- Installation: Open MPI transport settings for MPI runs on cluster
+  nodes (`OMPI_MCA_pml=ob1 OMPI_MCA_btl=self,sm`), see `doc/INSTALL.md`.
+- Theory book: foundations, line search per mixer, certificates C1 and
+  C2, L-BFGS, DFT+U, symmetry, dipole correction, relativistic setups and
+  spin-orbit coupling, MPI and the full PAW force formula.
+- The method paper is cited as arXiv:2611.20789. CI runs on macos-15.
+
 ## 1.0.2 — 2026-10-11
 
 - Test suite: the runs behind Table I of the method paper (direct

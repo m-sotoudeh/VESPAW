@@ -237,6 +237,8 @@ TYPE(PERIODICMAT_TYPE),ALLOCATABLE :: CHT(:)     !(NNS) CHI -> |F_AUG>CHT
 ! .TRUE.: FIT CHI THROUGH ITS PARTIAL-WAVE EXPANSION <PTILDE|CHITILDE> (OLD,
 ! DEPENDS ON THE NUMBER OF PROJECTORS). SET BY VESPAW_NTBO_OLDPROJ.
 LOGICAL(4)                         :: TOLDPROJ=.FALSE.
+! INCREASED BY LMTO_PCHI: KEY OF THE CACHED TRANSFORMATION IN LMTO$PROJTONTBO_NEW
+INTEGER(4)                         :: NPCHIGEN=0
 TYPE(PERIODICMAT2_TYPE),ALLOCATABLE:: DENMAT_NEW(:)  !(NND) DENSITY MATRIX
 ! DERIVATIVE OF THE ENERGY WITH RESPECT TO THE DENSITY MATRIX
 TYPE(PERIODICMAT2_TYPE),ALLOCATABLE:: HAMIL_NEW(:)   !(NND) DERIVATIVE OF ENERGY
@@ -2862,7 +2864,8 @@ INTEGER(4) :: J,K,L
      &                       ,SBAR_NEW & !(NNS) STRUCTURE CONSTANTS
      &                       ,PCHI     & !(NNS) <PTILDE|CHITILDE>
      &                       ,OPCHI    & !(NNS) <AEPHI|THETA|CHI>
-     &                       ,CHT        !(NNS) CHI IN HEAD+TAIL FUNCTIONS
+     &                       ,CHT      & !(NNS) CHI IN HEAD+TAIL FUNCTIONS
+     &                       ,NPCHIGEN
       IMPLICIT NONE
       TYPE PKJ_TYPE
         REAL(8),ALLOCATABLE :: PROK(:,:)
@@ -2948,6 +2951,7 @@ INTEGER(4) :: J,K,L
 !     ==========================================================================
 !     == PROJECTIONS ONTO LOCAL ORBITALS 
 !     ==========================================================================
+      NPCHIGEN=NPCHIGEN+1  ! INVALIDATES THE CACHE OF LMTO$PROJTONTBO_NEW
       NNS=SIZE(SBAR_NEW)
       ALLOCATE(PCHI(NNS))
       ALLOCATE(OPCHI(NNS))
@@ -3021,7 +3025,7 @@ INTEGER(4) :: J,K,L
      &                       ,POTPAR1  & !(NSP)
      &                       ,LNX      & !(NSP)
      &                       ,LOX      & !(LNXX,NSP) (MAIN ANGULAR MOMENTA)
-     &                       ,PCHI,OPCHI,CHT,TOLDPROJ
+     &                       ,PCHI,OPCHI,CHT,TOLDPROJ,NPCHIGEN
       IMPLICIT NONE
       CHARACTER(*),INTENT(IN) :: ID !MAY BE 'FWRD' OR 'BACK'
       REAL(8)     ,INTENT(IN) :: XK(3) ! # K-POINT IN RELATIVE COORDINATES
@@ -3054,6 +3058,19 @@ INTEGER(4) :: J,K,L
       INTEGER(4)              :: IPRO,IORB
       INTEGER(4)              :: IAT1,IAT2,I1,I2,J1,J2,I,J
       INTEGER(4)              :: ISP,NN,IAT,LN1,LN2,LMN1,LMN2,M,IBH,IDIM,L
+!     == THE TRANSFORMATION MAT DEPENDS ONLY ON THE STRUCTURE AND THE K-POINT.  ==
+!     == IT IS KEPT FOR UP TO NKCX K-POINTS UNTIL LMTO_PCHI RUNS AGAIN          ==
+!     == (2026-11-21, BEFORE IT WAS REBUILT IN EVERY CALL, FOUR TIMES PER       ==
+!     == ITERATION AND K-POINT IN A SPIN-POLARIZED CALCULATION)                 ==
+      REAL(8)   ,PARAMETER    :: CACHEBYTES=4.D8
+      COMPLEX(8),ALLOCATABLE,SAVE :: MATC(:,:,:)    !(NORB,NPRO,NKCX)
+      REAL(8)   ,ALLOCATABLE,SAVE :: XKC(:,:)       !(3,NKCX)
+      INTEGER(4),SAVE         :: NKC=0
+      INTEGER(4),SAVE         :: NKCX=0
+      INTEGER(4),SAVE         :: IGENC=-1
+      LOGICAL(4)              :: TCACHED
+      INTEGER(4)              :: IKC
+      COMPLEX(8),ALLOCATABLE  :: CMAT(:,:)
 !     **************************************************************************
       PI=4.D0*ATAN(1.D0)
       NAT=SIZE(ISPECIES)
@@ -3085,6 +3102,39 @@ CALL TIMING$CLOCKON('LMTO:TO-1')
         NORB2(IAT)=IORB
       ENDDO
 CALL TIMING$CLOCKOFF('LMTO:TO-1')
+!
+!     ==========================================================================
+!     ==  LOOK UP THE TRANSFORMATION IN THE CACHE                             ==
+!     ==========================================================================
+      IF(IGENC.NE.NPCHIGEN.OR.NKCX.EQ.0) THEN
+        IF(ALLOCATED(MATC)) DEALLOCATE(MATC)
+        IF(ALLOCATED(XKC)) DEALLOCATE(XKC)
+        NKCX=MAX(0,MIN(64,INT(CACHEBYTES/(16.D0*REAL(NORB,8)*REAL(NPRO,8)))))
+        IF(NKCX.GT.0) THEN
+          ALLOCATE(MATC(NORB,NPRO,NKCX))
+          ALLOCATE(XKC(3,NKCX))
+        END IF
+        NKC=0
+        IGENC=NPCHIGEN
+      END IF
+      TCACHED=.FALSE.
+      IF(NKCX.GT.0) THEN
+        IF(SIZE(MATC,1).NE.NORB.OR.SIZE(MATC,2).NE.NPRO) THEN
+          CALL ERROR$MSG('CACHED TRANSFORMATION HAS THE WRONG SIZE')
+          CALL ERROR$I4VAL('NORB',NORB)
+          CALL ERROR$I4VAL('NPRO',NPRO)
+          CALL ERROR$STOP('LMTO$PROJTONTBO_NEW')
+        END IF
+        DO IKC=1,NKC
+          IF(MAXVAL(ABS(XKC(:,IKC)-XK(:))).LT.1.D-12) THEN
+            TCACHED=.TRUE.
+            ALLOCATE(MAT(NORB,NPRO))
+            MAT=MATC(:,:,IKC)
+            EXIT
+          END IF
+        ENDDO
+      END IF
+      IF(.NOT.TCACHED) THEN
 !
 !     ==========================================================================
 !     ==  LEAST-SQUARES FIT OF THE ONE-CENTER EXPANSIONS SUM_J |AEPHI_J><P_J|PSI>
@@ -3227,26 +3277,29 @@ CALL TIMING$CLOCKON('LMTO:TO-4')
       DEALLOCATE(OPCHIOFK)
 CALL TIMING$CLOCKOFF('LMTO:TO-4')
       END IF
+      IF(NKC.LT.NKCX) THEN
+        NKC=NKC+1
+        XKC(:,NKC)=XK(:)
+        MATC(:,:,NKC)=MAT
+      END IF
+      END IF  ! (.NOT.TCACHED)
 !
 !     ==========================================================================
 !     == TRANSFORM PARTIAL WAVE PROJECTIONS TO ORBITAL PROJECTIONS            ==
+!     ==   PIPSI(:,:,I)=SUM_J MAT(I,J)*PROJ(:,:,J)              (FWRD)        ==
+!     ==   PROJ(:,:,J) =SUM_I PIPSI(:,:,I)*CONJG(MAT(I,J))      (BACK)        ==
 !     ==========================================================================
 CALL TIMING$CLOCKON('LMTO:TO-5')
       IF(ID.EQ.'FWRD') THEN
-        PIPSI(:,:,:)=(0.D0,0.D0)
-        DO J=1,NPRO
-          DO I=1,NORB
-             PIPSI(:,:,I)=PIPSI(:,:,I)+MAT(I,J)*PROJ(:,:,J)
-          ENDDO
-        ENDDO
+        CALL ZGEMM('N','T',NDIM*NBH,NORB,NPRO,(1.D0,0.D0),PROJ,NDIM*NBH &
+     &            ,MAT,NORB,(0.D0,0.D0),PIPSI,NDIM*NBH)
 !
       ELSE IF(ID.EQ.'BACK') THEN
-        PROJ(:,:,:)=(0.D0,0.D0)
-        DO I=1,NORB
-          DO J=1,NPRO
-            PROJ(:,:,J)=PROJ(:,:,J)+PIPSI(:,:,I)*CONJG(MAT(I,J))
-          ENDDO
-        ENDDO
+        ALLOCATE(CMAT(NORB,NPRO))
+        CMAT=CONJG(MAT)
+        CALL ZGEMM('N','N',NDIM*NBH,NPRO,NORB,(1.D0,0.D0),PIPSI,NDIM*NBH &
+     &            ,CMAT,NORB,(0.D0,0.D0),PROJ,NDIM*NBH)
+        DEALLOCATE(CMAT)
 !
       ELSE
         CALL ERROR$MSG('ID NOT RECOGNIZED. (ALLOWED IS "FWRD" OR "BACK")')
@@ -5009,9 +5062,15 @@ END IF
      &                       ,TCTE &
      &                       ,IDCTYPE &
      &                       ,PERIODICMAT2_TYPE
+      USE MPE_MODULE
       IMPLICIT NONE
       LOGICAL(4),PARAMETER  :: TPR=.FALSE.
       LOGICAL(4),PARAMETER  :: TPLOT=.TRUE.
+      INTEGER(4)            :: NTASKS,THISTASK
+      INTEGER(4)            :: IACTIVE    ! COUNTS THE ATOMS WITH LOCAL ORBITALS
+      INTEGER(4)            :: NATA,NDIMDA,LMNXXA
+      COMPLEX(8),ALLOCATABLE:: DH0(:)     ! ONE-CENTER HAMILTONIAN BEFORE THE LOOP
+      REAL(8)               :: ESUM(3)
       INTEGER(4)            :: NND
       INTEGER(4)            :: NNS
       INTEGER(4)            :: NAT
@@ -5063,6 +5122,9 @@ REAL(8)   ,ALLOCATABLE:: T(:,:),UNT(:,:),MYMAT(:,:)
       LOGICAL(4),SAVE       :: TSWAPDIAGCHECKED=.FALSE.
       LOGICAL(4),SAVE       :: TSWAPDIAG=.FALSE.
       CHARACTER(16)         :: CENVVALSWAPDIAG
+!     == DIAGNOSTIC VESPAW_DIAG_NOSWAP (ANY NONEMPTY VALUE): OMIT THE SWAP    ==
+!     == TERM, I.E. THE INCONSISTENT DOUBLE COUNTING OF THE PAPER (SEC. II C) ==
+      LOGICAL(4),SAVE       :: TNOSWAP=.FALSE.
       REAL(8)               :: SWAPNORM,MAINNORM
 !     == 2026-09-10 FOLLOW-UP: THE ABOVE ARE FROBENIUS (AGGREGATE) NORMS --     ==
 !     == SUMMED OVER EVERY (NN,I,J,IDIMD) ELEMENT ACROSS ALL ATOMS. A SINGLE    ==
@@ -5087,6 +5149,9 @@ PRINT*,'============ ENERGYTEST2_NEW ============================='
       IF(.NOT.TSWAPDIAGCHECKED) THEN
         CALL GET_ENVIRONMENT_VARIABLE('VESPAW_SCAN0R_SWAP_DIAG',CENVVALSWAPDIAG)
         TSWAPDIAG=(LEN_TRIM(CENVVALSWAPDIAG).GT.0)
+        CALL GET_ENVIRONMENT_VARIABLE('VESPAW_DIAG_NOSWAP',CENVVALSWAPDIAG)
+        TNOSWAP=(LEN_TRIM(CENVVALSWAPDIAG).GT.0)
+        IF(TNOSWAP) PRINT*,'VESPAW_DIAG_NOSWAP SET -- SWAP TERM OMITTED'
         TSWAPDIAGCHECKED=.TRUE.
         IF(TSWAPDIAG) THEN
           PRINT*,'VESPAW_SCAN0R_SWAP_DIAG SET -- PRINTING ||HAMIL_SWAP|| VS' &
@@ -5131,13 +5196,26 @@ PRINT*,'============ ENERGYTEST2_NEW ============================='
 !
 !     ==========================================================================
 !     == LOOP OVER ALL ATOMS                                                  ==
+!     == THE ATOMS WITH LOCAL ORBITALS ARE DISTRIBUTED OVER THE TASKS. THE    ==
+!     == CONTRIBUTIONS TO HAMIL, HAMIL_SWAP, THE ENERGIES AND THE ONE-CENTER  ==
+!     == HAMILTONIAN OF THE LMTOAUGMENTATION OBJECT ARE ADDED UP AFTER THE    ==
+!     == LOOP (2026-11-21, BEFORE EVERY TASK DID ALL ATOMS)                   ==
 !     ==========================================================================
+      CALL MPE$QUERY('MONOMER',NTASKS,THISTASK)
+      CALL LMTOAUGMENTATION$GETI4('NAT',NATA)
+      CALL LMTOAUGMENTATION$GETI4('NDIMD',NDIMDA)
+      CALL LMTOAUGMENTATION$GETI4('LMNXX',LMNXXA)
+      ALLOCATE(DH0(LMNXXA*LMNXXA*NDIMDA*NATA))
+      CALL LMTOAUGMENTATION$GETC8A('DH',SIZE(DH0),DH0)
+      IACTIVE=0
       EXTOT=0.D0
       EHTOT=0.D0
       DO IAT=1,NAT
         ISP=ISPECIES(IAT)
         TACTIVE=(POTPAR1(ISP)%NHEAD.GT.0)
         IF(.NOT.TACTIVE) CYCLE
+        IACTIVE=IACTIVE+1
+        IF(MOD(IACTIVE-1,NTASKS).NE.THISTASK-1) CYCLE
 !
 !       == COLLECT INFORMATION FROM SETUPS OBJECT ==============================
         CALL SETUP$ISELECT(ISP)
@@ -5382,7 +5460,10 @@ IF(.TRUE.) THEN
 !       ==     HFWEIGHT SCALING, INSTEAD OF (WRONGLY) FLOWING THE CORRECTION  ==
 !       ==     THROUGH THE SAME PIPELINE THE MAIN DC TERM USES BELOW.         ==
 !       ======================================================================
-        IF(IDCTYPE.GE.0.AND.IDCTYPE.NE.IDFTTYPE.AND.LHFWEIGHT.GT.0.D0) THEN
+!       == THE SWAP TERM IS INDEPENDENT OF LHFWEIGHT AND IS ALSO NEEDED FOR  ==
+!       == LHFWEIGHT=0 (2026-10-20: A GUARD LHFWEIGHT>0 MADE PBE-SL0R        ==
+!       == DISCONTINUOUS AT A_X=0; MNO -12 EV BETWEEN A_X=0 AND 0.05).       ==
+        IF(IDCTYPE.GE.0.AND.IDCTYPE.NE.IDFTTYPE.AND..NOT.TNOSWAP) THEN
           ALLOCATE(HT_SWAPDISCARD(LMNXT,LMNXT,NDIMD))
           CALL DFT$SETI4('TYPE',IDCTYPE)
           CALL LMTO_SIMPLEDC_NEW_NEW(GID,NR,NDIMD,LMNXT,LNXT,LOXT &
@@ -5475,6 +5556,25 @@ PRINT*,'EXCHANGE-XORRECTION FOR ATOM............. =',IAT,EAT-EX
         DEALLOCATE(AETAUCORE)
         DEALLOCATE(LOXT)
       ENDDO !END OF LOOP OVER ATOMS
+!
+!     ==========================================================================
+!     == ADD UP THE CONTRIBUTIONS OF THE TASKS                                ==
+!     ==========================================================================
+      IF(NTASKS.GT.1) THEN
+        ESUM=(/EXTOT,EHTOT,EXTOT_SWAP/)
+        CALL MPE$COMBINE('MONOMER','+',ESUM)
+        EXTOT=ESUM(1)
+        EHTOT=ESUM(2)
+        EXTOT_SWAP=ESUM(3)
+        DO IAT=1,NAT
+          IF(POTPAR1(ISPECIES(IAT))%NHEAD.LE.0) CYCLE
+          CALL LMTO_INDEXLOCAL2(IAT,NND,HAMIL,INH)
+          CALL MPE$COMBINE('MONOMER','+',HAMIL(INH)%MAT)
+          CALL MPE$COMBINE('MONOMER','+',HAMIL_SWAP(INH)%MAT)
+        ENDDO
+        CALL LMTOAUGMENTATION$COMBINEDH(SIZE(DH0),DH0)
+      END IF
+      DEALLOCATE(DH0)
 !
 !     ==========================================================================
 !     == OFFSITE EXCHANGE CONTRIBUTION                                        ==
@@ -7637,6 +7737,33 @@ END MODULE LMTOAUGMENTATION_MODULE
         CALL ERROR$CHVAL('ID',ID)
         CALL ERROR$STOP('LMTOAUGMENTATION$ADDC8A')
       END IF
+      RETURN
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE LMTOAUGMENTATION$COMBINEDH(LEN,DH0)
+!     **************************************************************************
+!     **  ADDS UP THE ONE-CENTER HAMILTONIAN OVER THE TASKS, WHEN EACH TASK   **
+!     **  HAS ADDED THE CONTRIBUTIONS OF ITS OWN ATOMS TO DH0, THE VALUE THAT **
+!     **  ALL TASKS HAD BEFORE (LMTO_SIMPLEENERGYTEST2_NEW).                  **
+!     **************************************************************************
+      USE LMTOAUGMENTATION_MODULE, ONLY : TACTIVE,NAT,LMNXX,NDIMD,DATH
+      USE MPE_MODULE
+      IMPLICIT NONE
+      INTEGER(4)  ,INTENT(IN) :: LEN
+      COMPLEX(8)  ,INTENT(IN) :: DH0(LEN)
+      COMPLEX(8)  ,ALLOCATABLE:: DIFF(:)
+!     **************************************************************************
+      IF(.NOT.TACTIVE.OR.LMNXX*LMNXX*NDIMD*NAT.NE.LEN) THEN
+        CALL ERROR$MSG('OBJECT NOT ACTIVE OR INCONSISTENT ARRAY SIZE')
+        CALL ERROR$I4VAL('LEN',LEN)
+        CALL ERROR$STOP('LMTOAUGMENTATION$COMBINEDH')
+      END IF
+      ALLOCATE(DIFF(LEN))
+      DIFF=RESHAPE(DATH,(/LEN/))-DH0
+      CALL MPE$COMBINE('MONOMER','+',DIFF)
+      DATH=RESHAPE(DH0+DIFF,(/LMNXX,LMNXX,NDIMD,NAT/))
+      DEALLOCATE(DIFF)
       RETURN
       END
 !
