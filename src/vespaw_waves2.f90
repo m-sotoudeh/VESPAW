@@ -47,6 +47,7 @@
       REAL(8)   ,ALLOCATABLE :: YLM(:)
       LOGICAL(4)             :: TSTRESS
       LOGICAL(4)             :: TINV
+      LOGICAL(4)             :: TDEBUG
       LOGICAL(4),PARAMETER   :: TTEST=.FALSE.
       COMPLEX(8)             :: CSVAR
       REAL(8)   ,ALLOCATABLE :: NORM(:)
@@ -94,22 +95,7 @@ IF(1.EQ.1) THEN ! CHANGE FOR KAESTNERS CONJUGATE GRADIENT
 !         ==  EVALUATE  DO<P|PSI>  ASSUMING <PRO|PSI> IS STILL VALID          ==
 !         ======================================================================
           ALLOCATE(OPROJ(NDIM,NBH,NPRO))
-          OPROJ(:,:,:)=(0.D0,0.D0)
-          IPRO=1
-          DO IAT=1,NAT
-            ISP=MAP%ISP(IAT)
-            CALL SETUP$ISELECT(ISP)
-            LNX=MAP%LNX(ISP)
-            LMNX=MAP%LMNX(ISP)
-            ALLOCATE(DO(LNX,LNX))
-            CALL SETUP$GETR8A('DO',LNX*LNX,DO) 
-                                        !FORMER CALL SETUP$1COVERLAP(ISP,LNX,DO)
-            CALL WAVES_OPROJ(LNX,MAP%LOX(1:LNX,ISP),DO,NDIM,LMNX,NBH &
-      &          ,THIS%PROJ(:,:,IPRO:IPRO+LMNX-1),OPROJ(:,:,IPRO:IPRO+LMNX-1))
-            DEALLOCATE(DO)
-            IPRO=IPRO+LMNX
-            CALL SETUP$UNSELECT()
-          ENDDO
+          CALL WAVES_OPROJ_ALL(MAP,NDIM,NBH,NPRO,THIS%PROJ,OPROJ)
 !
 !         ======================================================================
 !         ==  ADD  |PSI>+|P>DO<P|PSI>                                         ==
@@ -347,10 +333,13 @@ END IF
           IF(TSAFEORTHO) THEN
             CALL PLANEWAVE$GETL4('TINV',TINV)
             IF(TINV) THEN
-              WRITE(*,*) 'DEBUG-ORTHO-IMAG MAXAIMAG(MAT)=',MAXVAL(ABS(AIMAG(MAT))) &
-     &          ,'MAXABS(REAL(MAT))=',MAXVAL(ABS(REAL(MAT,KIND=8))) &
-     &          ,'MAXAIMAG(OMAT)=',MAXVAL(ABS(AIMAG(OMAT))) &
-     &          ,'MAXAIMAG(OOMAT)=',MAXVAL(ABS(AIMAG(OOMAT)))
+              CALL VERBOSITY$GETL4('DEBUG',TDEBUG)
+              IF(TDEBUG) THEN
+                WRITE(*,*) 'DEBUG-ORTHO-IMAG MAXAIMAG(MAT)=',MAXVAL(ABS(AIMAG(MAT))) &
+     &            ,'MAXABS(REAL(MAT))=',MAXVAL(ABS(REAL(MAT,KIND=8))) &
+     &            ,'MAXAIMAG(OMAT)=',MAXVAL(ABS(AIMAG(OMAT))) &
+     &            ,'MAXAIMAG(OOMAT)=',MAXVAL(ABS(AIMAG(OOMAT)))
+              END IF
 !             == FORCE HERMITICITY BEFORE DISCARDING THE IMAGINARY PART:     ==
 !             == RMAT=REAL(MAT) ALONE IS ONLY VALID IF MAT IS EXACTLY        ==
 !             == HERMITIAN (MAT(I,J)=CONJG(MAT(J,I))); THE LEGACY NBH-PACKED ==
@@ -411,8 +400,11 @@ END IF
           IF(GSET%TSUPER) THEN
             CALL PLANEWAVE$GETI4('NGAMMA',IND)
             IF(IND.NE.0) THEN
-              WRITE(*,*) 'DEBUG-ORTHO-GAMMA IND=',IND &
-     &                  ,'AIMAG(PSIM(GAMMA,1:4))=',(AIMAG(THIS%PSIM(IND,1,IB)),IB=1,MIN(4,NBH))
+              CALL VERBOSITY$GETL4('DEBUG',TDEBUG)
+              IF(TDEBUG) THEN
+                WRITE(*,*) 'DEBUG-ORTHO-GAMMA IND=',IND &
+     &                    ,'AIMAG(PSIM(GAMMA,1:4))=',(AIMAG(THIS%PSIM(IND,1,IB)),IB=1,MIN(4,NBH))
+              END IF
             END IF
             IF(IND.NE.0) THEN
               DO IB=1,NBH
@@ -535,14 +527,36 @@ END IF
        INTEGER(4),INTENT(IN) :: NB
        COMPLEX(8),INTENT(IN) :: PROJ(NDIM,NB,LMNX)
        COMPLEX(8),INTENT(OUT):: OPROJ(NDIM,NB,LMNX)
-       INTEGER(4)            :: LMN1,LMN2
-       INTEGER(4)            :: LMN10,LMN20
-       INTEGER(4)            :: LN1,LN2
-       INTEGER(4)            :: L1,L2
-       INTEGER(4)            :: IB,IDIM,M
-       REAL(8)               :: DOVER1
+       COMPLEX(8),ALLOCATABLE:: ZDO(:,:)
 !      *****************************************************************
-       OPROJ(:,:,:)=(0.D0,0.D0)
+       IF(LMNX.LE.0.OR.NB.LE.0) THEN
+         OPROJ(:,:,:)=(0.D0,0.D0)
+         RETURN
+       END IF
+       ALLOCATE(ZDO(LMNX,LMNX))
+       CALL WAVES_OPROJ_EXPAND(LNX,LOX,DO,LMNX,LMNX,ZDO)
+       CALL ZGEMM('N','N',NDIM*NB,LMNX,LMNX,(1.D0,0.D0),PROJ,NDIM*NB &
+     &           ,ZDO,LMNX,(0.D0,0.D0),OPROJ,NDIM*NB)
+       DEALLOCATE(ZDO)
+       RETURN
+       END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+       SUBROUTINE WAVES_OPROJ_EXPAND(LNX,LOX,DO,LDD,LMNX,ZDO)
+!      *****************************************************************
+!      **  EXPANDS SPECIES OVERLAP DO(LNX,LNX) TO ZDO(LMNX,LMNX)      **
+!      *****************************************************************
+       IMPLICIT NONE
+       INTEGER(4),INTENT(IN) :: LNX
+       INTEGER(4),INTENT(IN) :: LOX(LNX)
+       REAL(8)   ,INTENT(IN) :: DO(LNX,LNX)
+       INTEGER(4),INTENT(IN) :: LDD
+       INTEGER(4),INTENT(IN) :: LMNX
+       COMPLEX(8),INTENT(OUT):: ZDO(LDD,LDD)
+       INTEGER(4)            :: LN1,LN2,L1,L2,M,LMN10,LMN20
+       COMPLEX(8)            :: DOVER1
+!      *****************************************************************
+       ZDO(:,:)=(0.D0,0.D0)
        LMN10=0
        DO LN1=1,LNX
          L1=LOX(LN1)
@@ -550,22 +564,69 @@ END IF
          DO LN2=1,LNX
            L2=LOX(LN2)
            IF(L1.EQ.L2) THEN
-             DOVER1=DO(LN1,LN2)
+             DOVER1=CMPLX(DO(LN1,LN2),0.D0,KIND=8)
              DO M=1,2*L1+1
-               LMN1=LMN10+M
-               LMN2=LMN20+M
-               DO IDIM=1,NDIM
-                 DO IB=1,NB
-                   OPROJ(IDIM,IB,LMN1)=OPROJ(IDIM,IB,LMN1) &
-     &                          +DOVER1*PROJ(IDIM,IB,LMN2)
-                 ENDDO
-               ENDDO
+               ZDO(LMN20+M,LMN10+M)=DOVER1
              END DO
            END IF
            LMN20=LMN20+2*L2+1
          ENDDO
          LMN10=LMN10+2*L1+1
        ENDDO
+       RETURN
+       END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+       SUBROUTINE WAVES_OPROJ_ALL(MAP,NDIM,NBH,NPRO,PROJ,OPROJ)
+!      *****************************************************************
+!      **  EVALUATE OPROJ = DO * <PRO|PSI> ACROSS ALL ATOMS           **
+!      *****************************************************************
+       USE WAVES_MODULE, ONLY: MAP_TYPE
+       IMPLICIT NONE
+       TYPE(MAP_TYPE),INTENT(IN) :: MAP
+       INTEGER(4)    ,INTENT(IN) :: NDIM
+       INTEGER(4)    ,INTENT(IN) :: NBH
+       INTEGER(4)    ,INTENT(IN) :: NPRO
+       COMPLEX(8)    ,INTENT(IN) :: PROJ(NDIM,NBH,NPRO)
+       COMPLEX(8)    ,INTENT(OUT):: OPROJ(NDIM,NBH,NPRO)
+       INTEGER(4)                :: NSP,NAT,LNXX,LMNXX,ISP,IAT,IPRO
+       INTEGER(4)                :: LNX,LMNX
+       REAL(8)   ,ALLOCATABLE    :: DO_TMP(:)
+       COMPLEX(8),ALLOCATABLE    :: ZDO_ALL(:,:,:)
+!      *****************************************************************
+       IF(NPRO.LE.0.OR.NBH.LE.0) THEN
+         OPROJ(:,:,:)=(0.D0,0.D0)
+         RETURN
+       END IF
+       NSP=MAP%NSP
+       NAT=MAP%NAT
+       LNXX=MAP%LNXX
+       LMNXX=MAXVAL(MAP%LMNX(1:NSP))
+       ALLOCATE(DO_TMP(LNXX*LNXX))
+       ALLOCATE(ZDO_ALL(LMNXX,LMNXX,NSP))
+       DO ISP=1,NSP
+         LNX=MAP%LNX(ISP)
+         LMNX=MAP%LMNX(ISP)
+         CALL SETUP$ISELECT(ISP)
+         CALL SETUP$GETR8A('DO',LNX*LNX,DO_TMP(1:LNX*LNX))
+         CALL SETUP$UNSELECT()
+         CALL WAVES_OPROJ_EXPAND(LNX,MAP%LOX(1:LNX,ISP),DO_TMP(1:LNX*LNX) &
+     &                          ,LMNXX,LMNX,ZDO_ALL(:,:,ISP))
+       ENDDO
+       IPRO=1
+       DO IAT=1,NAT
+         ISP=MAP%ISP(IAT)
+         LMNX=MAP%LMNX(ISP)
+         IF(LMNX.GT.0) THEN
+           CALL ZGEMM('N','N',NDIM*NBH,LMNX,LMNX,(1.D0,0.D0) &
+     &               ,PROJ(:,:,IPRO:IPRO+LMNX-1),NDIM*NBH &
+     &               ,ZDO_ALL(:,:,ISP),LMNXX,(0.D0,0.D0) &
+     &               ,OPROJ(:,:,IPRO:IPRO+LMNX-1),NDIM*NBH)
+           IPRO=IPRO+LMNX
+         END IF
+       ENDDO
+       DEALLOCATE(ZDO_ALL)
+       DEALLOCATE(DO_TMP)
        RETURN
        END
 !

@@ -5098,9 +5098,11 @@ RETURN
       INTEGER(4)             :: IB,NGAMMAHPSI
       REAL(8)   ,ALLOCATABLE :: XKHYB(:,:)
       COMPLEX(8),ALLOCATABLE :: HPROJHYB(:,:,:)
+      LOGICAL(4)             :: TDEBUG
 !     **************************************************************************
                               CALL TRACE$PUSH('WAVES$HPSI')
                               CALL TIMING$CLOCKON('W:HPSI')
+      CALL VERBOSITY$GETL4('DEBUG',TDEBUG)
       IF(NDIMD_.NE.NDIMD.OR.NRL.NE.MAP%NRL.OR.NAT.NE.MAP%NAT) THEN
         CALL ERROR$MSG('ARRAY SIZE INCONSISTENT')
         CALL ERROR$I4VAL('NDIMD_',NDIMD_)
@@ -5138,22 +5140,8 @@ CALL TIMING$CLOCKOFF('W:HPSI.VPSI')
 !         ==============================================================
 CALL TIMING$CLOCKON('W:HPSI.HPROJ')
           ALLOCATE(HPROJ(NDIM,NBH,MAP%NPRO))
-          HPROJ(:,:,:)=(0.D0,0.D0)
-          IPRO=1
-          DO IAT=1,NAT
-            ISP=MAP%ISP(IAT)
-            LMNX=MAP%LMNX(ISP)
-            ALLOCATE(DH1(LMNX,LMNX,NDIM**2))
-            IF(NDIM.EQ.1) THEN
-              DH1(:,:,1)=DH(1:LMNX,1:LMNX,ISPIN,IAT)
-            ELSE 
-              DH1(:,:,:)=DH(1:LMNX,1:LMNX,:,IAT)
-            END IF
-            CALL WAVES_HPROJ(NDIM,NBH,LMNX &
-     &         ,DH1,THIS%PROJ(:,:,IPRO:IPRO+LMNX-1),HPROJ(:,:,IPRO:IPRO+LMNX-1))
-            DEALLOCATE(DH1)
-            IPRO=IPRO+LMNX
-          ENDDO
+          CALL WAVES_HPROJ_ALL(MAP,ISPIN,NDIM,NDIMD,NBH,LMNXX,NAT,MAP%NPRO &
+     &                        ,DH,THIS%PROJ,HPROJ)
 CALL TIMING$CLOCKOFF('W:HPSI.HPROJ')
 !
 !         ==============================================================
@@ -5204,10 +5192,12 @@ CALL TIMING$CLOCKOFF('W:HPSI.ADDPROJ')
 !         == DYNAMICS -- SEE WAVES$ORTHOGONALIZE'S OWN COMMENT (2026-09-22).  ==
           IF(GSET%TSUPER) THEN
             CALL PLANEWAVE$GETI4('NGAMMA',NGAMMAHPSI)
-            WRITE(*,*) 'DEBUG-HPSI-GAMMA NGAMMAHPSI=',NGAMMAHPSI &
-     &                ,'AIMAG(HPSI(GAMMA,1))=' &
-     &                ,MERGE(AIMAG(THIS%HPSI(MAX(NGAMMAHPSI,1),1,1)),0.D0 &
-     &                       ,NGAMMAHPSI.NE.0)
+            IF(TDEBUG) THEN
+              WRITE(*,*) 'DEBUG-HPSI-GAMMA NGAMMAHPSI=',NGAMMAHPSI &
+     &                  ,'AIMAG(HPSI(GAMMA,1))=' &
+     &                  ,MERGE(AIMAG(THIS%HPSI(MAX(NGAMMAHPSI,1),1,1)),0.D0 &
+     &                         ,NGAMMAHPSI.NE.0)
+            END IF
             IF(NGAMMAHPSI.NE.0) THEN
               DO IB=1,NBH
                 THIS%HPSI(NGAMMAHPSI,1,IB)=CMPLX(REAL(THIS%HPSI(NGAMMAHPSI,1,IB) &
@@ -5244,48 +5234,105 @@ END IF
       COMPLEX(8),INTENT(IN)  :: DH(LMNX,LMNX,NDIM**2)
       COMPLEX(8),INTENT(IN)  :: PROJ(NDIM,NB,LMNX)
       COMPLEX(8),INTENT(OUT) :: HPROJ(NDIM,NB,LMNX)
+      CALL WAVES_HPROJ_STRIDED(NDIM,NDIM**2,NB,LMNX,LMNX,DH,PROJ,HPROJ)
+      RETURN
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WAVES_HPROJ_STRIDED(NDIM,NDIMD,NB,LMNX,LDDH,DH,PROJ,HPROJ)
+!     **************************************************************************
+!     **  EVALUATE HPROJ = DH * <P|PSI> FOR ONE ATOM USING BLAS3 (ZGEMM)      **
+!     **************************************************************************
+      IMPLICIT NONE
+      INTEGER(4),INTENT(IN)  :: NDIM
+      INTEGER(4),INTENT(IN)  :: NDIMD
+      INTEGER(4),INTENT(IN)  :: NB
+      INTEGER(4),INTENT(IN)  :: LMNX
+      INTEGER(4),INTENT(IN)  :: LDDH
+      COMPLEX(8),INTENT(IN)  :: DH(LDDH,LDDH,NDIMD)
+      COMPLEX(8),INTENT(IN)  :: PROJ(NDIM,NB,LMNX)
+      COMPLEX(8),INTENT(OUT) :: HPROJ(NDIM,NB,LMNX)
       INTEGER(4)             :: IB
       INTEGER(4)             :: LMN1,LMN2
-      COMPLEX(8)             :: DHUPUP,DHDNDN
-      COMPLEX(8)             :: DHUPDN,DHDNUP
+      COMPLEX(8),ALLOCATABLE :: DH2(:,:),PBUF(:,:),HBUF(:,:)
       COMPLEX(8),PARAMETER   :: CI=(0.D0,1.D0)
 !     **************************************************************************
-      HPROJ(:,:,:)=(0.D0,0.D0)
-!
-!     ==========================================================================
-!     ==  EVALUATE  DH<P|PSI>                                                 ==
-!     ==========================================================================
-      IF(NDIM.EQ.1) THEN
-        DO LMN1=1,LMNX
-          DO LMN2=1,LMNX
-            DHUPUP=DH(LMN1,LMN2,1)
-            DO IB=1,NB
-              HPROJ(1,IB,LMN1)=HPROJ(1,IB,LMN1)+DHUPUP*PROJ(1,IB,LMN2)
-            ENDDO
-          ENDDO
-        ENDDO
-      ELSE 
-        DO LMN1=1,LMNX
-          DO LMN2=1,LMNX
-            DHUPUP=DH(LMN1,LMN2,1)+DH(LMN1,LMN2,4)
-            DHDNDN=DH(LMN1,LMN2,1)-DH(LMN1,LMN2,4)
-!           == HERE, DH=DH/DD AND NOT CONJG(DE/DD) !! 
-!JSC+PEB    DHUPDN=CMPLX(DH(LMN1,LMN2,2),DH(LMN1,LMN2,3),KIND=8)
-!            DHUPDN=CMPLX(DH(LMN1,LMN2,2),-DH(LMN1,LMN2,3),KIND=8)
-            DHUPDN=DH(LMN1,LMN2,2)-CI*DH(LMN1,LMN2,3)
-!           == DH_DN,UP=DH_X+I*DH_Y. CONJG(DHUPDN) IS EQUIVALENT ONLY FOR  ==
-!           == REAL DH_X,DH_Y; SPIN-ORBIT COUPLING MAKES THEM IMAGINARY,    ==
-!           == AND THE CONJUGATE TURNED THE SPIN-FLIP PART ANTI-HERMITIAN.  ==
-            DHDNUP=DH(LMN1,LMN2,2)+CI*DH(LMN1,LMN2,3)
-            DO IB=1,NB
-              HPROJ(1,IB,LMN1)=HPROJ(1,IB,LMN1)+DHUPUP*PROJ(1,IB,LMN2) &
-     &                                         +DHUPDN*PROJ(2,IB,LMN2)
-              HPROJ(2,IB,LMN1)=HPROJ(2,IB,LMN1)+DHDNUP*PROJ(1,IB,LMN2) &
-     &                                         +DHDNDN*PROJ(2,IB,LMN2)
-            ENDDO
-          ENDDO
-        ENDDO
+      IF(LMNX.LE.0.OR.NB.LE.0) THEN
+        HPROJ(:,:,:)=(0.D0,0.D0)
+        RETURN
       END IF
+      IF(NDIM.EQ.1) THEN
+        CALL ZGEMM('N','T',NB,LMNX,LMNX,(1.D0,0.D0),PROJ,NB &
+     &            ,DH,LDDH,(0.D0,0.D0),HPROJ,NB)
+      ELSE
+        ALLOCATE(DH2(2*LMNX,2*LMNX))
+        ALLOCATE(PBUF(NB,2*LMNX))
+        ALLOCATE(HBUF(NB,2*LMNX))
+        DO LMN2=1,LMNX
+          DO LMN1=1,LMNX
+            DH2(LMN2,     LMN1     )=DH(LMN1,LMN2,1)+DH(LMN1,LMN2,4)
+            DH2(LMN2+LMNX,LMN1     )=DH(LMN1,LMN2,2)-CI*DH(LMN1,LMN2,3)
+            DH2(LMN2,     LMN1+LMNX)=DH(LMN1,LMN2,2)+CI*DH(LMN1,LMN2,3)
+            DH2(LMN2+LMNX,LMN1+LMNX)=DH(LMN1,LMN2,1)-DH(LMN1,LMN2,4)
+          ENDDO
+        ENDDO
+        DO LMN2=1,LMNX
+          DO IB=1,NB
+            PBUF(IB,LMN2     )=PROJ(1,IB,LMN2)
+            PBUF(IB,LMN2+LMNX)=PROJ(2,IB,LMN2)
+          ENDDO
+        ENDDO
+        CALL ZGEMM('N','N',NB,2*LMNX,2*LMNX,(1.D0,0.D0),PBUF,NB &
+     &            ,DH2,2*LMNX,(0.D0,0.D0),HBUF,NB)
+        DO LMN1=1,LMNX
+          DO IB=1,NB
+            HPROJ(1,IB,LMN1)=HBUF(IB,LMN1     )
+            HPROJ(2,IB,LMN1)=HBUF(IB,LMN1+LMNX)
+          ENDDO
+        ENDDO
+        DEALLOCATE(HBUF)
+        DEALLOCATE(PBUF)
+        DEALLOCATE(DH2)
+      END IF
+      RETURN
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WAVES_HPROJ_ALL(MAP,ISPIN,NDIM,NDIMD,NBH,LMNXX,NAT,NPRO &
+     &                          ,DH,PROJ,HPROJ)
+!     **************************************************************************
+!     **  EVALUATE HPROJ = DH * <P|PSI> ACROSS ALL ATOMS                      **
+!     **************************************************************************
+      USE WAVES_MODULE, ONLY: MAP_TYPE
+      IMPLICIT NONE
+      TYPE(MAP_TYPE),INTENT(IN) :: MAP
+      INTEGER(4)    ,INTENT(IN) :: ISPIN
+      INTEGER(4)    ,INTENT(IN) :: NDIM
+      INTEGER(4)    ,INTENT(IN) :: NDIMD
+      INTEGER(4)    ,INTENT(IN) :: NBH
+      INTEGER(4)    ,INTENT(IN) :: LMNXX
+      INTEGER(4)    ,INTENT(IN) :: NAT
+      INTEGER(4)    ,INTENT(IN) :: NPRO
+      COMPLEX(8)    ,INTENT(IN) :: DH(LMNXX,LMNXX,NDIMD,NAT)
+      COMPLEX(8)    ,INTENT(IN) :: PROJ(NDIM,NBH,NPRO)
+      COMPLEX(8)    ,INTENT(OUT):: HPROJ(NDIM,NBH,NPRO)
+      INTEGER(4)                :: IPRO,IAT,ISP,LMNX
+!     **************************************************************************
+      IPRO=1
+      DO IAT=1,NAT
+        ISP=MAP%ISP(IAT)
+        LMNX=MAP%LMNX(ISP)
+        IF(NDIM.EQ.1) THEN
+          CALL WAVES_HPROJ_STRIDED(1,1,NBH,LMNX,LMNXX &
+     &        ,DH(:,:,ISPIN:ISPIN,IAT) &
+     &        ,PROJ(:,:,IPRO:IPRO+LMNX-1),HPROJ(:,:,IPRO:IPRO+LMNX-1))
+        ELSE
+          CALL WAVES_HPROJ_STRIDED(NDIM,NDIMD,NBH,LMNX,LMNXX &
+     &        ,DH(:,:,:,IAT) &
+     &        ,PROJ(:,:,IPRO:IPRO+LMNX-1),HPROJ(:,:,IPRO:IPRO+LMNX-1))
+        END IF
+        IPRO=IPRO+LMNX
+      ENDDO
       RETURN
       END
 !
@@ -5344,22 +5391,8 @@ CALL TIMING$CLOCKOFF('W:HPSI.VPSI')
 !     ==========================================================================
 CALL TIMING$CLOCKON('W:HPSI.HPROJ')
       ALLOCATE(HPROJ(NDIM,NBH,NPRO))
-      HPROJ(:,:,:)=(0.D0,0.D0)
-      IPRO=1
-      DO IAT=1,NAT
-        ISP=MAP%ISP(IAT)
-        LMNX=MAP%LMNX(ISP)
-        ALLOCATE(DH1(LMNX,LMNX,NDIM**2))
-        IF(NDIM.EQ.1) THEN
-          DH1(:,:,1)=DH(1:LMNX,1:LMNX,ISPIN,IAT)
-        ELSE 
-          DH1(:,:,:)=DH(1:LMNX,1:LMNX,:,IAT)
-        END IF
-        CALL WAVES_HPROJ(NDIM,NBH,LMNX,DH1 &
-       &       ,PROJ(:,:,IPRO:IPRO+LMNX-1),HPROJ(:,:,IPRO:IPRO+LMNX-1))
-        DEALLOCATE(DH1)
-        IPRO=IPRO+LMNX
-      ENDDO
+      CALL WAVES_HPROJ_ALL(MAP,ISPIN,NDIM,NDIMD,NBH,LMNXX,NAT,NPRO &
+     &                    ,DH,PROJ,HPROJ)
 CALL TIMING$CLOCKOFF('W:HPSI.HPROJ')
 !
 !     ==========================================================================
@@ -5436,28 +5469,7 @@ CALL TIMING$CLOCKOFF('W:HPSI.ADDPRO')
 !     ==  EVALUATE  DO<P|PSI>  ASSUMING <PRO|PSI> IS STILL VALID  ==
 !     ==============================================================
       ALLOCATE(OPROJ(NDIM,NBH,NPRO))
-      OPROJ(:,:,:)=(0.D0,0.D0)
-      IPRO=1
-      DO IAT=1,NAT
-         ISP=MAP%ISP(IAT)
-         LNX=MAP%LNX(ISP)
-         LMNX=MAP%LMNX(ISP)
-         ALLOCATE(DO(LNX,LNX))
-         CALL SETUP$ISELECT(ISP)
-         CALL SETUP$GETR8A('DO',LNX*LNX,DO)
-                                    !FORMER CALL SETUP$1COVERLAP(ISP,LNX,DO)
-         CALL WAVES_OPROJ(LNX,MAP%LOX(1:LNX,ISP),DO,NDIM,LMNX,NBH &
-     &                  ,PROJ(:,:,IPRO:IPRO+LMNX-1),OPROJ(:,:,IPRO:IPRO+LMNX-1))
-!        == SCAN0R: UNSELECT MUST HAPPEN PER ATOM, INSIDE THE LOOP.        ==
-!        == THE ORIGINAL CODE ONLY UNSELECTED ONCE AFTER THE LOOP, SO THE ==
-!        == SECOND (AND LATER) ATOMS' ISELECT HIT SETUP$ISELECT'S "ANOTHER==
-!        == SETUP IS ALREADY SELECTED" SAFEGUARD -- A REAL, PREVIOUSLY   ==
-!        == UNDIAGNOSED BUG IN THIS CG-ONLY CODE PATH (WAVES_OPSI IS NOT ==
-!        == CALLED BY THE DYNAMICS PATH, SO IT WAS NEVER EXERCISED).     ==
-         CALL SETUP$ISELECT(0)
-         DEALLOCATE(DO)
-         IPRO=IPRO+LMNX
-      ENDDO
+      CALL WAVES_OPROJ_ALL(MAP,NDIM,NBH,NPRO,PROJ,OPROJ)
 !
 !     ==============================================================
 !     ==  ADD  |PSI>+|P>DO<P|PSI>                                 ==
@@ -5487,6 +5499,7 @@ CALL TIMING$CLOCKOFF('W:HPSI.ADDPRO')
 !     **                                                                      **
 !     *******************************************P.E. BLOECHL, (1991)***********
       USE WAVES_MODULE, ONLY : GSET_TYPE,TBUCKET,LTSCANDELOC
+      USE VESPAW_GPU_MODULE, ONLY : VESPAW$GPU_ENABLED
       IMPLICIT NONE
       TYPE(GSET_TYPE),INTENT(IN) :: GSET
       INTEGER(4),INTENT(IN)  :: NGL         ! #(G-VECTORS)
@@ -5504,9 +5517,11 @@ CALL TIMING$CLOCKOFF('W:HPSI.ADDPRO')
       COMPLEX(8),ALLOCATABLE :: PSIOFR(:,:)
       REAL(8)   ,ALLOCATABLE :: PSIOFRR(:,:)  ! REAL R-SPACE FIELD, TSUPER PATH
       INTEGER(4),PARAMETER   :: NFFTBLK=32   ! MAX #(BANDS) PER BATCHED FFT
-      INTEGER(4)             :: IB0,NBLK
+      INTEGER(4)             :: IB0,NBLK,NBLKMAX
       COMPLEX(8)             :: PSIUP,PSIDN
       COMPLEX(8),ALLOCATABLE :: HTAUPSI(:,:,:)
+      REAL(8)                :: BKT_DUMMY(1)
+      LOGICAL(4)             :: TGPUDONE
 !     **************************************************************************
 !
 !     ==========================================================================
@@ -5530,6 +5545,28 @@ CALL TIMING$CLOCKOFF('W:HPSI.ADDPRO')
 !     ==  SMALL ON ANY MODERN MACHINE FOR REALISTIC NRL*NBH (VERIFIED ON A    ==
 !     ==  REAL RUN, NOT ASSUMED) -- SEE THE DEV NOTES, PHASE 1.           ==
 !     ==========================================================================
+      IF(VESPAW$GPU_ENABLED().AND..NOT.GSET%TSUPER) THEN
+        ALLOCATE(G2(NGL))
+        CALL PLANEWAVE$GETR8A('G2',NGL,G2)
+        IF(TBUCKET) THEN
+          CALL PLANEWAVE$GPU_VPSI_TRY(NGL,NDIM,NBH,NRL,.FALSE.,.TRUE. &
+     &                               ,G2,GSET%BUCKET,V,PSI,HPSI,TGPUDONE)
+        ELSE
+          BKT_DUMMY(1)=0.D0
+          CALL PLANEWAVE$GPU_VPSI_TRY(NGL,NDIM,NBH,NRL,.FALSE.,.FALSE. &
+     &                               ,G2,BKT_DUMMY,V,PSI,HPSI,TGPUDONE)
+        END IF
+        DEALLOCATE(G2)
+        IF(TGPUDONE) THEN
+          IF(LTSCANDELOC) THEN
+            ALLOCATE(HTAUPSI(NGL,NDIM,NBH))
+            CALL WAVES_TAUHPSI(NGL,NRL,NDIM,NBH,VTAU,PSI,HTAUPSI)
+            HPSI(:,:,:)=HPSI(:,:,:)+HTAUPSI(:,:,:)
+            DEALLOCATE(HTAUPSI)
+          END IF
+          RETURN
+        END IF
+      END IF
       IF(NDIM.EQ.1) THEN
         IF(GSET%TSUPER) THEN
 !         == TSUPER: NBH=NB HERE (NO BAND PAIRING -- SEE LGAMMASUPER), AND  ==
@@ -5579,7 +5616,8 @@ CALL TIMING$CLOCKOFF('W:HPSI.ADDPRO')
           CALL ERROR$MSG('COMPATIBLE WITH GAMMA-POINT SUPER WAVE FUNCTIONS')
           CALL ERROR$STOP('WAVES_VPSI')
         END IF
-        ALLOCATE(PSIOFR(NRL,NDIM))
+        NBLKMAX=MIN(NBH,MAX(1,NFFTBLK/NDIM))
+        ALLOCATE(PSIOFR(NRL,NDIM*NBLKMAX))
         ALLOCATE(VUPUP(NRL))
         ALLOCATE(VDNDN(NRL))
         ALLOCATE(VUPDN(NRL))
@@ -5588,15 +5626,20 @@ CALL TIMING$CLOCKOFF('W:HPSI.ADDPRO')
           VDNDN(IR)=V(IR,1)-V(IR,4)
           VUPDN(IR)=CMPLX(V(IR,2),-V(IR,3),KIND=8)
         ENDDO
-        DO IB=1,NBH
-          CALL PLANEWAVE$FFT('GTOR',NDIM,NGL,PSI(:,:,IB),NRL,PSIOFR)
-          DO IR=1,NRL
-            PSIUP=PSIOFR(IR,1)
-            PSIDN=PSIOFR(IR,2)
-            PSIOFR(IR,1)=VUPUP(IR)*PSIUP+      VUPDN(IR) *PSIDN
-            PSIOFR(IR,2)=VDNDN(IR)*PSIDN+CONJG(VUPDN(IR))*PSIUP
+        DO IB0=1,NBH,NBLKMAX
+          NBLK=MIN(NBLKMAX,NBH-IB0+1)
+          CALL PLANEWAVE$FFT('GTOR',NDIM*NBLK,NGL,PSI(:,:,IB0:IB0+NBLK-1),NRL &
+     &                      ,PSIOFR(:,1:NDIM*NBLK))
+          DO IB=1,NBLK
+            DO IR=1,NRL
+              PSIUP=PSIOFR(IR,2*IB-1)
+              PSIDN=PSIOFR(IR,2*IB)
+              PSIOFR(IR,2*IB-1)=VUPUP(IR)*PSIUP+      VUPDN(IR) *PSIDN
+              PSIOFR(IR,2*IB)  =VDNDN(IR)*PSIDN+CONJG(VUPDN(IR))*PSIUP
+            ENDDO
           ENDDO
-          CALL PLANEWAVE$FFT('RTOG',NDIM,NGL,HPSI(:,:,IB),NRL,PSIOFR)
+          CALL PLANEWAVE$FFT('RTOG',NDIM*NBLK,NGL,HPSI(:,:,IB0:IB0+NBLK-1),NRL &
+     &                      ,PSIOFR(:,1:NDIM*NBLK))
         ENDDO
         DEALLOCATE(VUPUP)
         DEALLOCATE(VUPDN)
@@ -5837,6 +5880,7 @@ CALL TIMING$CLOCKOFF('W:HPSI.ADDPRO')
 !     **                                                              **
 !     **                                                              **
 !     *******************************************P.E. BLOECHL, (1991)***
+      USE VESPAW_GPU_MODULE, ONLY : VESPAW$GPU_ENABLED
       IMPLICIT NONE
       INTEGER(4),PARAMETER  :: NFFTBLK=32   ! MAX #(BANDS) PER BATCHED FFT
       INTEGER(4)            :: IB0,NBLK,K
@@ -5861,9 +5905,13 @@ CALL TIMING$CLOCKOFF('W:HPSI.ADDPRO')
       REAL(8)                :: SVAR1,SVAR2
       REAL(8)                :: RWDBG
       COMPLEX(8)             :: CVARDBG
+      LOGICAL(4)             :: TDEBUG
+      LOGICAL(4)             :: TGPUDONE
+      COMPLEX(8)             :: CDUMMY_C8(1)
       COMPLEX(8),PARAMETER   :: CI=(0.D0,1.D0)
 !     ******************************************************************
                                CALL TRACE$PUSH('WAVES_DENSITY')
+      CALL VERBOSITY$GETL4('DEBUG',TDEBUG)
 !RELEASED 8.OCT.99 
 !
 !     ==================================================================
@@ -5891,16 +5939,27 @@ CALL TIMING$CLOCKOFF('W:HPSI.ADDPRO')
           CALL ERROR$MSG('WITH GAMMA-POINT SUPER WAVE FUNCTIONS')
           CALL ERROR$STOP('WAVES_DENSITY')
         END IF
+        IF(VESPAW$GPU_ENABLED().AND..NOT.TDEBUG) THEN
+          CDUMMY_C8(1)=(0.D0,0.D0)
+          CALL PLANEWAVE$GPU_DENSITY_TRY(NGL,NDIM,NBH,NB,NRL,TSUPER,TINV &
+     &                                  ,F,CDUMMY_C8,PSIOFG,RHO,TGPUDONE)
+          IF(TGPUDONE) THEN
+                                   CALL TRACE$POP()
+            RETURN
+          END IF
+        END IF
         ALLOCATE(PSIOFRR(NRL,NBH))
         CALL PLANEWAVE$SUPFFT('GTOR',NBH,NGL,PSIOFG,NRL,PSIOFRR)
-        CALL PLANEWAVE$GETR8('RWEIGHT',RWDBG)
-        DO IBH=1,NBH
-          CALL PLANEWAVE$SCALARPRODUCT(' ',NGL,1,1,PSIOFG(:,:,IBH),1 &
-     &                                 ,PSIOFG(:,:,IBH),CVARDBG)
-          WRITE(*,*) 'DEBUG-DENSITY-NORM IBH=',IBH,'F=',F(IBH) &
-     &              ,'RNORM=',SUM(PSIOFRR(:,IBH)**2)*RWDBG &
-     &              ,'GNORM=',REAL(CVARDBG,KIND=8)
-        ENDDO
+        IF(TDEBUG) THEN
+          CALL PLANEWAVE$GETR8('RWEIGHT',RWDBG)
+          DO IBH=1,NBH
+            CALL PLANEWAVE$SCALARPRODUCT(' ',NGL,1,1,PSIOFG(:,:,IBH),1 &
+     &                                   ,PSIOFG(:,:,IBH),CVARDBG)
+            WRITE(*,*) 'DEBUG-DENSITY-NORM IBH=',IBH,'F=',F(IBH) &
+     &                ,'RNORM=',SUM(PSIOFRR(:,IBH)**2)*RWDBG &
+     &                ,'GNORM=',REAL(CVARDBG,KIND=8)
+          ENDDO
+        END IF
         RHO(:,:)=0.D0
         DO IBH=1,NBH
           F1=F(IBH)
@@ -5909,7 +5968,9 @@ CALL TIMING$CLOCKOFF('W:HPSI.ADDPRO')
             RHO(IR,1)=RHO(IR,1)+F1*PSIOFRR(IR,IBH)**2
           ENDDO
         ENDDO
-        WRITE(*,*) 'DEBUG-DENSITY-TOTALQ=',SUM(RHO(:,1))*RWDBG
+        IF(TDEBUG) THEN
+          WRITE(*,*) 'DEBUG-DENSITY-TOTALQ=',SUM(RHO(:,1))*RWDBG
+        END IF
         DEALLOCATE(PSIOFRR)
                                  CALL TRACE$POP()
         RETURN
@@ -5937,6 +5998,15 @@ CALL TIMING$CLOCKOFF('W:HPSI.ADDPRO')
         CALL ERROR$MSG('SPINOR WAVE FUNCTIONS ARE NOT COMPATIBLE')
         CALL ERROR$MSG('WITH SUPER WAVE FUNCTIONS')
         CALL ERROR$STOP('WAVES_DENSITY')
+      END IF
+      IF(VESPAW$GPU_ENABLED().AND..NOT.TDEBUG) THEN
+        CDUMMY_C8(1)=(0.D0,0.D0)
+        CALL PLANEWAVE$GPU_DENSITY_TRY(NGL,NDIM,NBH,NB,NRL,TSUPER,TINV &
+     &                                ,F,CDUMMY_C8,PSIOFG,RHO,TGPUDONE)
+        IF(TGPUDONE) THEN
+                                 CALL TRACE$POP()
+          RETURN
+        END IF
       END IF
       RHO(:,:)=0.D0
       IF(TINV) THEN
@@ -6222,6 +6292,9 @@ CALL TIMING$CLOCKOFF('W:HPSI.ADDPRO')
       USE WAVES_MODULE, ONLY : MAP_TYPE,GSET_TYPE &
      &                         ,PROCACHEID,PROCACHENAT,PROCACHENGL,PROCACHENPRO &
      &                         ,PROCACHER,PROCACHEPRO
+      USE VESPAW_GPU_MODULE, ONLY : VESPAW$GPU_ENABLED &
+     &                             ,VESPAW$GPU_EXPANDPRO_ALL &
+     &                             ,VESPAW$GPU_PROCACHE_UPLOAD
       IMPLICIT NONE
       TYPE(MAP_TYPE) ,INTENT(IN) :: MAP
       TYPE(GSET_TYPE),INTENT(IN) :: GSET
@@ -6229,7 +6302,7 @@ CALL TIMING$CLOCKOFF('W:HPSI.ADDPRO')
       REAL(8)        ,INTENT(IN) :: R(3,NAT)
       INTEGER(4)     ,INTENT(IN) :: NGL
       INTEGER(4)     ,INTENT(IN) :: NPRO
-      LOGICAL(4)                 :: THIT
+      LOGICAL(4)                 :: THIT,TGPUDONE
       REAL(8)        ,ALLOCATABLE:: GVEC(:,:)  !(3,NGL)
       COMPLEX(8)     ,ALLOCATABLE:: PRO(:,:)   !(NGL,LMNXX)
       COMPLEX(8)     ,ALLOCATABLE:: EIGR(:)    !(NGL)
@@ -6288,32 +6361,43 @@ CALL TIMING$CLOCKOFF('W:HPSI.ADDPRO')
       CALL PLANEWAVE$GETR8A('GVEC',3*GSET%NGL,GVEC)
       LMNXX=MAXVAL(MAP%LMNX)
       LNXX=MAXVAL(MAP%LNX)
-      ALLOCATE(PRO(NGL,LMNXX))
-      ALLOCATE(EIGR(NGL))
-      ALLOCATE(LOX(LNXX))
-      IPRO=1
-      DO IAT=1,MAP%NAT
-        ISP=MAP%ISP(IAT)
-        LNX=MAP%LNX(ISP)
-        LMNX=MAP%LMNX(ISP)
-        LOX=MAP%LOX(:,ISP)
-        IBPRO=1+SUM(MAP%LNX(1:ISP-1))
-        CALL PLANEWAVE$STRUCTUREFACTOR(R(1,IAT),NGL,EIGR)
-        CALL WAVES_EXPANDPRO(LNX,LOX,LMNX,NGL,GVEC &
-     &                      ,GSET%PRO(:,IBPRO:IBPRO+LNX-1),MAP%LMX,GSET%YLM,EIGR &
-     &                      ,PRO(:,1:LMNX))
-        PROCACHEPRO(:,IPRO:IPRO+LMNX-1)=PRO(:,1:LMNX)
-        IF(TFULLPRODIAG.AND.IAT.EQ.8) THEN
-          PRINT*,'VESPAW_SCAN0R_SWAP_DIAG FULLPRO MISS GSETID=',GSET%ID &
-     &          ,' IAT=8 ISP=',ISP,' MAX|GSET%PRO(RAW)|=' &
-     &          ,MAXVAL(ABS(GSET%PRO(:,IBPRO:IBPRO+LNX-1))) &
-     &          ,' MAX|P(IAT=8,EXPANDED)|=',MAXVAL(ABS(PRO(:,1:LMNX)))
+      TGPUDONE=.FALSE.
+      IF(VESPAW$GPU_ENABLED().AND..NOT.TFULLPRODIAG) THEN
+        CALL VESPAW$GPU_EXPANDPRO_ALL(NGL,NAT,MAP%NSP,LMNXX,MAP%LNXX &
+     &     ,MAP%LMX,MAP%NBAREPRO,NPRO,MAP%ISP,MAP%LNX,MAP%LMNX,MAP%LOX &
+     &     ,R,GVEC,GSET%PRO,GSET%YLM,PROCACHEPRO,TGPUDONE)
+      END IF
+      IF(.NOT.TGPUDONE) THEN
+        ALLOCATE(PRO(NGL,LMNXX))
+        ALLOCATE(EIGR(NGL))
+        ALLOCATE(LOX(LNXX))
+        IPRO=1
+        DO IAT=1,MAP%NAT
+          ISP=MAP%ISP(IAT)
+          LNX=MAP%LNX(ISP)
+          LMNX=MAP%LMNX(ISP)
+          LOX=MAP%LOX(:,ISP)
+          IBPRO=1+SUM(MAP%LNX(1:ISP-1))
+          CALL PLANEWAVE$STRUCTUREFACTOR(R(1,IAT),NGL,EIGR)
+          CALL WAVES_EXPANDPRO(LNX,LOX,LMNX,NGL,GVEC &
+     &                        ,GSET%PRO(:,IBPRO:IBPRO+LNX-1),MAP%LMX,GSET%YLM,EIGR &
+     &                        ,PRO(:,1:LMNX))
+          PROCACHEPRO(:,IPRO:IPRO+LMNX-1)=PRO(:,1:LMNX)
+          IF(TFULLPRODIAG.AND.IAT.EQ.8) THEN
+            PRINT*,'VESPAW_SCAN0R_SWAP_DIAG FULLPRO MISS GSETID=',GSET%ID &
+     &            ,' IAT=8 ISP=',ISP,' MAX|GSET%PRO(RAW)|=' &
+     &            ,MAXVAL(ABS(GSET%PRO(:,IBPRO:IBPRO+LNX-1))) &
+     &            ,' MAX|P(IAT=8,EXPANDED)|=',MAXVAL(ABS(PRO(:,1:LMNX)))
+          END IF
+          IPRO=IPRO+LMNX
+        ENDDO
+        DEALLOCATE(LOX)
+        DEALLOCATE(PRO)
+        DEALLOCATE(EIGR)
+        IF(VESPAW$GPU_ENABLED()) THEN
+          CALL VESPAW$GPU_PROCACHE_UPLOAD(GSET%ID,NAT,NGL,NPRO,R,PROCACHEPRO)
         END IF
-        IPRO=IPRO+LMNX
-      ENDDO
-      DEALLOCATE(LOX)
-      DEALLOCATE(PRO)
-      DEALLOCATE(EIGR)
+      END IF
       DEALLOCATE(GVEC)
 !
 !     ==================================================================
@@ -6337,6 +6421,7 @@ CALL TIMING$CLOCKOFF('W:HPSI.ADDPRO')
 !     **                                                              **
 !     *******************************************P.E. BLOECHL, (1998)***
       USE WAVES_MODULE, ONLY : MAP_TYPE,GSET_TYPE,PROCACHEPRO
+      USE VESPAW_GPU_MODULE, ONLY : VESPAW$GPU_ENABLED,VESPAW$GPU_PROJECTIONS
       IMPLICIT NONE
       TYPE(MAP_TYPE) ,INTENT(IN) :: MAP
       TYPE(GSET_TYPE),INTENT(IN) :: GSET
@@ -6349,7 +6434,9 @@ CALL TIMING$CLOCKOFF('W:HPSI.ADDPRO')
       COMPLEX(8)     ,INTENT(IN) :: PSI(NGL,NDIM,NB) !WAVEFUNCTIONS
       COMPLEX(8)     ,INTENT(OUT):: PROPSI(NDIM,NB,NPRO) !
       COMPLEX(8)     ,ALLOCATABLE:: PROPSI1(:,:)  !(NPRO,NDIM*NB)
-      INTEGER(4)                 :: IPRO,IB,IDIM,ICOL
+      INTEGER(4)                 :: IPRO,IB,IDIM,ICOL,NGAMMA_META
+      LOGICAL(4)                 :: TSUP_META
+      REAL(8)                    :: GW_META
 !     ******************************************************************
                                 CALL TIMING$CLOCKON('WAVES_PROJECTIONS')
 !
@@ -6375,6 +6462,13 @@ CALL TIMING$CLOCKOFF('W:HPSI.ADDPRO')
 !     ==  THE DEV NOTES, 2026-09-07.                                ==
 !     ==================================================================
       CALL WAVES_FULLPRO(MAP,GSET,NAT,R,NGL,NPRO)
+      IF(VESPAW$GPU_ENABLED()) THEN
+        CALL PLANEWAVE$GET_SCALAR_META(TSUP_META,NGAMMA_META,GW_META)
+        CALL VESPAW$GPU_PROJECTIONS(NGL,NDIM,NB,NPRO,TSUP_META,NGAMMA_META &
+     &                             ,GW_META,PSI,PROPSI)
+                               CALL TIMING$CLOCKOFF('WAVES_PROJECTIONS')
+        RETURN
+      END IF
       ALLOCATE(PROPSI1(NPRO,NDIM*NB))
       CALL PLANEWAVE$SCALARPRODUCT(' ',NGL,1,NPRO,PROCACHEPRO,NDIM*NB,PSI,PROPSI1)
       DO IB=1,NB
@@ -6399,6 +6493,7 @@ CALL TIMING$CLOCKOFF('W:HPSI.ADDPRO')
 !     **                                                              **
 !     *******************************************P.E. BLOECHL, (1998)***
       USE WAVES_MODULE, ONLY : MAP_TYPE,GSET_TYPE,PROCACHEPRO
+      USE VESPAW_GPU_MODULE, ONLY : VESPAW$GPU_ENABLED,VESPAW$GPU_ADDPRO
       IMPLICIT NONE
       TYPE(MAP_TYPE) ,INTENT(IN) :: MAP
       TYPE(GSET_TYPE),INTENT(IN) :: GSET
@@ -6410,8 +6505,6 @@ CALL TIMING$CLOCKOFF('W:HPSI.ADDPRO')
       INTEGER(4)     ,INTENT(IN) :: NPRO       ! #(PROJECTIONS)
       COMPLEX(8)     ,INTENT(INOUT) :: PSI(NGL,NDIM,NB)  !WAVEFUNCTIONS
       COMPLEX(8)     ,INTENT(IN) :: PROPSI(NDIM,NB,NPRO) !
-      COMPLEX(8)     ,ALLOCATABLE:: PROPSI1(:,:)  !(NPRO,NDIM*NB)
-      INTEGER(4)                 :: IPRO,IB,IDIM,ICOL
 !     ******************************************************************
                                  CALL TIMING$CLOCKON('WAVES_ADDPRO')
 !
@@ -6437,18 +6530,17 @@ CALL TIMING$CLOCKOFF('W:HPSI.ADDPRO')
 !     ==  THE DEV NOTES, 2026-09-07.                               ==
 !     ==================================================================
       CALL WAVES_FULLPRO(MAP,GSET,NAT,R,NGL,NPRO)
-      ALLOCATE(PROPSI1(NPRO,NDIM*NB))
-      DO IB=1,NB
-        DO IDIM=1,NDIM
-          ICOL=IDIM+NDIM*(IB-1)
-          DO IPRO=1,NPRO
-            PROPSI1(IPRO,ICOL)=PROPSI(IDIM,IB,IPRO)
-          ENDDO
-        ENDDO
-      ENDDO
-!     == PSI=PSI+PRO*PROPSI1
-      CALL LIB$ADDPRODUCTC8(.FALSE.,NGL,NPRO,NDIM*NB,PROCACHEPRO,PROPSI1,PSI)
-      DEALLOCATE(PROPSI1)
+      IF(VESPAW$GPU_ENABLED()) THEN
+        CALL VESPAW$GPU_ADDPRO(NGL,NDIM,NB,NPRO,PROPSI,PSI)
+                                 CALL TIMING$CLOCKOFF('WAVES_ADDPRO')
+        RETURN
+      END IF
+!     == PSI=PSI+PRO*TRANSPOSE(PROPSI), ZERO-COPY DIRECT ZGEMM ON      ==
+!     == (NDIM*NB,NPRO) MEMORY LAYOUT                                  ==
+      IF(NGL.GT.0.AND.NPRO.GT.0.AND.NDIM*NB.GT.0) THEN
+        CALL ZGEMM('N','T',NGL,NDIM*NB,NPRO,(1.D0,0.D0) &
+     &            ,PROCACHEPRO,NGL,PROPSI,NDIM*NB,(1.D0,0.D0),PSI,NGL)
+      END IF
                                  CALL TIMING$CLOCKOFF('WAVES_ADDPRO')
       RETURN
       END

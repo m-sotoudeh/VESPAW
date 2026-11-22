@@ -52,6 +52,8 @@ FFTDIR="/usr/local/opt/"
 MPIDIR="/usr/local/opt/open-mpi/"
 ##_______________________ TEMPLATE -- SET THIS TO YOUR CLUSTER'S CUDA TOOLKIT PATH ____##
 CUDADIR="/CHANGE/ME/TO/YOUR/CUDA/TOOLKIT/PREFIX"
+NVCC="${CUDADIR}/bin/nvcc"
+NVCCFLAGS="-O3 -Xcompiler -fPIC -I${CUDADIR}/include"
 ##  e.g. on Justus2: whatever `module load cuda` (or the site's equivalent module)     ##
 ##  sets as CUDA_HOME/CUDA_PATH -- must contain lib64/libcudart.so and lib64/libcufft.so
 ##  (or lib/ on some installs -- adjust LDFLAGS_* below if so).                        ##
@@ -129,21 +131,21 @@ LDFLAGS_PARALLEL="-I${OBJDIR} -I/usr/local/opt/fftw/include/ -L${OBJDIR} -L${LAP
 #########################################################################################
 #________________________________external libraries (sequential)
 ##                                                                                     ##
-LIBS_SCALAR="-lcufft -lcudart -lfftw3 -lgfortran -lopenblas -llapack -lpthread -lm -fopenmp"
+LIBS_SCALAR="-lcudart -lcufft -lcublas -lcusolver -lstdc++ -lfftw3 -lgfortran -lopenblas -llapack -lpthread -lm -fopenmp"
 ##                                                                                     ##
 #########################################################################################
 #
 #########################################################################################
 #____________________________external libraries (parallel)_____________________________##
 ##                                                                                     ##
-LIBS_PARALLEL="-lcufft -lcudart -lfftw3 -lgfortran -lopenblas -llapack -lpthread -lm -fopenmp"
+LIBS_PARALLEL="-lcudart -lcufft -lcublas -lcusolver -lstdc++ -lfftw3 -lgfortran -lopenblas -llapack -lpthread -lm -fopenmp"
 ##                                                                                     ##
 #########################################################################################
 #
 #########################################################################################
 ##________________________________preprocessor variables_______________________________##
 ##                                                                                     ##
-CPPFLAGS="-DCPPVAR_FFT_CUFFT -DCPPVAR_BLAS_OPENBLAS -DCPPVAR_U77 -DCPPVAR_COMPILER_G95 "
+CPPFLAGS="-DCPPVAR_GPU_CUDA -DCPPVAR_FFT_CUFFT -DCPPVAR_BLAS_OPENBLAS -DCPPVAR_U77 -DCPPVAR_COMPILER_G95 "
 ##                                                                                     ##
 ##-------------------------------------------------------------------------------------##
 ##  selects LIB_CUFFT/LIB_3DFFTCUFFT in src/paw_library.f90 instead of LIB_FFTW3.      ##

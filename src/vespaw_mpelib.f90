@@ -1735,4 +1735,63 @@ END MODULE MPE_MODULE
       CLOCK%STARTTIME  =0.D0
       RETURN
       END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE MPE$TRANSPOSE_DEVC8(CID,LENG,DEVPTR_SEND,DEVPTR_RECV)
+!     **************************************************************************
+!     **  CUDA-AWARE MPI ALLTOALL FOR DEVICE-RESIDENT COMPLEX(8) BUFFERS      **
+!     **************************************************************************
+      USE, INTRINSIC :: ISO_C_BINDING
+      USE MPE_MPIF_MODULE
+      IMPLICIT NONE
+      CHARACTER(*),INTENT(IN) :: CID
+      INTEGER(4)  ,INTENT(IN) :: LENG
+      TYPE(C_PTR) ,INTENT(IN) :: DEVPTR_SEND
+      TYPE(C_PTR) ,INTENT(IN) :: DEVPTR_RECV
+#IF DEFINED(CPPVARIABLE_PARALLEL)
+#IF DEFINED(CPPVAR_MPI_CUDA_AWARE)
+      INTEGER                 :: IERR,LENG1
+      COMPLEX(8)  ,POINTER    :: D_SEND(:),D_RECV(:)
+      CALL MPE_CLOCKON(TRANSPOSE_CLOCK)
+      CALL MPE$SELECT(CID)
+      LENG1=LENG/NTASKS
+      IF(LENG1*NTASKS.NE.LENG) THEN
+        CALL ERROR$MSG('ARRAY SIZE NOT DIVIDABLE BY #(PROCESSORS)')
+        CALL ERROR$STOP('MPE$TRANSPOSE_DEVC8')
+      END IF
+      CALL C_F_POINTER(DEVPTR_SEND,D_SEND,(/LENG/))
+      CALL C_F_POINTER(DEVPTR_RECV,D_RECV,(/LENG/))
+      CALL MPI_ALLTOALL(D_SEND,LENG1,MY_MPITYPE_COMPLEX_KIND8 &
+     &                 ,D_RECV,LENG1,MY_MPITYPE_COMPLEX_KIND8,COMM,IERR)
+      CALL MPE_CLOCKOFF(TRANSPOSE_CLOCK,LENG1,'C8')
+#ENDIF
+#ENDIF
+      RETURN
+      END SUBROUTINE MPE$TRANSPOSE_DEVC8
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE MPE$COMBINE_DEVC8(CID,LENG,DEVPTR_SEND,DEVPTR_RECV)
+!     **************************************************************************
+!     **  CUDA-AWARE MPI ALLREDUCE (+) FOR DEVICE-RESIDENT COMPLEX(8) BUFFERS **
+!     **************************************************************************
+      USE, INTRINSIC :: ISO_C_BINDING
+      USE MPE_MPIF_MODULE
+      IMPLICIT NONE
+      CHARACTER(*),INTENT(IN) :: CID
+      INTEGER(4)  ,INTENT(IN) :: LENG
+      TYPE(C_PTR) ,INTENT(IN) :: DEVPTR_SEND
+      TYPE(C_PTR) ,INTENT(IN) :: DEVPTR_RECV
+#IF DEFINED(CPPVARIABLE_PARALLEL)
+#IF DEFINED(CPPVAR_MPI_CUDA_AWARE)
+      INTEGER                 :: IERR
+      COMPLEX(8)  ,POINTER    :: D_SEND(:),D_RECV(:)
+      CALL MPE$SELECT(CID)
+      CALL C_F_POINTER(DEVPTR_SEND,D_SEND,(/LENG/))
+      CALL C_F_POINTER(DEVPTR_RECV,D_RECV,(/LENG/))
+      CALL MPI_ALLREDUCE(D_SEND,D_RECV,LENG,MY_MPITYPE_COMPLEX_KIND8 &
+     &                  ,MPI_SUM,COMM,IERR)
+#ENDIF
+#ENDIF
+      RETURN
+      END SUBROUTINE MPE$COMBINE_DEVC8
 

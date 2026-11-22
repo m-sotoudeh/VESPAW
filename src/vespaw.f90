@@ -23,6 +23,7 @@
 !     **                                                                      **
 !     **************************************************************************
       USE CLOCK_MODULE
+      USE VESPAW_GPU_MODULE
       IMPLICIT NONE
       CHARACTER(32) :: DATIME
       INTEGER(4)    :: NFILO
@@ -34,6 +35,8 @@
 !     == INITIALIZE MPE ROUTINE FOR PARALLEL PROCESSING                       ==
 !     ==========================================================================
       CALL MPE$INIT
+      CALL MPE$QUERY('~',NTASKS,THISTASK)
+      CALL VESPAW$GPU_INIT(THISTASK-1,NTASKS)
 !
 !     ==========================================================================
 !     == CONSISTENCY CHECKS OF THE CALLING SEQUENCY AND VERSION INFO          ==
@@ -87,6 +90,7 @@
 !     ==  CLOSE DOWN                                                          ==
 !     ==========================================================================
       CALL TRACE$POP
+      CALL VESPAW$GPU_SHUTDOWN()
       CALL ERROR$NORMALSTOP 
       STOP
       END

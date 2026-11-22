@@ -1788,10 +1788,10 @@ END MODULE PLANEWAVE_MODULE
       INTEGER(4)                 :: NGL
       INTEGER(4)                 :: NR1,NR2,NR3
       INTEGER(4)                 :: NSTRIPELX
-      INTEGER(4)                 :: IGH,IG1,IG2,IFFT,IR,IG
+      INTEGER(4)                 :: IGH,IG1,IG2,IFFT,IR,IG,NFFT2,IPAIR
       COMPLEX(8),PARAMETER       :: CI=(0.D0,1.D0)
-      COMPLEX(8),ALLOCATABLE     :: FOFG1(:)
-      COMPLEX(8),ALLOCATABLE     :: FOFR1(:)
+      COMPLEX(8),ALLOCATABLE     :: FOFG1(:,:)
+      COMPLEX(8),ALLOCATABLE     :: FOFR1(:,:)
       COMPLEX(8)                 :: F1,F2
       INTEGER(4)                 :: ntasks,THISTASK
 !     ******************************************************************
@@ -1840,86 +1840,77 @@ END MODULE PLANEWAVE_MODULE
       END IF
 !
 !     ==================================================================
-!     == FOURIER TRANSFORM VIA SUPER WAVE FUNCTIONS                   ==
+!     == FOURIER TRANSFORM VIA SUPER WAVE FUNCTIONS (BATCHED OVER ALL ==
+!     == PAIRS VIA _MU SO MPI/SLABS/GPU SEE NFFT2 BANDS AT ONCE)      ==
 !     ==================================================================
-      ALLOCATE(FOFG1(NGL))
-      ALLOCATE(FOFR1(NRL))
+      IF(NFFT.LE.0) THEN
+                                 CALL TIMING$CLOCKOFF('PLANEWAVE$SUPFFT')
+                                 CALL TRACE$POP
+        RETURN
+      END IF
+      NFFT2=(NFFT+1)/2
+      ALLOCATE(FOFG1(NGL,NFFT2))
+      ALLOCATE(FOFR1(NRL,NFFT2))
       IF(ID.EQ.'GTOR') THEN
-        DO IFFT=1,NFFT,2
-!
-!         ==============================================================
-!         == SET UP SUPER WAVE FUNCTIONS IN G-SPACE                   ==
-!         ==============================================================
+        DO IPAIR=1,NFFT2
+          IFFT=2*IPAIR-1
           IGH=0
           DO IG1=1,NGL
             IG2=THIS%MINUSG(IG1)
             IF(IG2.LT.IG1) CYCLE
             IGH=IGH+1
             IF(IFFT+1.LE.NFFT) THEN
-              FOFG1(IG1)=      FOFG(IGH,IFFT) +CI*      FOFG(IGH,IFFT+1)
-              FOFG1(IG2)=CONJG(FOFG(IGH,IFFT))+CI*CONJG(FOFG(IGH,IFFT+1))
+              FOFG1(IG1,IPAIR)=      FOFG(IGH,IFFT) +CI*      FOFG(IGH,IFFT+1)
+              FOFG1(IG2,IPAIR)=CONJG(FOFG(IGH,IFFT))+CI*CONJG(FOFG(IGH,IFFT+1))
             ELSE
-              FOFG1(IG1)=FOFG(IGH,IFFT)
-              FOFG1(IG2)=CONJG(FOFG(IGH,IFFT))
+              FOFG1(IG1,IPAIR)=FOFG(IGH,IFFT)
+              FOFG1(IG2,IPAIR)=CONJG(FOFG(IGH,IFFT))
             END IF
           ENDDO
-!
-!         ==============================================================
-!         == NOW TRANSFORM SUPER WAVE FUNCTIONS TO R-SPACE            ==
-!         ==============================================================
-          CALL PLANEWAVE_FFTGTOR(this%cid,ntasks,NGL,NRL,NR1,NR2,NR3 &
-     &           ,NSTRIPELX,THIS%NSTRIPELARR,THIS%NR1LARR &
-     &           ,THIS%IGTOSTRIPE,THIS%ISTRIPETOYZ &
-     &           ,FOFG1,FOFR1)
-!
-!         ==============================================================
-!         == UNRAVEL SUPER WAVE FUNCTIONS IN R-SPACE                  ==
-!         ==============================================================
+        ENDDO
+        CALL PLANEWAVE_FFTGTOR_MU(this%cid,ntasks,NFFT2,NGL,NRL,NR1,NR2,NR3 &
+     &         ,NSTRIPELX,THIS%NSTRIPELARR,THIS%NR1LARR &
+     &         ,THIS%IGTOSTRIPE,THIS%ISTRIPETOYZ &
+     &         ,FOFG1,FOFR1)
+        DO IPAIR=1,NFFT2
+          IFFT=2*IPAIR-1
           IF(IFFT+1.LE.NFFT) THEN
             DO IR=1,NRL
-              FOFR(IR,IFFT)  =REAL(FOFR1(IR),KIND=8)
-              FOFR(IR,IFFT+1)=AIMAG(FOFR1(IR))
+              FOFR(IR,IFFT)  =REAL(FOFR1(IR,IPAIR),KIND=8)
+              FOFR(IR,IFFT+1)=AIMAG(FOFR1(IR,IPAIR))
             ENDDO
           ELSE
             DO IR=1,NRL
-              FOFR(IR,IFFT)=REAL(FOFR1(IR),KIND=8)
+              FOFR(IR,IFFT)=REAL(FOFR1(IR,IPAIR),KIND=8)
             ENDDO
           END IF
         ENDDO
       ELSE IF(ID.EQ.'RTOG') THEN
-        DO IFFT=1,NFFT,2
-!
-!         ==============================================================
-!         == SET UP SUPER WAVE FUNCTIONS IN R-SPACE                   ==
-!         ==============================================================
+        DO IPAIR=1,NFFT2
+          IFFT=2*IPAIR-1
           IF(IFFT+1.LE.NFFT) THEN
             DO IR=1,NRL
-              FOFR1(IR)=CMPLX(FOFR(IR,IFFT),FOFR(IR,IFFT+1),8)
+              FOFR1(IR,IPAIR)=CMPLX(FOFR(IR,IFFT),FOFR(IR,IFFT+1),8)
             ENDDO
           ELSE
             DO IR=1,NRL
-              FOFR1(IR)=CMPLX(FOFR(IR,IFFT),0.D0,8)
+              FOFR1(IR,IPAIR)=CMPLX(FOFR(IR,IFFT),0.D0,8)
             ENDDO
           END IF
-! 
-!         ==============================================================
-!         == NOW TRANSFORM SUPER WAVE FUNCTIONS TO G-SPACE            ==
-!         ==============================================================
-          CALL PLANEWAVE_FFTRTOG(this%cid,ntasks,NGL,NRL,NR1,NR2,NR3 &
-     &           ,NSTRIPELX,THIS%NSTRIPELARR,THIS%NR1LARR &
-     &           ,THIS%IGTOSTRIPE,THIS%ISTRIPETOYZ &
-     &           ,FOFG1,FOFR1)
-!
-!         ==============================================================
-!         == UNRAVEL SUPER WAVE FUNCTIONS IN R-SPACE                  ==
-!         ==============================================================
+        ENDDO
+        CALL PLANEWAVE_FFTRTOG_MU(this%cid,ntasks,NFFT2,NGL,NRL,NR1,NR2,NR3 &
+     &         ,NSTRIPELX,THIS%NSTRIPELARR,THIS%NR1LARR &
+     &         ,THIS%IGTOSTRIPE,THIS%ISTRIPETOYZ &
+     &         ,FOFG1,FOFR1)
+        DO IPAIR=1,NFFT2
+          IFFT=2*IPAIR-1
           IGH=0
           DO IG1=1,NGL
             IG2=THIS%MINUSG(IG1)
             IF(IG2.LT.IG1) CYCLE
             IGH=IGH+1
-            F1=FOFG1(IG1)
-            F2=CONJG(FOFG1(IG2))
+            F1=FOFG1(IG1,IPAIR)
+            F2=CONJG(FOFG1(IG2,IPAIR))
             IF(IFFT+1.LE.NFFT) THEN
               FOFG(IGH,IFFT)  =0.5D0*(F1+F2)
               FOFG(IGH,IFFT+1)=0.5D0*CI*(F2-F1)
@@ -1927,7 +1918,6 @@ END MODULE PLANEWAVE_MODULE
               FOFG(IGH,IFFT)=0.5D0*(F1+F2)
             END IF
           ENDDO
-          
         ENDDO
       ELSE
         CALL ERROR$MSG('ID MUST BE WITHER GTOR OR RTOG')
@@ -2381,6 +2371,7 @@ END MODULE PLANEWAVE_MODULE
 !     **  SILENTLY SCRAMBLE RESULTS ACROSS BANDS/TASKS.                 **
 !     ******************************************************************
       USE MPE_MODULE
+      USE VESPAW_GPU_MODULE, ONLY : VESPAW$GPU_ENABLED,VESPAW$GPU_FFT_3D_GTOR_MU
       IMPLICIT NONE
       character(*),intent(in)   :: cid   ! communicator id (see mpelib)
       INTEGER(4)  ,INTENT(IN)   :: ntasks_
@@ -2414,6 +2405,11 @@ END MODULE PLANEWAVE_MODULE
         call error$msg('inconsistent ntasks')
         call error$stop('PLANEWAVE_FFTGTOR_MU')
       end if
+      IF(NTASKS.EQ.1.AND.VESPAW$GPU_ENABLED()) THEN
+        CALL VESPAW$GPU_FFT_3D_GTOR_MU(NGL,NRL,NR1,NR2,NR3,NFFT,NSTRIPELX &
+     &                                ,IGTOSTRIPE,ISTRIPETOYZ(:,1),FOFG,FOFR)
+        RETURN
+      END IF
       IF(MAX(NR1,NR2,NR3).GT.2048) THEN
         CALL ERROR$MSG('INSUFFICIENT SIZE FOR AUXILIARY ARRAYS')
         CALL ERROR$STOP('PLANEWAVE_FFTGTOR_MU')
@@ -2508,19 +2504,9 @@ END MODULE PLANEWAVE_MODULE
 !     == OVER (IFFT,IR1L), NOT BATCHED -- SEE THE HEADER COMMENT       ==
 !     ==================================================================
                                  CALL TIMING$CLOCKON('FFTMU:NR2FFT')
-      DO IFFT=1,NFFT
-        DO IR1L=1,NR1L
-          CALL LIB$FFTC8('GTOR',NR2,NR3END1,FOFR(1+(IR1L-1)*NR2*NR3,IFFT) &
-     &                                     ,FOFR(1+(IR1L-1)*NR2*NR3,IFFT))
-        ENDDO
-      ENDDO
-      DO IFFT=1,NFFT
-        DO IR1L=1,NR1L
-          CALL LIB$FFTC8('GTOR',NR2,NR3-NR3END2+1 &
-     &                  ,FOFR(1+NR2*(NR3END2-1)+(IR1L-1)*NR2*NR3,IFFT) &
-     &                  ,FOFR(1+NR2*(NR3END2-1)+(IR1L-1)*NR2*NR3,IFFT))
-        ENDDO
-      ENDDO
+      CALL LIB$FFTC8_SLABS('GTOR',NR2,NR3END1,NR1L,NR2*NR3,NFFT,NRL,0,FOFR)
+      CALL LIB$FFTC8_SLABS('GTOR',NR2,NR3-NR3END2+1,NR1L,NR2*NR3,NFFT,NRL &
+     &                    ,NR2*(NR3END2-1),FOFR)
                                  CALL TIMING$CLOCKOFF('FFTMU:NR2FFT')
 !
 !     ==================================================================
@@ -2589,6 +2575,7 @@ END MODULE PLANEWAVE_MODULE
 !     **  RATIONALE -- NOT REPEATED HERE).                              **
 !     ******************************************************************
       USE MPE_MODULE
+      USE VESPAW_GPU_MODULE, ONLY : VESPAW$GPU_ENABLED,VESPAW$GPU_FFT_3D_RTOG_MU
       IMPLICIT NONE
       character(*),intent(in)   :: cid
       INTEGER(4)  ,INTENT(IN)   :: ntasks_
@@ -2623,6 +2610,11 @@ END MODULE PLANEWAVE_MODULE
         call error$msg('inconsistent ntasks')
         call error$stop('PLANEWAVE_FFTRTOG_MU')
       end if
+      IF(NTASKS.EQ.1.AND.VESPAW$GPU_ENABLED()) THEN
+        CALL VESPAW$GPU_FFT_3D_RTOG_MU(NGL,NRL,NR1,NR2,NR3,NFFT,NSTRIPELX &
+     &                                ,IGTOSTRIPE,ISTRIPETOYZ(:,1),FOFG,FOFR)
+        RETURN
+      END IF
       NR1L=NR1LARR(THISTASK)
       NR1LX=MAXVAL(NR1LARR)
       NSTRIPEL=NSTRIPELARR(THISTASK)
@@ -2701,19 +2693,10 @@ END MODULE PLANEWAVE_MODULE
 !     == NOT BATCHED -- SEE PLANEWAVE_FFTGTOR_MU'S HEADER COMMENT      ==
 !     ==================================================================
                                  CALL TIMING$CLOCKON('FFTMU:NR2FFT')
-      DO IFFT=1,NFFT
-        DO IR1L=1,NR1L
-          CALL LIB$FFTC8('RTOG',NR2,NR3END1,FOFR2(1+(IR1L-1)*NR2*NR3,IFFT) &
-     &                                     ,FOFR2(1+(IR1L-1)*NR2*NR3,IFFT))
-        ENDDO
-      ENDDO
-      DO IFFT=1,NFFT
-        DO IR1L=1,NR1L
-          CALL LIB$FFTC8('RTOG',NR2,NR3-NR3END2+1 &
-     &                    ,FOFR2(1+NR2*(NR3END2-1)+(IR1L-1)*NR2*NR3,IFFT) &
-     &                    ,FOFR2(1+NR2*(NR3END2-1)+(IR1L-1)*NR2*NR3,IFFT))
-        ENDDO
-      ENDDO
+      CALL LIB$FFTC8_SLABS('RTOG',NR2,NR3END1,NR1L,NR2*NR3,NFFT &
+     &                    ,NR2*NR3*NR1L,0,FOFR2)
+      CALL LIB$FFTC8_SLABS('RTOG',NR2,NR3-NR3END2+1,NR1L,NR2*NR3,NFFT &
+     &                    ,NR2*NR3*NR1L,NR2*(NR3END2-1),FOFR2)
                                  CALL TIMING$CLOCKOFF('FFTMU:NR2FFT')
 !
 !     ==================================================================
@@ -2791,6 +2774,7 @@ END MODULE PLANEWAVE_MODULE
 !     **                                                              **
 !     ******************************************************************
       USE PLANEWAVE_MODULE
+      USE VESPAW_GPU_MODULE, ONLY : VESPAW$GPU_ENABLED,VESPAW$GPU_SCALARPRODUCT
       IMPLICIT NONE 
       CHARACTER(*),INTENT(IN)   :: ID    ! ' ','=','-'
       INTEGER(4)  ,INTENT(IN)   :: NDIM
@@ -2804,8 +2788,17 @@ END MODULE PLANEWAVE_MODULE
       INTEGER(4)                :: I1,I2,IDIM
       COMPLEX(8)  ,ALLOCATABLE  :: F2M(:,:)
       LOGICAL(4)  ,PARAMETER    :: TESSL=.TRUE.
+      LOGICAL(4)                :: TGPUDONE
 !     ******************************************************************
                           CALL TIMING$CLOCKON('PLANEWAVE$SCALARPRODUCT')
+      IF((ID.EQ.''.OR.ID.EQ.'=').AND.VESPAW$GPU_ENABLED()) THEN
+        CALL VESPAW$GPU_SCALARPRODUCT((ID.EQ.'='),NGL,NDIM,N1,F1,N2,F2 &
+     &     ,THIS%TSUPER,THIS%NGAMMA,THIS%GWEIGHT,MAT,TGPUDONE)
+        IF(TGPUDONE) THEN
+                          CALL TIMING$CLOCKOFF('PLANEWAVE$SCALARPRODUCT')
+          RETURN
+        END IF
+      END IF
       IF(ID.EQ.''.OR.ID.EQ.'=') THEN
         CALL LIB$SCALARPRODUCTC8((ID.EQ.'='),NGL*NDIM,N1,F1,N2,F2,MAT)
       ELSE IF(ID.EQ.'-') THEN
@@ -2853,6 +2846,60 @@ END MODULE PLANEWAVE_MODULE
 !     ==  MULTIPLY WITH GWEIGHT                                       ==
 !     ==================================================================
       MAT=MAT*THIS%GWEIGHT
+                         CALL TIMING$CLOCKOFF('PLANEWAVE$SCALARPRODUCT')
+      RETURN
+      END
+!
+!     ..................................................................
+      SUBROUTINE PLANEWAVE$DOTDIAG(NGL,NDIM,N,F1,F2,DIAG)
+!     ******************************************************************
+!     **  BATCHED REAL DIAGONAL SCALAR PRODUCTS DIAG(K)=RE(<F1_K|F2_K>)**
+!     **  WITH EXACT TSUPER + GWEIGHT SCALING, AVOIDING N CALLS TO      **
+!     **  PLANEWAVE$SCALARPRODUCT (AND N SEPARATE MPE$COMBINE CALLS).   **
+!     ******************************************************************
+      USE PLANEWAVE_MODULE
+      USE VESPAW_GPU_MODULE, ONLY : VESPAW$GPU_ENABLED,VESPAW$GPU_DOTDIAG
+      IMPLICIT NONE
+      INTEGER(4),INTENT(IN)  :: NGL
+      INTEGER(4),INTENT(IN)  :: NDIM
+      INTEGER(4),INTENT(IN)  :: N
+      COMPLEX(8),INTENT(IN)  :: F1(NGL,NDIM,N)
+      COMPLEX(8),INTENT(IN)  :: F2(NGL,NDIM,N)
+      REAL(8)   ,INTENT(OUT) :: DIAG(N)
+      INTEGER(4)             :: K,IDIM,IG,NGAMMA
+      REAL(8)                :: SVAR,GW
+      LOGICAL(4)             :: TGPUDONE
+!     ******************************************************************
+                         CALL TIMING$CLOCKON('PLANEWAVE$SCALARPRODUCT')
+      IF(VESPAW$GPU_ENABLED()) THEN
+        CALL VESPAW$GPU_DOTDIAG(NGL,NDIM,N,F1,F2,THIS%TSUPER,THIS%NGAMMA &
+     &                         ,THIS%GWEIGHT,DIAG,TGPUDONE)
+        IF(TGPUDONE) THEN
+                         CALL TIMING$CLOCKOFF('PLANEWAVE$SCALARPRODUCT')
+          RETURN
+        END IF
+      END IF
+      NGAMMA=THIS%NGAMMA
+      GW=THIS%GWEIGHT
+      DO K=1,N
+        SVAR=0.D0
+        DO IDIM=1,NDIM
+          DO IG=1,NGL
+            SVAR=SVAR+DBLE(F1(IG,IDIM,K))*DBLE(F2(IG,IDIM,K)) &
+     &               +AIMAG(F1(IG,IDIM,K))*AIMAG(F2(IG,IDIM,K))
+          ENDDO
+        ENDDO
+        IF(THIS%TSUPER) THEN
+          SVAR=2.D0*SVAR
+          IF(NGAMMA.NE.0) THEN
+            DO IDIM=1,NDIM
+              SVAR=SVAR-(DBLE(F1(NGAMMA,IDIM,K))*DBLE(F2(NGAMMA,IDIM,K)) &
+     &                 +AIMAG(F1(NGAMMA,IDIM,K))*AIMAG(F2(NGAMMA,IDIM,K)))
+            ENDDO
+          END IF
+        END IF
+        DIAG(K)=SVAR*GW
+      ENDDO
                          CALL TIMING$CLOCKOFF('PLANEWAVE$SCALARPRODUCT')
       RETURN
       END
@@ -3306,5 +3353,165 @@ END MODULE PLANEWAVE_MODULE
       DEALLOCATE(X_LOCTMP)
                      CALL TRACE$POP
       
+      RETURN
+      END
+!
+!     ..................................................................
+      SUBROUTINE PLANEWAVE$GET_SCALAR_META(TSUPER_OUT,NGAMMA_OUT,GWEIGHT_OUT)
+!     ******************************************************************
+!     **  RETURNS TSUPER, NGAMMA, AND GWEIGHT FOR CURRENT GSET        **
+!     ******************************************************************
+      USE PLANEWAVE_MODULE
+      IMPLICIT NONE
+      LOGICAL(4),INTENT(OUT) :: TSUPER_OUT
+      INTEGER(4),INTENT(OUT) :: NGAMMA_OUT
+      REAL(8)   ,INTENT(OUT) :: GWEIGHT_OUT
+      TSUPER_OUT=THIS%TSUPER
+      NGAMMA_OUT=THIS%NGAMMA
+      GWEIGHT_OUT=THIS%GWEIGHT
+      RETURN
+      END
+!
+!     ..................................................................
+      SUBROUTINE PLANEWAVE$GPU_VPSI_TRY(NGL,NDIM,NBH,NRL,TSUPER,TBUCKET &
+     &                                 ,G2,BUCKET,V,PSI,HPSI,TDONE)
+!     ******************************************************************
+!     **  SERIAL (NTASKS == 1) FUSED GPU VPSI KERNEL DISPATCHER       **
+!     ******************************************************************
+      USE PLANEWAVE_MODULE
+      USE VESPAW_GPU_MODULE, ONLY : VESPAW$GPU_ENABLED,VESPAW$GPU_VPSI_SERIAL
+      IMPLICIT NONE
+      INTEGER(4),INTENT(IN)  :: NGL,NDIM,NBH,NRL
+      LOGICAL(4),INTENT(IN)  :: TSUPER,TBUCKET
+      REAL(8)   ,INTENT(IN)  :: G2(NGL)
+      REAL(8)   ,INTENT(IN)  :: BUCKET(*)
+      REAL(8)   ,INTENT(IN)  :: V(NRL,NDIM**2)
+      COMPLEX(8),INTENT(IN)  :: PSI(NGL,NDIM,NBH)
+      COMPLEX(8),INTENT(OUT) :: HPSI(NGL,NDIM,NBH)
+      LOGICAL(4),INTENT(OUT) :: TDONE
+      INTEGER(4)             :: NTASKS,THISTASK,NSTRIPELX
+      INTEGER(4),SAVE        :: DUMMY_MG(1)=0
+      TDONE=.FALSE.
+      IF(.NOT.VESPAW$GPU_ENABLED().OR.TSUPER) RETURN
+      CALL MPE$QUERY(THIS%CID,NTASKS,THISTASK)
+      IF(NTASKS.NE.1) RETURN
+      IF(NRL.NE.THIS%NR1L*THIS%NR2*THIS%NR3) RETURN
+      IF(NGL.NE.THIS%NGLARR(1)) RETURN
+      NSTRIPELX=MAXVAL(THIS%NSTRIPELARR)
+      IF(ASSOCIATED(THIS%MINUSG)) THEN
+        CALL VESPAW$GPU_VPSI_SERIAL(NGL,NDIM,NBH,NRL,THIS%NR1,THIS%NR2 &
+     &     ,THIS%NR3,NSTRIPELX,TSUPER,TBUCKET,THIS%IGTOSTRIPE &
+     &     ,THIS%ISTRIPETOYZ(:,1),THIS%MINUSG,G2,BUCKET,V,PSI,HPSI)
+      ELSE
+        CALL VESPAW$GPU_VPSI_SERIAL(NGL,NDIM,NBH,NRL,THIS%NR1,THIS%NR2 &
+     &     ,THIS%NR3,NSTRIPELX,TSUPER,TBUCKET,THIS%IGTOSTRIPE &
+     &     ,THIS%ISTRIPETOYZ(:,1),DUMMY_MG,G2,BUCKET,V,PSI,HPSI)
+      END IF
+      TDONE=.TRUE.
+      RETURN
+      END
+!
+!     ..................................................................
+      SUBROUTINE PLANEWAVE$GPU_DENSITY_TRY(NGL,NDIM,NBH,NB,NRL,TSUPER,TINV &
+     &                                    ,OCC,EI2KR,PSI,RHO,TDONE)
+!     ******************************************************************
+!     **  SERIAL (NTASKS == 1) GPU DENSITY KERNEL DISPATCHER          **
+!     ******************************************************************
+      USE PLANEWAVE_MODULE
+      USE VESPAW_GPU_MODULE, ONLY : VESPAW$GPU_ENABLED &
+     &                             ,VESPAW$GPU_DENSITY_SERIAL
+      IMPLICIT NONE
+      INTEGER(4),INTENT(IN)  :: NGL,NDIM,NBH,NB,NRL
+      LOGICAL(4),INTENT(IN)  :: TSUPER,TINV
+      REAL(8)   ,INTENT(IN)  :: OCC(NB)
+      COMPLEX(8),INTENT(IN)  :: EI2KR(*)
+      COMPLEX(8),INTENT(IN)  :: PSI(NGL,NDIM,NBH)
+      REAL(8)   ,INTENT(OUT) :: RHO(NRL,NDIM**2)
+      LOGICAL(4),INTENT(OUT) :: TDONE
+      INTEGER(4)             :: NTASKS,THISTASK,NSTRIPELX,NGL_FULL
+      COMPLEX(8),ALLOCATABLE :: EI2KR_LOC(:)
+      COMPLEX(8),SAVE        :: DUMMY_C8(1)=(0.D0,0.D0)
+      INTEGER(4),SAVE        :: DUMMY_MG(1)=0
+      TDONE=.FALSE.
+      IF(.NOT.VESPAW$GPU_ENABLED()) RETURN
+      CALL MPE$QUERY(THIS%CID,NTASKS,THISTASK)
+      IF(NTASKS.NE.1) RETURN
+      IF(NRL.NE.THIS%NR1L*THIS%NR2*THIS%NR3) RETURN
+      NGL_FULL=THIS%NGLARR(1)
+      NSTRIPELX=MAXVAL(THIS%NSTRIPELARR)
+      IF(TINV.AND..NOT.TSUPER) THEN
+        ALLOCATE(EI2KR_LOC(NRL))
+        CALL PLANEWAVE$GETC8A('EIKR',NRL,EI2KR_LOC)
+        EI2KR_LOC=EI2KR_LOC**2
+        IF(ASSOCIATED(THIS%MINUSG)) THEN
+          CALL VESPAW$GPU_DENSITY_SERIAL(NGL,NGL_FULL,NDIM,NBH,NB,NRL &
+     &       ,THIS%NR1,THIS%NR2,THIS%NR3,NSTRIPELX,TSUPER,TINV,OCC &
+     &       ,THIS%IGTOSTRIPE,THIS%ISTRIPETOYZ(:,1),THIS%MINUSG &
+     &       ,EI2KR_LOC,PSI,RHO)
+        ELSE
+          CALL VESPAW$GPU_DENSITY_SERIAL(NGL,NGL_FULL,NDIM,NBH,NB,NRL &
+     &       ,THIS%NR1,THIS%NR2,THIS%NR3,NSTRIPELX,TSUPER,TINV,OCC &
+     &       ,THIS%IGTOSTRIPE,THIS%ISTRIPETOYZ(:,1),DUMMY_MG &
+     &       ,EI2KR_LOC,PSI,RHO)
+        END IF
+        DEALLOCATE(EI2KR_LOC)
+      ELSE
+        IF(ASSOCIATED(THIS%MINUSG)) THEN
+          CALL VESPAW$GPU_DENSITY_SERIAL(NGL,NGL_FULL,NDIM,NBH,NB,NRL &
+     &       ,THIS%NR1,THIS%NR2,THIS%NR3,NSTRIPELX,TSUPER,TINV,OCC &
+     &       ,THIS%IGTOSTRIPE,THIS%ISTRIPETOYZ(:,1),THIS%MINUSG &
+     &       ,DUMMY_C8,PSI,RHO)
+        ELSE
+          CALL VESPAW$GPU_DENSITY_SERIAL(NGL,NGL_FULL,NDIM,NBH,NB,NRL &
+     &       ,THIS%NR1,THIS%NR2,THIS%NR3,NSTRIPELX,TSUPER,TINV,OCC &
+     &       ,THIS%IGTOSTRIPE,THIS%ISTRIPETOYZ(:,1),DUMMY_MG &
+     &       ,DUMMY_C8,PSI,RHO)
+        END IF
+      END IF
+      TDONE=.TRUE.
+      RETURN
+      END
+!
+!     ..................................................................
+      SUBROUTINE PLANEWAVE$GPU_TAU_TRY(MODE,NGL,NDIM,NBH,NB,NRL,OCC,GVEC &
+     &                                ,VTAU,PSI,TAU,HTAUPSI,TDONE)
+!     ******************************************************************
+!     **  SERIAL (NTASKS == 1) GPU KINETICDENSITY / TAUHPSI DISPATCH  **
+!     ******************************************************************
+      USE PLANEWAVE_MODULE
+      USE VESPAW_GPU_MODULE, ONLY : VESPAW$GPU_ENABLED,VESPAW$GPU_TAU_SERIAL
+      IMPLICIT NONE
+      INTEGER(4),INTENT(IN)    :: MODE,NGL,NDIM,NBH,NB,NRL
+      REAL(8)   ,INTENT(IN)    :: OCC(*)
+      REAL(8)   ,INTENT(IN)    :: GVEC(3,NGL)
+      REAL(8)   ,INTENT(IN)    :: VTAU(*)
+      COMPLEX(8),INTENT(IN)    :: PSI(NGL,NDIM,NBH)
+      REAL(8)   ,INTENT(INOUT) :: TAU(*)
+      COMPLEX(8),INTENT(INOUT) :: HTAUPSI(*)
+      LOGICAL(4),INTENT(OUT)   :: TDONE
+      INTEGER(4)               :: NTASKS,THISTASK,NSTRIPELX
+      REAL(8)                  :: KVEC_CART(3)
+      INTEGER(4),SAVE          :: DUMMY_MG(1)=0
+      TDONE=.FALSE.
+      IF(.NOT.VESPAW$GPU_ENABLED()) RETURN
+      IF(THIS%TINV.OR.THIS%TSUPER.OR.NDIM.NE.1) RETURN
+      CALL MPE$QUERY(THIS%CID,NTASKS,THISTASK)
+      IF(NTASKS.NE.1) RETURN
+      IF(NRL.NE.THIS%NR1L*THIS%NR2*THIS%NR3) RETURN
+      IF(NGL.NE.THIS%NGLARR(1)) RETURN
+      NSTRIPELX=MAXVAL(THIS%NSTRIPELARR)
+      KVEC_CART=MATMUL(THIS%GBAS,THIS%KVEC)
+      IF(ASSOCIATED(THIS%MINUSG)) THEN
+        CALL VESPAW$GPU_TAU_SERIAL(MODE,NGL,NDIM,NBH,NB,NRL,THIS%NR1 &
+     &     ,THIS%NR2,THIS%NR3,NSTRIPELX,THIS%TSUPER,THIS%TINV,OCC,GVEC &
+     &     ,KVEC_CART,THIS%IGTOSTRIPE,THIS%ISTRIPETOYZ(:,1),THIS%MINUSG &
+     &     ,VTAU,PSI,TAU,HTAUPSI)
+      ELSE
+        CALL VESPAW$GPU_TAU_SERIAL(MODE,NGL,NDIM,NBH,NB,NRL,THIS%NR1 &
+     &     ,THIS%NR2,THIS%NR3,NSTRIPELX,THIS%TSUPER,THIS%TINV,OCC,GVEC &
+     &     ,KVEC_CART,THIS%IGTOSTRIPE,THIS%ISTRIPETOYZ(:,1),DUMMY_MG &
+     &     ,VTAU,PSI,TAU,HTAUPSI)
+      END IF
+      TDONE=.TRUE.
       RETURN
       END

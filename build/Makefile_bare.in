@@ -53,6 +53,11 @@ export LIBAR=@LIBAR@
 export FFT_HEADER=@FFT_HEADER@
 #___________________________header file for MPI
 export MPI_HEADER=@MPI_HEADER@
+#___________________________CUDA / GPU backend toolchain
+export CUDADIR=@CUDADIR@
+export NVCC=@NVCC@
+export NVCCFLAGS=@NVCCFLAGS@
+export GPUOBJS=@GPUOBJS@
 #___________________________special treatment
 export SPECIAL=@SPECIAL@
 #___________________________ set to T, if this is Makefile.parallel
@@ -188,6 +193,7 @@ export LOBJS = \
         ${OBJDIR}/vespaw_cell.o \
         ${OBJDIR}/vespaw_pdos.o \
         ${OBJDIR}/vespaw_banddata.o \
+        ${OBJDIR}/vespaw_gpu.o \
         ${OBJDIR}/vespaw_library.o \
         ${OBJDIR}/vespaw_polynom.o \
         ${OBJDIR}/vespaw_dimer.o  \
@@ -363,19 +369,19 @@ ${BINDIR}/parmfilewriter.x: ${SRCDIR}/buildtools/F90PP/parmfilewriter.f90
 ##  link files and produce executable PAWX                             ##
 #########################################################################
 #
-${PAWX} : ${SRCBLOB} f90pp ${OBJDIR}/fftw_f77.i ${OBJDIR}/mpif.h ${LOBJS} ${LOBJSF77} \
+${PAWX} : ${SRCBLOB} f90pp ${OBJDIR}/fftw_f77.i ${OBJDIR}/mpif.h ${LOBJS} ${LOBJSF77} ${GPUOBJS} \
                 ${OBJDIR}/version_writeparmfile.o \
                 ${OBJVERSION} ${OBJECTS} ${MPE}
-	${LINK} -o ${PAWX} ${OBJECTS} ${OBJVERSION} ${SRCBLOB} ${LOBJS} ${LOBJSF77} ${OBJDIR}/version_writeparmfile.o ${MPE} ${LIBS}
+	${LINK} -o ${PAWX} ${OBJECTS} ${OBJVERSION} ${SRCBLOB} ${LOBJS} ${LOBJSF77} ${GPUOBJS} ${OBJDIR}/version_writeparmfile.o ${MPE} ${LIBS}
 #
 #########################################################################
 ##  build paw library                                                  ##
 #########################################################################
-${PAWLIB}: f90pp ${LOBJS} ${LOBJSF77} ${MPE} ${OBJDIR}/version_writeparmfile.o ${OBJVERSION}
-	$(LIBAR) cru $(PAWLIB) $(LOBJS) $(LOBJSF77) ${OBJDIR}/vespaw_mpelib_s.o ${OBJDIR}/version_writeparmfile.o
+${PAWLIB}: f90pp ${LOBJS} ${LOBJSF77} ${GPUOBJS} ${MPE} ${OBJDIR}/version_writeparmfile.o ${OBJVERSION}
+	$(LIBAR) cru $(PAWLIB) $(LOBJS) $(LOBJSF77) ${GPUOBJS} ${OBJDIR}/vespaw_mpelib_s.o ${OBJDIR}/version_writeparmfile.o
 
-${PPAWLIB}: f90pp ${LOBJS} ${LOBJSF77} ${MPE} ${OBJDIR}/version_writeparmfile.o ${OBJVERSION}
-	$(LIBAR) cru $(PPAWLIB) $(LOBJS) $(LOBJSF77) ${OBJDIR}/vespaw_mpelib_p.o ${OBJDIR}/version_writeparmfile.o
+${PPAWLIB}: f90pp ${LOBJS} ${LOBJSF77} ${GPUOBJS} ${MPE} ${OBJDIR}/version_writeparmfile.o ${OBJVERSION}
+	$(LIBAR) cru $(PPAWLIB) $(LOBJS) $(LOBJSF77) ${GPUOBJS} ${OBJDIR}/vespaw_mpelib_p.o ${OBJDIR}/version_writeparmfile.o
 #
 #########################################################################
 ##  build full paw library and optionally exclude objects              ##
@@ -386,13 +392,13 @@ ${PPAWLIB}: f90pp ${LOBJS} ${LOBJSF77} ${MPE} ${OBJDIR}/version_writeparmfile.o 
 ##  main program.                                                      ##
 ##  This library can then be linked to a main program, like libpaw.a   ##
 #########################################################################
-${PAWLIBFULL}: f90pp ${OBJECTS} ${SRCBLOB} ${LOBJS} ${LOBJSF77} ${MPE} ${OBJDIR}/version_writeparmfile.o ${OBJVERSION}
-	$(LIBAR) cru $(PAWLIBFULL) ${OBJECTS} ${OBJVERSION} ${SRCBLOB} $(LOBJS) $(LOBJSF77) ${OBJDIR}/vespaw_mpelib_s.o ${OBJDIR}/version_writeparmfile.o
+${PAWLIBFULL}: f90pp ${OBJECTS} ${SRCBLOB} ${LOBJS} ${LOBJSF77} ${GPUOBJS} ${MPE} ${OBJDIR}/version_writeparmfile.o ${OBJVERSION}
+	$(LIBAR) cru $(PAWLIBFULL) ${OBJECTS} ${OBJVERSION} ${SRCBLOB} $(LOBJS) $(LOBJSF77) ${GPUOBJS} ${OBJDIR}/vespaw_mpelib_s.o ${OBJDIR}/version_writeparmfile.o
 	$(LIBAR) -dv ${PAWLIBFULL} vespaw.o
 	for EX in ${EXCLUDE}; do ar -dv ${PAWLIBFULL} $$EX;done
 
-${PPAWLIBFULL}: f90pp ${OBJECTS} ${SRCBLOB} ${LOBJS} ${LOBJSF77} ${MPE} ${OBJDIR}/version_writeparmfile.o ${OBJVERSION}
-	$(LIBAR) cru $(PPAWLIBFULL) ${OBJECTS} ${OBJVERSION} ${SRCBLOB} $(LOBJS) $(LOBJSF77) ${OBJDIR}/vespaw_mpelib_p.o ${OBJDIR}/version_writeparmfile.o
+${PPAWLIBFULL}: f90pp ${OBJECTS} ${SRCBLOB} ${LOBJS} ${LOBJSF77} ${GPUOBJS} ${MPE} ${OBJDIR}/version_writeparmfile.o ${OBJVERSION}
+	$(LIBAR) cru $(PPAWLIBFULL) ${OBJECTS} ${OBJVERSION} ${SRCBLOB} $(LOBJS) $(LOBJSF77) ${GPUOBJS} ${OBJDIR}/vespaw_mpelib_p.o ${OBJDIR}/version_writeparmfile.o
 	$(LIBAR) -dv ${PPAWLIBFULL} vespaw.o
 	for EX in ${EXCLUDE}; do ar -dv ${PPAWLIBFULL} $$EX;done
 #
@@ -612,6 +618,14 @@ ${OBJDIR}/vespaw_edft.o: ${SRCDIR}/vespaw_edft.f90
 	${F90PP} -notemplates $< >${OBJDIR}/vespaw_edft_d.${FEXT}
 	${COMPILE} -o $@ ${OBJDIR}/vespaw_edft_d.${FEXT}
 #
+#__vespaw_gpu.f90 uses -notemplates (no F90PP templates used) and CUDA .cu rule
+${OBJDIR}/vespaw_gpu.o: ${SRCDIR}/vespaw_gpu.f90
+	${F90PP} -notemplates $< >${OBJDIR}/vespaw_gpu_d.${FEXT}
+	${COMPILE} -o $@ ${OBJDIR}/vespaw_gpu_d.${FEXT}
+#
+${OBJDIR}/vespaw_gpu_backend.o: ${SRCDIR}/vespaw_gpu_backend.cu ${SRCDIR}/vespaw_gpu_backend.h
+	${NVCC} ${NVCCFLAGS} -c $< -o $@
+#
 #__general rule for object files fortran 77______________________________
 $(LOBJSF77): ${OBJDIR}/%.o: ${SRCDIR}/%.f
 	cp $< ${OBJDIR}/$*_d.f
@@ -823,6 +837,7 @@ endif
  ## file:src/vespaw_cg.f90
  ${OBJDIR}/vespaw_cg.o : WAVES_MODULE.mod
  ${OBJDIR}/vespaw_cg.o : MPE_MODULE.mod
+ ${OBJDIR}/vespaw_cg.o : VESPAW_GPU_MODULE.mod
  CG_INTERFACE_MODULE.mod : ${OBJDIR}/vespaw_cg.o
  ## file:src/vespaw_classical.f90
  ${OBJDIR}/vespaw_classical.o : MPE_MODULE.mod
@@ -875,11 +890,13 @@ endif
  ## file:src/vespaw.f90
  ${OBJDIR}/vespaw.o : CLOCK_MODULE.mod
  ${OBJDIR}/vespaw.o : MPE_MODULE.mod
+ ${OBJDIR}/vespaw.o : VESPAW_GPU_MODULE.mod
  VERSION_MODULE.mod : ${OBJDIR}/vespaw_version.o
  TIMESTEP_MODULE.mod : ${OBJDIR}/vespaw.o
  STOPIT_MODULE.mod : ${OBJDIR}/vespaw.o
  ## file:src/vespaw_fft.f90
  ${OBJDIR}/vespaw_fft.o : MPE_MODULE.mod
+ ${OBJDIR}/vespaw_fft.o : VESPAW_GPU_MODULE.mod
  PLANEWAVE_MODULE.mod : ${OBJDIR}/vespaw_fft.o
  ## file:src/vespaw_filehandler.f90
  ${OBJDIR}/vespaw_filehandler.o : STRINGS_MODULE.mod
@@ -916,7 +933,10 @@ endif
  ## file:src/vespaw_kpoints.f90
  ## file:src/vespaw_ci.f90
  CI_MODULE.mod : ${OBJDIR}/vespaw_ci.o
- ## file:src/vespaw_library.f90
+ ## file:src/vespaw_gpu.f90
+ VESPAW_GPU_MODULE.mod : ${OBJDIR}/vespaw_gpu.o
+## file:src/vespaw_library.f90
+ ${OBJDIR}/vespaw_library.o : VESPAW_GPU_MODULE.mod
  RANDOM_MODULE.mod : ${OBJDIR}/vespaw_library.o
  ## file:src/vespaw_linkedlist.f90
  ${OBJDIR}/vespaw_linkedlist.o : STRINGS_MODULE.mod
@@ -1034,9 +1054,12 @@ endif
  VEXT_MODULE.mod : ${OBJDIR}/vespaw_vext.o
  ## file:src/vespaw_warmup.f90
  WARMUP_MODULE.mod : ${OBJDIR}/vespaw_warmup.o
+ ## file:src/vespaw_scankinden.f90
+ ${OBJDIR}/vespaw_scankinden.o : VESPAW_GPU_MODULE.mod
  ## file:src/vespaw_waves1.f90
  ${OBJDIR}/vespaw_waves1.o : LINKEDLIST_MODULE.mod
  ${OBJDIR}/vespaw_waves1.o : MPE_MODULE.mod
+ ${OBJDIR}/vespaw_waves1.o : VESPAW_GPU_MODULE.mod
  WAVES_MODULE.mod : ${OBJDIR}/vespaw_waves1.o
  ## file:src/vespaw_waves2.f90
  ${OBJDIR}/vespaw_waves2.o : MPE_MODULE.mod
@@ -1044,6 +1067,7 @@ endif
  ${OBJDIR}/vespaw_waves2.o : WAVES_MODULE.mod
  ${OBJDIR}/vespaw_waves2.o : PERIODICTABLE_MODULE.mod
  ${OBJDIR}/vespaw_waves2.o : RESTART_INTERFACE.mod
+ ${OBJDIR}/vespaw_waves2.o : VESPAW_GPU_MODULE.mod
  WAVESFIXRHO_MODULE.mod : ${OBJDIR}/vespaw_waves2.o
  TOTALSPIN_MODULE.mod : ${OBJDIR}/vespaw_waves2.o
  ## file:src/vespaw_waves_add.f90
