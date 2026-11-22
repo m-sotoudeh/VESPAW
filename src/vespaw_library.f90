@@ -2372,6 +2372,7 @@ INTEGER(4) :: I,J
 !     **      CAN THUS CAN ACT AS EIGENVECTORS THEMSELVES             **
 !     **                                                              **
 !     ******************************************************************
+      USE VESPAW_GPU_MODULE, ONLY : VESPAW$GPU_ENABLED,VESPAW$GPU_ZHEEVD
       IMPLICIT NONE
       INTEGER(4),INTENT(IN) :: N
       COMPLEX(8),INTENT(IN) :: H(N,N)
@@ -2386,34 +2387,41 @@ INTEGER(4) :: I,J
       INTEGER(4)            :: LWORK
       INTEGER(4)            :: INFO
       COMPLEX(8)            :: CH(N,N)
+      LOGICAL(4)            :: TGPUDONE
       EXTERNAL ZHEEV
 !     ******************************************************************
+      TGPUDONE=.FALSE.
+      IF(VESPAW$GPU_ENABLED()) THEN
+        CALL VESPAW$GPU_ZHEEVD(N,H,E,U,TGPUDONE)
+      END IF
 !     ==================================================================
 !     == DIAGONALIZE                                                  ==
 !     ==================================================================
-      IF(LWMAX.LT.2*N) THEN
-        CALL ERROR$MSG('HARDWIRED LIMIT LWMAX SMALLER THAN 2*N')
-        CALL ERROR$I4VAL('LWMAX',LWMAX)
-        CALL ERROR$I4VAL('2*N',2*N)
-        CALL ERROR$STOP('LIB_LAPACK_ZHEEV')
-      END IF
-      U=0.5D0*(H+TRANSPOSE(CONJG(H)))
-      LWORK=-1
-      CALL ZHEEV('V','L',N,U,N,E,CWORK,LWORK,RWORK,INFO) !LAPACK
-      LWORK=MIN(LWMAX,INT(CWORK(1)))
-      CALL ZHEEV('V','L',N,U,N,E,CWORK,LWORK,RWORK,INFO) !LAPACK
+      IF(.NOT.TGPUDONE) THEN
+        IF(LWMAX.LT.2*N) THEN
+          CALL ERROR$MSG('HARDWIRED LIMIT LWMAX SMALLER THAN 2*N')
+          CALL ERROR$I4VAL('LWMAX',LWMAX)
+          CALL ERROR$I4VAL('2*N',2*N)
+          CALL ERROR$STOP('LIB_LAPACK_ZHEEV')
+        END IF
+        U=0.5D0*(H+TRANSPOSE(CONJG(H)))
+        LWORK=-1
+        CALL ZHEEV('V','L',N,U,N,E,CWORK,LWORK,RWORK,INFO) !LAPACK
+        LWORK=MIN(LWMAX,INT(CWORK(1)))
+        CALL ZHEEV('V','L',N,U,N,E,CWORK,LWORK,RWORK,INFO) !LAPACK
 !
-      IF(INFO.NE.0) THEN
-        IF(INFO.LT.0) THEN
-          CALL ERROR$MSG('I-TH ARGUMENT TO ZHEEV HAD AN ILLEGAL VALUE')
-          CALL ERROR$I4VAL('I',-INFO)
-          CALL ERROR$STOP('LIB_LAPACK_ZHEEV')
-        ELSE
-          CALL ERROR$MSG('THE ALGORITHM FAILED TO CONVERGE')
-          CALL ERROR$MSG('I OFF-DIAGONAL ELEMENTS OF AN INTERMEDIATE')
-          CALL ERROR$MSG('TRIDIAGONAL FORM DID NOT CONVERGE TO ZERO.')
-          CALL ERROR$I4VAL('I',INFO)
-          CALL ERROR$STOP('LIB_LAPACK_ZHEEV')
+        IF(INFO.NE.0) THEN
+          IF(INFO.LT.0) THEN
+            CALL ERROR$MSG('I-TH ARGUMENT TO ZHEEV HAD AN ILLEGAL VALUE')
+            CALL ERROR$I4VAL('I',-INFO)
+            CALL ERROR$STOP('LIB_LAPACK_ZHEEV')
+          ELSE
+            CALL ERROR$MSG('THE ALGORITHM FAILED TO CONVERGE')
+            CALL ERROR$MSG('I OFF-DIAGONAL ELEMENTS OF AN INTERMEDIATE')
+            CALL ERROR$MSG('TRIDIAGONAL FORM DID NOT CONVERGE TO ZERO.')
+            CALL ERROR$I4VAL('I',INFO)
+            CALL ERROR$STOP('LIB_LAPACK_ZHEEV')
+          END IF
         END IF
       END IF
 !
@@ -2544,6 +2552,7 @@ INTEGER(4) :: I,J
 !     **             MATMUL(TRANSPOSE(VEC),MATMUL(S,VEC))=IDENTITY            **
 !     **                                                                      **
 !     **************************************************************************
+      USE VESPAW_GPU_MODULE, ONLY : VESPAW$GPU_ENABLED,VESPAW$GPU_ZHEGVD
       IMPLICIT NONE
       INTEGER(4),INTENT(IN) :: N
       COMPLEX(8),INTENT(IN) :: H(N,N)    ! HAMITON MATRIX
@@ -2558,6 +2567,7 @@ INTEGER(4) :: I,J
       LOGICAL   ,PARAMETER  :: TTEST=.FALSE.
       REAL(8)               :: DEV
       INTEGER               :: I
+      LOGICAL(4)            :: TGPUDONE
 !     **************************************************************************
 !
 !     ==========================================================================
@@ -2578,45 +2588,52 @@ INTEGER(4) :: I,J
         END IF
       END IF
 !
+      TGPUDONE=.FALSE.
+      IF(VESPAW$GPU_ENABLED()) THEN
+        CALL VESPAW$GPU_ZHEGVD(N,H,S,E,VEC,TGPUDONE)
+      END IF
+!
 !     ==========================================================================
 !     == CALL LAPACK ROUTINE                                                 ==
 !     ==========================================================================
-      ! LAPACK ROUTINE OVERWRITES HAMILTONIAN WITH EIGENVECTORS
-      VEC=0.5D0*(H+TRANSPOSE(CONJG(H)))  
-      S1=S
-      !DO WORKSPACE QUERY
-      ALLOCATE(WORK(1))
-      LDWORK=-1
-      CALL ZHEGV(1,'V','U',N,VEC,N,S1,N,E,WORK,LDWORK,RWORK,INFO)
-      LDWORK=int(WORK(1))
-      DEALLOCATE(WORK)
-      ALLOCATE(WORK(LDWORK)) 
-      CALL ZHEGV(1,'V','U',N,VEC,N,S1,N,E,WORK,LDWORK,RWORK,INFO)
+      IF(.NOT.TGPUDONE) THEN
+        ! LAPACK ROUTINE OVERWRITES HAMILTONIAN WITH EIGENVECTORS
+        VEC=0.5D0*(H+TRANSPOSE(CONJG(H)))  
+        S1=S
+        !DO WORKSPACE QUERY
+        ALLOCATE(WORK(1))
+        LDWORK=-1
+        CALL ZHEGV(1,'V','U',N,VEC,N,S1,N,E,WORK,LDWORK,RWORK,INFO)
+        LDWORK=int(WORK(1))
+        DEALLOCATE(WORK)
+        ALLOCATE(WORK(LDWORK)) 
+        CALL ZHEGV(1,'V','U',N,VEC,N,S1,N,E,WORK,LDWORK,RWORK,INFO)
 !
-!     ==========================================================================
-!     == ERROR MESSAGES                                                       ==
-!     ==========================================================================
-      IF(INFO.NE.0) THEN
-        CALL ERROR$MSG('FAILURE SOLVING THE COMPLEX GENERALIZED')
-        CALL ERROR$MSG('EIGENVALUE PROBLEM A*X=(LAMBDA)*B*X USING ZHEGV:')
-        IF(INFO.LT.0) THEN
-          CALL ERROR$MSG('ITH ARGUMENT OF ZHGEV HAS ILLEGAL VALUE')
-          CALL ERROR$I4VAL('I',-INFO)
-        ELSE IF(INFO.GT.N) THEN
-          CALL ERROR$MSG('THE LEADING MINOR OF ORDER I OF B IS NOT POSITIVE')
-          CALL ERROR$MSG('DEFINITE. THE FACTORIZATION OF B COULD NOT BE')
-          CALL ERROR$MSG('COMPLETED AND NO EIGENVALUES OR EIGENVECTORS ')
-          CALL ERROR$MSG('WERE COMPUTED.')
-          CALL ERROR$I4VAL('I',INFO-N)
-        ELSE   !(0.LT.INFO.LE.N)
-          CALL ERROR$MSG('ZHEEV FAILED  TO  CONVERGE')
-          CALL ERROR$MSG('I OFF-DIAGONAL ELEMENTS OF AN INTERMEDIATE') 
-          CALL ERROR$MSG('TRIDIAGONAL FORM DID NOT CONVERGE TO ZERO')
-          CALL ERROR$I4VAL('I',INFO)
+!       ========================================================================
+!       == ERROR MESSAGES                                                     ==
+!       ========================================================================
+        IF(INFO.NE.0) THEN
+          CALL ERROR$MSG('FAILURE SOLVING THE COMPLEX GENERALIZED')
+          CALL ERROR$MSG('EIGENVALUE PROBLEM A*X=(LAMBDA)*B*X USING ZHEGV:')
+          IF(INFO.LT.0) THEN
+            CALL ERROR$MSG('ITH ARGUMENT OF ZHGEV HAS ILLEGAL VALUE')
+            CALL ERROR$I4VAL('I',-INFO)
+          ELSE IF(INFO.GT.N) THEN
+            CALL ERROR$MSG('THE LEADING MINOR OF ORDER I OF B IS NOT POSITIVE')
+            CALL ERROR$MSG('DEFINITE. THE FACTORIZATION OF B COULD NOT BE')
+            CALL ERROR$MSG('COMPLETED AND NO EIGENVALUES OR EIGENVECTORS ')
+            CALL ERROR$MSG('WERE COMPUTED.')
+            CALL ERROR$I4VAL('I',INFO-N)
+          ELSE   !(0.LT.INFO.LE.N)
+            CALL ERROR$MSG('ZHEEV FAILED  TO  CONVERGE')
+            CALL ERROR$MSG('I OFF-DIAGONAL ELEMENTS OF AN INTERMEDIATE') 
+            CALL ERROR$MSG('TRIDIAGONAL FORM DID NOT CONVERGE TO ZERO')
+            CALL ERROR$I4VAL('I',INFO)
+          END IF
+          CALL ERROR$I4VAL('N',N)
+          CALL ERROR$I4VAL('INFO',INFO)
+          CALL ERROR$STOP('LIB_LAPACK_ZHEGV')
         END IF
-        CALL ERROR$I4VAL('N',N)
-        CALL ERROR$I4VAL('INFO',INFO)
-        CALL ERROR$STOP('LIB_LAPACK_ZHEGV')
       END IF
 !
 !     ========================================================================
@@ -2657,6 +2674,7 @@ INTEGER(4) :: I,J
 !     **             MATMUL(TRANSPOSE(VEC),MATMUL(S,VEC))=IDENTITY       **
 !     **                                                                 **
 !     *********************************************************************
+      USE VESPAW_GPU_MODULE, ONLY : VESPAW$GPU_ENABLED,VESPAW$GPU_ZHEGVD
       IMPLICIT NONE
       INTEGER(4),INTENT(IN)        :: N
       COMPLEX(8),INTENT(IN)        :: H(N,N)    ! HAMITON MATRIX
@@ -2672,6 +2690,7 @@ INTEGER(4) :: I,J
       REAL(8)   ,ALLOCATABLE       :: RWORK(:)
       INTEGER(4),ALLOCATABLE       :: IWORK(:)
       CHARACTER(1)                 :: JOBZ
+      LOGICAL(4)                   :: TGPUDONE
 !     *********************************************************************
 !
 !     ========================================================================
@@ -2692,60 +2711,67 @@ INTEGER(4) :: I,J
         END IF
       END IF
 !
+      TGPUDONE=.FALSE.
+      IF(VESPAW$GPU_ENABLED()) THEN
+        CALL VESPAW$GPU_ZHEGVD(N,H,S,E,VEC,TGPUDONE)
+      END IF
+!
 !     ========================================================================
 !     == CALL LAPACK ROUTINE                                                ==
 !     ========================================================================
-      JOBZ='V' !COMPUTE EIGENVALUES AND EIGENVECTORS
+      IF(.NOT.TGPUDONE) THEN
+        JOBZ='V' !COMPUTE EIGENVALUES AND EIGENVECTORS
 
-      ! LAPACK ROUTINE OVERWRITES HAMILTONIAN WITH EIGENVECTORS
-      !VEC=0.5D0*(H+TRANSPOSE(CONJG(H)))  
-      VEC=H
-      S1=S
-      !DO WORKSPACE QUERY
-      LWORK=-1
-      LRWORK=-1
-      LIWORK=-1
-      ALLOCATE(WORK(1))
-      ALLOCATE(RWORK(1))
-      ALLOCATE(IWORK(1))
-      
-      CALL ZHEGVD(1,JOBZ,'U',N,VEC,N,S1,N,E,WORK,LWORK,RWORK,&
-     &        LRWORK,IWORK,LIWORK,INFO)
-      IF(INFO.NE.0)THEN
-        CALL ERROR$MSG('ZHEGVD WORKSPACE QUERY FAILED')
-        CALL ERROR$I4VAL('INFO',INFO)
-        CALL ERROR$STOP('LAPACK_ZHEGVD')
-      ENDIF
-      LWORK=INT(WORK(1))
-      LRWORK=INT(RWORK(1))
-      LIWORK=INT(IWORK(1))
-      DEALLOCATE(WORK)
-      DEALLOCATE(RWORK)
-      DEALLOCATE(IWORK)
-      ALLOCATE(WORK(LWORK)) 
-      ALLOCATE(RWORK(LRWORK)) 
-      ALLOCATE(IWORK(LIWORK)) 
-      CALL ZHEGVD(1,JOBZ,'U',N,VEC,N,S1,N,E,WORK,LWORK,RWORK,&
-     &               LRWORK,IWORK,LIWORK,INFO)
-      DEALLOCATE(WORK)
-      DEALLOCATE(RWORK)
-      DEALLOCATE(IWORK)
+        ! LAPACK ROUTINE OVERWRITES HAMILTONIAN WITH EIGENVECTORS
+        !VEC=0.5D0*(H+TRANSPOSE(CONJG(H)))  
+        VEC=H
+        S1=S
+        !DO WORKSPACE QUERY
+        LWORK=-1
+        LRWORK=-1
+        LIWORK=-1
+        ALLOCATE(WORK(1))
+        ALLOCATE(RWORK(1))
+        ALLOCATE(IWORK(1))
+        
+        CALL ZHEGVD(1,JOBZ,'U',N,VEC,N,S1,N,E,WORK,LWORK,RWORK,&
+     &          LRWORK,IWORK,LIWORK,INFO)
+        IF(INFO.NE.0)THEN
+          CALL ERROR$MSG('ZHEGVD WORKSPACE QUERY FAILED')
+          CALL ERROR$I4VAL('INFO',INFO)
+          CALL ERROR$STOP('LAPACK_ZHEGVD')
+        ENDIF
+        LWORK=INT(WORK(1))
+        LRWORK=INT(RWORK(1))
+        LIWORK=INT(IWORK(1))
+        DEALLOCATE(WORK)
+        DEALLOCATE(RWORK)
+        DEALLOCATE(IWORK)
+        ALLOCATE(WORK(LWORK)) 
+        ALLOCATE(RWORK(LRWORK)) 
+        ALLOCATE(IWORK(LIWORK)) 
+        CALL ZHEGVD(1,JOBZ,'U',N,VEC,N,S1,N,E,WORK,LWORK,RWORK,&
+     &                 LRWORK,IWORK,LIWORK,INFO)
+        DEALLOCATE(WORK)
+        DEALLOCATE(RWORK)
+        DEALLOCATE(IWORK)
 
-      IF(INFO.NE.0)THEN
-        CALL ERROR$MSG('ZHEGVD FAILED')
-        CALL ERROR$I4VAL('INFO',INFO)
-        CALL ERROR$STOP('LAPACK_ZHEGVD')
-      ENDIF
-      
+        IF(INFO.NE.0)THEN
+          CALL ERROR$MSG('ZHEGVD FAILED')
+          CALL ERROR$I4VAL('INFO',INFO)
+          CALL ERROR$STOP('LAPACK_ZHEGVD')
+        ENDIF
+        
 
-      IF(INFO.LT.0) THEN
-        CALL ERROR$MSG('ITH ARGUMENT OF ZHGEVD HAS ILLEGAL VALUE')
-        CALL ERROR$I4VAL('I',-INFO)
-        CALL ERROR$STOP('LIB_LAPACK_ZHEGVD')
-      ELSE IF(INFO.GT.0) THEN
-        CALL ERROR$MSG('FAILED')
-        CALL ERROR$I4VAL('INFO',INFO)
-        CALL ERROR$STOP('LIB_LAPACK_ZHEGVD')
+        IF(INFO.LT.0) THEN
+          CALL ERROR$MSG('ITH ARGUMENT OF ZHGEVD HAS ILLEGAL VALUE')
+          CALL ERROR$I4VAL('I',-INFO)
+          CALL ERROR$STOP('LIB_LAPACK_ZHEGVD')
+        ELSE IF(INFO.GT.0) THEN
+          CALL ERROR$MSG('FAILED')
+          CALL ERROR$I4VAL('INFO',INFO)
+          CALL ERROR$STOP('LIB_LAPACK_ZHEGVD')
+        END IF
       END IF
 !
 !     ========================================================================
@@ -2830,7 +2856,6 @@ INTEGER(4) :: I,J
 !#ELIF DEFINED(CPPVAR_BLAS_ATLAS)
 !      CALL ZGEMM('N','N',N,L,M,ONE,A,N,B,M,ZERO,C,N)
 #ELSE
-      C(:,:)=(0.D0,0.D0)
       CALL ZGEMM('N','N',N,L,M,ONE,A,N,B,M,ZERO,C,N)
 #ENDIF
       RETURN
@@ -2916,7 +2941,6 @@ INTEGER(4) :: I,J
       CALL ZGEMUL(PSI1,LEN1,'N',PSI2,LEN2,'C',OPERATOR,LEN1,LEN1,N,LEN2)
 #ELSE 
 !     == OPERATOR=MATMUL(PSI1,TRANSPOSE(PSI2))
-      OPERATOR(:,:)=(0.D0,0.D0)
       CALL ZGEMM('N','C',LEN1,LEN2,N,(1.D0,0.D0) &
      &          ,PSI1(:,:),LEN1,PSI2(:,:),LEN2,(0.D0,0.D0),OPERATOR,LEN1)
 #ENDIF
@@ -2990,7 +3014,6 @@ INTEGER(4) :: I,J
         CALL ERROR$MSG('PSI2 AND PSI1 DIFFER FOR TID=.TRUE.')
         CALL ERROR$STOP('LIB$SCALARPRODUCTC8')
       END IF
-      OVERLAP(:,:)=(0.D0,0.D0)
       IF(TID) THEN
 !       == ATTENTION: SCALAR FACTORS ARE SUPPOSED TO BE REAL AS THEY ARE
         CALL ZHERK('U','C',N1,LEN,1.D0,PSI1,LEN,0.D0,OVERLAP,N1)
@@ -3001,6 +3024,7 @@ INTEGER(4) :: I,J
         ENDDO
       ELSE
 #IF DEFINED(CPPVAR_BLAS_ESSL)
+        OVERLAP(:,:)=(0.D0,0.D0)
         CALL ZGEMUL(PSI1,LEN,'C',PSI2,LEN,'N',OVERLAP,N1,N1,LEN,N2)
 #ELSE 
         CALL ZGEMM('C','N',N1,N2,LEN,(1.D0,0.D0),PSI1,LEN,PSI2,LEN &
@@ -3210,6 +3234,57 @@ INTEGER(4) :: I,J
       CALL ERROR$STOP('LIB$FFTC8')
 #ENDIF
 
+      RETURN
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE LIB$FFTC8_SLABS(DIR,LEN,NSLAB,NR1L,STRIDE_R1 &
+     &                          ,NFFT,STRIDE_FFT,IOFF,X)
+!     **************************************************************************
+!     **  IN-PLACE STRIDED 1-D FFT OVER (NSLAB, NR1L, NFFT) SLABS:            **
+!     **  FOR EACH IFFT=1..NFFT AND IR1L=1..NR1L, TRANSFORMS NSLAB CONTIGUOUS **
+!     **  VECTORS OF LENGTH LEN STARTING AT 1-BASED ELEMENT                   **
+!     **    IOFF + (IFFT-1)*STRIDE_FFT + (IR1L-1)*STRIDE_R1 + 1.              **
+!     **  AVOIDS THOUSANDS OF PER-SLAB LIB$FFTC8 CALLS, ALLOCATIONS, AND      **
+!     **  STRING/PLAN LOOKUPS WHILE REUSING THE CACHED 1-D PLAN.              **
+!     **************************************************************************
+      USE VESPAW_GPU_MODULE, ONLY : VESPAW$GPU_ENABLED,VESPAW$GPU_FFT_SLABS
+      IMPLICIT NONE
+      CHARACTER(*),INTENT(IN)    :: DIR
+      INTEGER(4)  ,INTENT(IN)    :: LEN
+      INTEGER(4)  ,INTENT(IN)    :: NSLAB
+      INTEGER(4)  ,INTENT(IN)    :: NR1L
+      INTEGER(4)  ,INTENT(IN)    :: STRIDE_R1
+      INTEGER(4)  ,INTENT(IN)    :: NFFT
+      INTEGER(4)  ,INTENT(IN)    :: STRIDE_FFT
+      INTEGER(4)  ,INTENT(IN)    :: IOFF
+      COMPLEX(8)  ,INTENT(INOUT) :: X(*)
+      INTEGER(4)                 :: IFFT,IR1L,BASE
+!     **************************************************************************
+      IF(LEN.LE.0.OR.NSLAB.LE.0.OR.NR1L.LE.0.OR.NFFT.LE.0) RETURN
+#IF DEFINED(CPPVAR_FFT_FFTW3)
+      CALL LIB_FFTW3_SLABS(DIR,LEN,NSLAB,NR1L,STRIDE_R1 &
+     &                    ,NFFT,STRIDE_FFT,IOFF,X)
+#ELIF DEFINED(CPPVAR_FFT_CUFFT)
+      IF(VESPAW$GPU_ENABLED()) THEN
+        CALL VESPAW$GPU_FFT_SLABS(DIR,LEN,NSLAB,NR1L,STRIDE_R1 &
+     &                           ,NFFT,STRIDE_FFT,IOFF,X)
+      ELSE
+        DO IFFT=1,NFFT
+          DO IR1L=1,NR1L
+            BASE=IOFF+(IFFT-1)*STRIDE_FFT+(IR1L-1)*STRIDE_R1
+            CALL LIB$FFTC8(DIR,LEN,NSLAB,X(BASE+1),X(BASE+1))
+          END DO
+        END DO
+      END IF
+#ELSE
+      DO IFFT=1,NFFT
+        DO IR1L=1,NR1L
+          BASE=IOFF+(IFFT-1)*STRIDE_FFT+(IR1L-1)*STRIDE_R1
+          CALL LIB$FFTC8(DIR,LEN,NSLAB,X(BASE+1),X(BASE+1))
+        END DO
+      END DO
+#ENDIF
       RETURN
       END
 !
@@ -3625,6 +3700,81 @@ INTEGER(4) :: I,J
 !**               HTTP://WWW.FFTW.ORG/                                        **
 !*******************************************************************************
 !     ..........................................................................
+      MODULE LIB_FFTW3_CACHE_MODULE
+      USE, INTRINSIC :: ISO_C_BINDING
+      IMPLICIT NONE
+      INTEGER(4),PARAMETER :: NPX=32
+      INTEGER(4),SAVE      :: NP=0
+      INTEGER(4),SAVE      :: PLANS1(NPX)=0
+      TYPE(C_PTR),SAVE     :: PLANS2(NPX)
+      CHARACTER(4),SAVE    :: DIRSAVE=''
+      INTEGER(4),SAVE      :: LENSAVE=0
+      INTEGER,SAVE         :: ISIGNSAVE=0
+      TYPE(C_PTR),SAVE     :: PLANSAVE
+      END MODULE LIB_FFTW3_CACHE_MODULE
+!
+!     ..........................................................................
+      SUBROUTINE LIB_FFTW3_GETPLAN(DIR,LEN,PLAN,ISIGN)
+!     **************************************************************************
+!     **  SHARED 1-D FFTW3 PLAN CACHE FOR LIB_FFTW3 AND LIB_FFTW3_SLABS.      **
+!     **************************************************************************
+      USE, INTRINSIC :: ISO_C_BINDING
+      USE LIB_FFTW3_CACHE_MODULE
+      IMPLICIT NONE
+      CHARACTER(*),INTENT(IN)  :: DIR
+      INTEGER(4)  ,INTENT(IN)  :: LEN
+      TYPE(C_PTR) ,INTENT(OUT) :: PLAN
+      INTEGER     ,INTENT(OUT) :: ISIGN
+      COMPLEX(8)               :: XDUMMY(LEN),YDUMMY(LEN)
+      LOGICAL                  :: DEF
+      INTEGER(4)               :: I
+      INCLUDE 'FFTW3.F03'
+!     **************************************************************************
+      IF(DIR.EQ.DIRSAVE.AND.LEN.EQ.LENSAVE) THEN
+        PLAN=PLANSAVE
+        ISIGN=ISIGNSAVE
+        RETURN
+      END IF
+      IF (DIR.EQ.'GTOR') THEN
+        ISIGN=1
+      ELSE IF (DIR.EQ.'RTOG') THEN
+        ISIGN=-1
+      ELSE
+        CALL ERROR$MSG('DIRECTION ID NOT RECOGNIZED')
+        CALL ERROR$MSG('DIR MUST BE "GTOR" OR "RTOG"')
+        CALL ERROR$CHVAL('DIR',TRIM(DIR))
+        CALL ERROR$STOP('LIB_FFTW3')
+      END IF
+      DEF=.FALSE.
+      DO I=1,NP
+        IF((LEN*ISIGN).EQ.PLANS1(I)) THEN
+          DEF=.TRUE.
+          PLAN=PLANS2(I)
+          EXIT
+        END IF
+      END DO
+      IF(.NOT.DEF) THEN
+        WRITE(*,*) 'LIB_FFTW: CREATE PLAN FOR: ',TRIM(DIR),ISIGN,LEN,NP
+        NP=NP+1
+        IF(NP.GT.NPX) NP=NPX
+        IF(DIR.EQ.'RTOG') THEN
+          PLANS2(NP)=FFTW_PLAN_DFT_1D(LEN,XDUMMY,YDUMMY,FFTW_FORWARD, &
+     &       IOR(FFTW_DESTROY_INPUT,IOR(FFTW_MEASURE,FFTW_UNALIGNED)))
+        ELSE
+          PLANS2(NP)=FFTW_PLAN_DFT_1D(LEN,XDUMMY,YDUMMY,FFTW_BACKWARD, &
+     &       IOR(FFTW_DESTROY_INPUT,IOR(FFTW_MEASURE,FFTW_UNALIGNED)))
+        END IF
+        PLANS1(NP)=ISIGN*LEN
+        PLAN=PLANS2(NP)
+      END IF
+      LENSAVE=LEN
+      DIRSAVE=DIR
+      PLANSAVE=PLAN
+      ISIGNSAVE=ISIGN
+      RETURN
+      END
+!
+!     ..........................................................................
       SUBROUTINE LIB_FFTW3(DIR,LEN,NFFT,X,Y)
 !     **************************************************************************
 !     **  1-D FFT                                                             **
@@ -3652,66 +3802,14 @@ INTEGER(4) :: I,J
       INTEGER(4)  ,INTENT(IN) :: NFFT
       COMPLEX(8)  ,INTENT(INOUT) :: X(LEN,NFFT)
       COMPLEX(8)  ,INTENT(OUT):: Y(LEN,NFFT)
-      CHARACTER(4),SAVE       :: DIRSAVE=''
-      INTEGER(4)  ,SAVE       :: LENSAVE=0
-      REAL(8)     ,SAVE       :: SCALE
-      INTEGER     ,SAVE       :: ISIGN
+      REAL(8)                 :: SCALE
+      INTEGER                 :: ISIGN
       COMPLEX(8)              :: XDUMMY(LEN)
-      COMPLEX(8)              :: YDUMMY(LEN)
-      INTEGER(4),SAVE         :: NP=0
-      INTEGER(4),PARAMETER    :: NPX=10 ! #(DIFFERENT FFT PLANS)
-      TYPE(C_PTR),SAVE        :: PLANS2(NPX),PLAN
-      INTEGER(4),SAVE         :: PLANS1(NPX)
-      LOGICAL                 :: DEF
+      TYPE(C_PTR)             :: PLAN
       INTEGER(4)              :: I
       INCLUDE 'FFTW3.F03'
 !     **************************************************************************
-      IF(DIR.NE.DIRSAVE.OR.LEN.NE.LENSAVE) THEN
-        IF (DIR.EQ.'GTOR') THEN
-          ISIGN=1
-        ELSE IF (DIR.EQ.'RTOG') THEN
-          ISIGN=-1
-        ELSE
-          CALL ERROR$MSG('DIRECTION ID NOT RECOGNIZED')
-          CALL ERROR$MSG('DIR MUST BE "GTOR" OR "RTOG"')
-          CALL ERROR$CHVAL('DIR',TRIM(DIR))
-          CALL ERROR$STOP('1D-FFTW')
-        END IF
-!
-!       == FIND PLAN IN THE LIST ===============================================
-        DEF=.FALSE.
-        DO I=1,NP
-          IF((LEN*ISIGN).EQ.PLANS1(I)) THEN
-            DEF=.TRUE.
-            PLAN=PLANS2(I)
-            EXIT
-          END IF
-        END DO
-!
-!       == CREATE NEW PLAN IF NOT IN THE LIST ==================================
-        IF(.NOT.DEF) THEN
-          WRITE(*,*) 'LIB_FFTW: CREATE PLAN FOR: ',TRIM(DIR),ISIGN,LEN,NP
-          NP=NP+1
-          IF(NP.GE.NPX) NP=NPX ! ALLOW ONLY NPX PLANS
-          IF(DIR.EQ.'RTOG') THEN
-            PLANS2(NP) = FFTW_PLAN_DFT_1D(LEN,XDUMMY,YDUMMY,FFTW_FORWARD,&
-              &IOR(FFTW_DESTROY_INPUT,IOR(FFTW_MEASURE,FFTW_UNALIGNED)))
-          ELSE IF (DIR.EQ.'GTOR') THEN
-            PLANS2(NP) = FFTW_PLAN_DFT_1D(LEN,XDUMMY,YDUMMY,FFTW_BACKWARD,&
-              &IOR(FFTW_DESTROY_INPUT,IOR(FFTW_MEASURE,FFTW_UNALIGNED)))
-          ELSE
-            CALL ERROR$MSG('DIRECTION ID NOT RECOGNIZED')
-            CALL ERROR$MSG('DIR MUST BE "GTOR" OR "RTOG"')
-            CALL ERROR$CHVAL('DIR',TRIM(DIR))
-            CALL ERROR$STOP('LIB_FFTW3')
-          END IF
-
-          PLANS1(NP)=ISIGN*LEN
-          PLAN=PLANS2(NP)
-        END IF
-        LENSAVE=LEN
-        DIRSAVE=DIR
-      END IF
+      CALL LIB_FFTW3_GETPLAN(DIR,LEN,PLAN,ISIGN)
 !
 !     ==========================================================================
 !     ==  NOW PERFORM FFT                                                     ==
@@ -3728,6 +3826,61 @@ INTEGER(4) :: I,J
         SCALE=1.D0/REAL(LEN,KIND=8)
         Y(:,:)=Y(:,:)*SCALE
       END IF
+      RETURN
+      END
+!
+!     ..........................................................................
+      SUBROUTINE LIB_FFTW3_SLABS(DIR,LEN,NSLAB,NR1L,STRIDE_R1 &
+     &                          ,NFFT,STRIDE_FFT,IOFF,X)
+!     **************************************************************************
+!     **  EXECUTED BY LIB$FFTC8_SLABS FOR FFTW3: REUSES THE SINGLE 1-D PLAN   **
+!     **  AND A SINGLE STACK SCRATCH BUFFER ACROSS ALL (NSLAB, NR1L, NFFT).   **
+!     **************************************************************************
+      USE, INTRINSIC :: ISO_C_BINDING
+      IMPLICIT NONE
+      CHARACTER(*),INTENT(IN)    :: DIR
+      INTEGER(4)  ,INTENT(IN)    :: LEN
+      INTEGER(4)  ,INTENT(IN)    :: NSLAB
+      INTEGER(4)  ,INTENT(IN)    :: NR1L
+      INTEGER(4)  ,INTENT(IN)    :: STRIDE_R1
+      INTEGER(4)  ,INTENT(IN)    :: NFFT
+      INTEGER(4)  ,INTENT(IN)    :: STRIDE_FFT
+      INTEGER(4)  ,INTENT(IN)    :: IOFF
+      COMPLEX(8)  ,INTENT(INOUT) :: X(*)
+      COMPLEX(8)                 :: XDUMMY(LEN)
+      COMPLEX(8)                 :: YDUMMY(LEN)
+      TYPE(C_PTR)                :: PLAN
+      INTEGER                    :: ISIGN
+      REAL(8)                    :: SCALE
+      INTEGER(4)                 :: IFFT,IR1L,ISLAB,BASE,O1,O2
+      LOGICAL(4)                 :: TSCALE
+      INCLUDE 'FFTW3.F03'
+!     **************************************************************************
+      CALL LIB_FFTW3_GETPLAN(DIR,LEN,PLAN,ISIGN)
+      TSCALE=(DIR.EQ.'RTOG')
+      SCALE=1.D0/REAL(LEN,KIND=8)
+      DO IFFT=1,NFFT
+        DO IR1L=1,NR1L
+          BASE=IOFF+(IFFT-1)*STRIDE_FFT+(IR1L-1)*STRIDE_R1
+          IF(TSCALE) THEN
+            DO ISLAB=1,NSLAB
+              O1=BASE+(ISLAB-1)*LEN+1
+              O2=O1+LEN-1
+              XDUMMY=X(O1:O2)
+              CALL FFTW_EXECUTE_DFT(PLAN, XDUMMY, YDUMMY)
+              X(O1:O2)=YDUMMY*SCALE
+            END DO
+          ELSE
+            DO ISLAB=1,NSLAB
+              O1=BASE+(ISLAB-1)*LEN+1
+              O2=O1+LEN-1
+              XDUMMY=X(O1:O2)
+              CALL FFTW_EXECUTE_DFT(PLAN, XDUMMY, YDUMMY)
+              X(O1:O2)=YDUMMY
+            END DO
+          END IF
+        END DO
+      END DO
       RETURN
       END
 !
@@ -3880,6 +4033,7 @@ INTEGER(4) :: I,J
 !     **************************************************************************
       USE, INTRINSIC :: ISO_C_BINDING
       USE CUFFT_INTERFACE_MODULE
+      USE VESPAW_GPU_MODULE, ONLY : VESPAW$GPU_ENABLED,VESPAW$GPU_FFT_1D
       IMPLICIT NONE
       CHARACTER(*),INTENT(IN)    :: DIR
       INTEGER(4)  ,INTENT(IN)    :: LEN
@@ -3903,6 +4057,10 @@ INTEGER(4) :: I,J
         CALL ERROR$MSG('DIR MUST BE "GTOR" OR "RTOG"')
         CALL ERROR$CHVAL('DIR',TRIM(DIR))
         CALL ERROR$STOP('LIB_CUFFT')
+      END IF
+      IF(VESPAW$GPU_ENABLED()) THEN
+        CALL VESPAW$GPU_FFT_1D(DIR,LEN,NFFT,X,Y)
+        RETURN
       END IF
 !
 !     ==========================================================================
@@ -3973,6 +4131,7 @@ INTEGER(4) :: I,J
 !     **************************************************************************
       USE, INTRINSIC :: ISO_C_BINDING
       USE CUFFT_INTERFACE_MODULE
+      USE VESPAW_GPU_MODULE, ONLY : VESPAW$GPU_ENABLED,VESPAW$GPU_FFT_3D
       IMPLICIT NONE
       CHARACTER(4),INTENT(IN)   :: DIR
       INTEGER(4)  ,INTENT(IN)   :: N1,N2,N3
@@ -3986,6 +4145,16 @@ INTEGER(4) :: I,J
       INTEGER(C_INT)             :: DIRECTION
       REAL(8)                    :: SCALE
 !     **************************************************************************
+      IF(DIR.NE.'RTOG'.AND.DIR.NE.'GTOR') THEN
+        CALL ERROR$MSG('DIRECTION ID NOT RECOGNIZED')
+        CALL ERROR$MSG('DIR MUST BE "GTOR" OR "RTOG"')
+        CALL ERROR$CHVAL('DIR',TRIM(DIR))
+        CALL ERROR$STOP('LIB_3DFFTCUFFT')
+      END IF
+      IF(VESPAW$GPU_ENABLED()) THEN
+        CALL VESPAW$GPU_FFT_3D(DIR,N1,N2,N3,1,X,Y)
+        RETURN
+      END IF
       IF(DIR.EQ.'RTOG') THEN
         DIRECTION=CUFFT_FORWARD
       ELSE IF(DIR.EQ.'GTOR') THEN

@@ -410,22 +410,13 @@ IF(TDEBUG) WRITE(*,"('CG-MIXER: POT   :',3F10.7)") V(1:3,1)
       DEALLOCATE(SUBO)
 
       ALLOCATE(PSIROT(NGL,NDIM,NB))
-      PSIROT=(0.D0,0.D0)
-      DO IB2=1,NB
-        DO IB1=1,NB
-          PSIROT(:,:,IB2)=PSIROT(:,:,IB2)+PSI(:,:,IB1)*SUBVEC(IB1,IB2)
-        END DO
-      END DO
+      CALL LIB$MATMULC8(NGL*NDIM,NB,NB,PSI,SUBVEC,PSIROT)
       PSI=PSIROT
       DEALLOCATE(PSIROT)
 
       ALLOCATE(PROJROT(NDIM,NB,NPRO))
-      PROJROT=(0.D0,0.D0)
-      DO IB2=1,NB
-        DO IB1=1,NB
-          PROJROT(:,IB2,:)=PROJROT(:,IB2,:)+PROJ(:,IB1,:)*SUBVEC(IB1,IB2)
-        END DO
-      END DO
+      CALL CG_PROJ_CONTRACT(NDIM,NPRO,(1.D0,0.D0),PROJ,NB,1,NB &
+     &                     ,SUBVEC,NB,1,NB,(0.D0,0.D0),PROJROT,NB,1)
       PROJ=PROJROT
       DEALLOCATE(PROJROT)
 
@@ -1340,12 +1331,7 @@ IF(TDEBUG) WRITE(*,"('CG-MIXER: POT   :',3F10.7)") V(1:3,1)
             END IF
             DEALLOCATE(HPHYS)
             ALLOCATE(PSINAT(NGL,NDIM,NB))
-            PSINAT=(0.D0,0.D0)
-            DO IB2=1,NB
-              DO IB1=1,NB
-                PSINAT(:,:,IB2)=PSINAT(:,:,IB2)+PSIU(:,:,IB1)*UNAT(IB1,IB2)
-              END DO
-            END DO
+            CALL LIB$MATMULC8(NGL*NDIM,NB,NB,PSIU,UNAT,PSINAT)
             THIS%EIGVAL(:)=EIGVALNAT(:)
             DEALLOCATE(EIGVALNAT)
             DEALLOCATE(UNAT)
@@ -1626,11 +1612,10 @@ END MODULE EDFTVAR_MODULE
             HPHYS=0.5D0*(HPHYS+CONJG(TRANSPOSE(HPHYS)))
 !           == PROJECTED RESIDUAL G_I=H|PSI_I>-SUM_J O|PSI_J>HPHYS_JI ====
             RES=HPSI
-            DO IB=1,NB
-              DO JB=1,NB
-                RES(:,:,IB)=RES(:,:,IB)-OPSI(:,:,JB)*HPHYS(JB,IB)
-              ENDDO
-            ENDDO
+            IF(NGL*NDIM.GT.0.AND.NB.GT.0) THEN
+              CALL ZGEMM('N','N',NGL*NDIM,NB,NB,(-1.D0,0.D0),OPSI,NGL*NDIM &
+     &                  ,HPHYS,NB,(1.D0,0.D0),RES,NGL*NDIM)
+            END IF
             IF(.NOT.ALLOCATED(BLK(IKPT,ISPIN)%PSIB)) THEN
               ALLOCATE(BLK(IKPT,ISPIN)%PSIB(NGL,NDIM,NB))
               ALLOCATE(BLK(IKPT,ISPIN)%DPSI(NGL,NDIM,NB))
@@ -1780,12 +1765,7 @@ END MODULE EDFTVAR_MODULE
           HPHYS=0.5D0*(HPHYS+CONJG(TRANSPOSE(HPHYS)))
           CALL LIB$DIAGC8(NB,HPHYS,EVAL,UMAT)
           CMAT=MATMUL(SMAT,UMAT)          ! S**(-1/2) * U
-          PSINEW=(0.D0,0.D0)
-          DO IB=1,NB
-            DO JB=1,NB
-              PSINEW(:,:,IB)=PSINEW(:,:,IB)+PSIU(:,:,JB)*CMAT(JB,IB)
-            ENDDO
-          ENDDO
+          CALL LIB$MATMULC8(NGL*NDIM,NB,NB,PSIU,CMAT,PSINEW)
           HPHYS=(0.D0,0.D0)
           DO IB=1,NB
             HPHYS(IB,IB)=CMPLX(EVAL(IB),0.D0,KIND=8)
@@ -1837,11 +1817,10 @@ END MODULE EDFTVAR_MODULE
         CALL WAVES_OPSI(NB,NB,NPRO,NAT,NGL,R0,PROJX,OPSIX)
         CALL PLANEWAVE$SCALARPRODUCT('',NGL,NDIM,NB,OPSIX,NB,X,CX)
         CALL MPE$COMBINE('K','+',CX)
-        DO IB1=1,NB
-          DO JB1=1,NB
-            X(:,:,IB1)=X(:,:,IB1)-PSIU(:,:,JB1)*CX(JB1,IB1)
-          ENDDO
-        ENDDO
+        IF(NGL*NDIM.GT.0.AND.NB.GT.0) THEN
+          CALL ZGEMM('N','N',NGL*NDIM,NB,NB,(-1.D0,0.D0),PSIU,NGL*NDIM &
+     &              ,CX,NB,(1.D0,0.D0),X,NGL*NDIM)
+        END IF
         DEALLOCATE(OPSIX,PROJX,CX)
         END SUBROUTINE CG_PROJECTOUT
       END SUBROUTINE EDFT$VARSTEP
@@ -2160,11 +2139,11 @@ END MODULE EDFTVAR_MODULE
 !       == RESIDUALS (IN W) AND THEIR NORMS ================================
         DO K=1,NACT
           W(:,:,K)=HB(:,:,K)-CMPLX(EPSACT(K),0.D0,KIND=8)*OB(:,:,K)
-          CALL PLANEWAVE$SCALARPRODUCT('',NGL,NDIM,1,W(:,:,K),1,W(:,:,K) &
-     &                                ,CSCAL)
-          CALL MPE$COMBINE('K','+',CSCAL)
-          RNORMACT(K)=SQRT(MAX(REAL(CSCAL(1,1),KIND=8),0.D0))
         END DO
+        CALL PLANEWAVE$DOTDIAG(NGL,NDIM,NACT,W(:,:,1:NACT),W(:,:,1:NACT) &
+     &                        ,RNORMACT(1:NACT))
+        CALL MPE$COMBINE('K','+',RNORMACT(1:NACT))
+        RNORMACT(1:NACT)=SQRT(MAX(RNORMACT(1:NACT),0.D0))
 !
 !       == LOCK EVERY ACTIVE BAND THAT JUST DROPPED BELOW CONV: FREEZE IT  ==
 !       == (ITS PSI/EPS/PROJ ARE ALREADY CORRECT IN THE MAIN ARRAYS),      ==
@@ -2244,12 +2223,10 @@ END MODULE EDFTVAR_MODULE
         CALL WAVES_OPSI(NACT,NACT,NPRO,NAT,NGL,R0,PD(:,1:NACT,:) &
      &                  ,OD(:,:,1:NACT))
 !       == NORMS BEFORE ANY PROJECTION, TO DETECT CANCELLATION BELOW ======
-        DO K=1,NACT
-          CALL PLANEWAVE$SCALARPRODUCT('',NGL,NDIM,1,D(:,:,K),1 &
-     &              ,OD(:,:,K),CSCAL)
-          CALL MPE$COMBINE('K','+',CSCAL)
-          DNORM0(K)=MAX(REAL(CSCAL(1,1),KIND=8),0.D0)
-        END DO
+        CALL PLANEWAVE$DOTDIAG(NGL,NDIM,NACT,D(:,:,1:NACT),OD(:,:,1:NACT) &
+     &                        ,DNORM0(1:NACT))
+        CALL MPE$COMBINE('K','+',DNORM0(1:NACT))
+        DNORM0(1:NACT)=MAX(DNORM0(1:NACT),0.D0)
 !
 !       ================================================================
 !       == ROBUST SUBSPACE (2026-09-23): O-ORTHOGONALIZE THE CORRECTION ==
@@ -2274,11 +2251,8 @@ END MODULE EDFTVAR_MODULE
             CALL DAVIDSON_SUBTRACT(NG,NLOCK,NACT,SLOCK(1:NLOCK,1:NACT) &
        &              ,PB(:,:,LB:NB),HB(:,:,LB:NB),OB(:,:,LB:NB) &
        &              ,D(:,:,1:NACT),HD(:,:,1:NACT),OD(:,:,1:NACT))
-            DO K=1,NACT
-              DO IC=1,NLOCK
-                PD(:,K,:)=PD(:,K,:)-PRB(:,LB+IC-1,:)*SLOCK(IC,K)
-              END DO
-            END DO
+            CALL CG_PROJ_CONTRACT(NDIM,NPRO,(-1.D0,0.D0),PRB,NB,LB,NLOCK &
+       &                         ,SLOCK,NB,1,NACT,(1.D0,0.D0),PD,NB,1)
           END IF
           CALL PLANEWAVE$SCALARPRODUCT('',NGL,NDIM,NACT,PB(:,:,1:NACT) &
      &              ,NACT,OD(:,:,1:NACT),SACT(1:NACT,1:NACT))
@@ -2286,11 +2260,8 @@ END MODULE EDFTVAR_MODULE
           CALL DAVIDSON_SUBTRACT(NG,NACT,NACT,SACT(1:NACT,1:NACT) &
        &            ,PB(:,:,1:NACT),HB(:,:,1:NACT),OB(:,:,1:NACT) &
        &            ,D(:,:,1:NACT),HD(:,:,1:NACT),OD(:,:,1:NACT))
-          DO K=1,NACT
-            DO IC=1,NACT
-              PD(:,K,:)=PD(:,K,:)-PRB(:,IC,:)*SACT(IC,K)
-            END DO
-          END DO
+          CALL CG_PROJ_CONTRACT(NDIM,NPRO,(-1.D0,0.D0),PRB,NB,1,NACT &
+     &                         ,SACT,NB,1,NACT,(1.D0,0.D0),PD,NB,1)
         END DO
 !
 !       == NORMALIZE; DROP DIRECTIONS THAT CANCELLED ALMOST COMPLETELY   ==
@@ -2341,12 +2312,8 @@ END MODULE EDFTVAR_MODULE
        &                          ,HD(:,:,1:NACT),W(:,:,1:NGOOD))
           CALL DAVIDSON_TRANSFORM(NG,NACT,NGOOD,TMAT(1:NACT,1:NGOOD) &
        &                          ,OD(:,:,1:NACT),W(:,:,1:NGOOD))
-          DO K=1,NGOOD
-            PWORK(:,K,:)=(0.D0,0.D0)
-            DO IC=1,NACT
-              PWORK(:,K,:)=PWORK(:,K,:)+PD(:,IC,:)*TMAT(IC,K)
-            END DO
-          END DO
+          CALL CG_PROJ_CONTRACT(NDIM,NPRO,(1.D0,0.D0),PD,NB,1,NACT &
+       &                       ,TMAT,NB,1,NGOOD,(0.D0,0.D0),PWORK,NB,1)
           PD(:,1:NGOOD,:)=PWORK(:,1:NGOOD,:)
         END IF
 !
@@ -2417,15 +2384,12 @@ END MODULE EDFTVAR_MODULE
           CALL LIB$ADDPRODUCTC8(.FALSE.,NG,NGOOD,NACT,D(:,:,1:NGOOD) &
      &                         ,CMAT(1:NGOOD,1:NACT),W(:,:,1:NACT))
         END IF
-        DO K=1,NACT
-          PWORK(:,K,:)=(0.D0,0.D0)
-          DO IC=1,NACT
-            PWORK(:,K,:)=PWORK(:,K,:)+PRB(:,IC,:)*SUBVEC(IC,K)
-          END DO
-          DO IC=1,NGOOD
-            PWORK(:,K,:)=PWORK(:,K,:)+PD(:,IC,:)*SUBVEC(NACT+IC,K)
-          END DO
-        END DO
+        CALL CG_PROJ_CONTRACT(NDIM,NPRO,(1.D0,0.D0),PRB,NB,1,NACT &
+     &                       ,SUBVEC,2*NB,1,NACT,(0.D0,0.D0),PWORK,NB,1)
+        IF(NGOOD.GT.0) THEN
+          CALL CG_PROJ_CONTRACT(NDIM,NPRO,(1.D0,0.D0),PD,NB,1,NGOOD &
+     &                         ,SUBVEC,2*NB,NACT+1,NACT,(1.D0,0.D0),PWORK,NB,1)
+        END IF
         DO K=1,NACT
           PSI(:,:,IACT(K))=W(:,:,K)
           PROJ(:,IACT(K),:)=PWORK(:,K,:)
@@ -2827,7 +2791,7 @@ END MODULE EDFTVAR_MODULE
       COMPLEX(8),INTENT(IN) :: RH(NGL,NDIM,NH)
       COMPLEX(8),INTENT(OUT):: XOUT(NGL,NDIM)
       COMPLEX(8),INTENT(OUT):: ROUT(NGL,NDIM)
-      COMPLEX(8)             :: BMATC(NH,NH)
+      COMPLEX(8)             :: BMATC(NH,NH),CALPHA(NH)
       REAL(8)                :: BMAT(NH,NH),BINV(NH,NH)
       REAL(8)                :: ALPHA(NH),SVAR
       REAL(8)                :: REGVAR
@@ -2859,13 +2823,17 @@ END MODULE EDFTVAR_MODULE
       SVAR=SUM(BINV)
       DO J=1,NH
         ALPHA(J)=SUM(BINV(J,:))/SVAR
+        CALPHA(J)=CMPLX(ALPHA(J),0.D0,KIND=8)
       END DO
-      XOUT=(0.D0,0.D0)
-      ROUT=(0.D0,0.D0)
-      DO K=1,NH
-        XOUT=XOUT+CMPLX(ALPHA(K),0.D0,KIND=8)*XH(:,:,K)
-        ROUT=ROUT+CMPLX(ALPHA(K),0.D0,KIND=8)*RH(:,:,K)
-      END DO
+      IF(NGL*NDIM.GT.0) THEN
+        CALL ZGEMV('N',NGL*NDIM,NH,(1.D0,0.D0),XH,NGL*NDIM,CALPHA,1 &
+     &            ,(0.D0,0.D0),XOUT,1)
+        CALL ZGEMV('N',NGL*NDIM,NH,(1.D0,0.D0),RH,NGL*NDIM,CALPHA,1 &
+     &            ,(0.D0,0.D0),ROUT,1)
+      ELSE
+        XOUT=(0.D0,0.D0)
+        ROUT=(0.D0,0.D0)
+      END IF
       RETURN
       END SUBROUTINE RMM_DIIS_COEFF
 !
@@ -3519,3 +3487,71 @@ WRITE(*,*)
       CALL MPE$COMBINE('K','+',PROPSI)
       RETURN
       END SUBROUTINE CG_PROJECTIONS
+!
+!     ..................................................................
+      SUBROUTINE CG_PROJ_CONTRACT(NDIM,NPRO,ALPHA,A,LDBA,IA0,N1 &
+     &                           ,MAT,LDM,IM0,N2,BETA,B,LDBB,IB0)
+!     ******************************************************************
+!     **  SHARED BLAS3 CONTRACTION OVER BANDS FOR PROJECTOR ARRAYS:     **
+!     **    B(:, IB0:IB0+N2-1, :) = BETA * B(:, IB0:IB0+N2-1, :)        **
+!     **      + ALPHA * SUM_{IC=1..N1} A(:, IA0+IC-1, :)                **
+!     **                              * MAT(IM0+IC-1, 1:N2)             **
+!     **  ZERO-COPY ZGEMM FOR NDIM=1; PACKED SINGLE ZGEMM FOR NDIM>1.   **
+!     ******************************************************************
+      IMPLICIT NONE
+      INTEGER(4),INTENT(IN)    :: NDIM,NPRO,LDBA,IA0,N1,LDM,IM0,N2
+      INTEGER(4),INTENT(IN)    :: LDBB,IB0
+      COMPLEX(8),INTENT(IN)    :: ALPHA,BETA
+      COMPLEX(8),INTENT(IN)    :: A(NDIM,LDBA,NPRO)
+      COMPLEX(8),INTENT(IN)    :: MAT(LDM,N2)
+      COMPLEX(8),INTENT(INOUT) :: B(NDIM,LDBB,NPRO)
+      COMPLEX(8),ALLOCATABLE   :: APACK(:,:),BPACK(:,:)
+      INTEGER(4)               :: IPRO,IDIM,ICOL,IC
+!     ******************************************************************
+      IF(NPRO.LE.0.OR.N2.LE.0) RETURN
+      IF(N1.LE.0) THEN
+        IF(BETA.EQ.(0.D0,0.D0)) THEN
+          B(:,IB0:IB0+N2-1,:)=(0.D0,0.D0)
+        ELSE IF(BETA.NE.(1.D0,0.D0)) THEN
+          B(:,IB0:IB0+N2-1,:)=BETA*B(:,IB0:IB0+N2-1,:)
+        END IF
+        RETURN
+      END IF
+      IF(NDIM.EQ.1) THEN
+        CALL ZGEMM('T','N',N2,NPRO,N1,ALPHA,MAT(IM0,1),LDM &
+     &            ,A(1,IA0,1),LDBA,BETA,B(1,IB0,1),LDBB)
+      ELSE
+        ALLOCATE(APACK(N1,NDIM*NPRO))
+        ALLOCATE(BPACK(N2,NDIM*NPRO))
+        DO IPRO=1,NPRO
+          DO IDIM=1,NDIM
+            ICOL=IDIM+NDIM*(IPRO-1)
+            DO IC=1,N1
+              APACK(IC,ICOL)=A(IDIM,IA0+IC-1,IPRO)
+            END DO
+          END DO
+        END DO
+        IF(BETA.NE.(0.D0,0.D0)) THEN
+          DO IPRO=1,NPRO
+            DO IDIM=1,NDIM
+              ICOL=IDIM+NDIM*(IPRO-1)
+              DO IC=1,N2
+                BPACK(IC,ICOL)=B(IDIM,IB0+IC-1,IPRO)
+              END DO
+            END DO
+          END DO
+        END IF
+        CALL ZGEMM('T','N',N2,NDIM*NPRO,N1,ALPHA,MAT(IM0,1),LDM &
+     &            ,APACK,N1,BETA,BPACK,N2)
+        DO IPRO=1,NPRO
+          DO IDIM=1,NDIM
+            ICOL=IDIM+NDIM*(IPRO-1)
+            DO IC=1,N2
+              B(IDIM,IB0+IC-1,IPRO)=BPACK(IC,ICOL)
+            END DO
+          END DO
+        END DO
+        DEALLOCATE(APACK,BPACK)
+      END IF
+      RETURN
+      END SUBROUTINE CG_PROJ_CONTRACT

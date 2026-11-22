@@ -37,6 +37,7 @@
 !     **  INTERSTITIAL KINETIC-ENERGY DENSITY TAU IN REAL SPACE, SAME  **
 !     **  SIGNATURE SHAPE AS WAVES_DENSITY (RHO -> TAU).               **
 !     ******************************************************************
+      USE VESPAW_GPU_MODULE, ONLY : VESPAW$GPU_ENABLED
       IMPLICIT NONE
       INTEGER(4),INTENT(IN)  :: NGL         ! MAX # PLANE WAVES
       INTEGER(4),INTENT(IN)  :: NRL         ! # R-SPACE POINTS
@@ -49,10 +50,12 @@
       COMPLEX(8),ALLOCATABLE :: PSIOFG_D(:,:,:)
       COMPLEX(8),ALLOCATABLE :: PSIOFR_D(:,:,:)
       REAL(8)   ,ALLOCATABLE :: GVEC(:,:)
-      LOGICAL(4)              :: TINV
+      LOGICAL(4)              :: TINV,TGPUDONE
       INTEGER(4)              :: IBH,IR,IDIR,IG,IDIM
       REAL(8)                 :: F1
       REAL(8)                 :: RE,IM
+      REAL(8)                 :: VDUMMY_R8(1)
+      COMPLEX(8)              :: VDUMMY_C8(1)
       COMPLEX(8),PARAMETER    :: CI=(0.D0,1.D0)
 !     ******************************************************************
                                CALL TRACE$PUSH('WAVES_KINETICDENSITY')
@@ -80,6 +83,17 @@
 !     ==================================================================
       ALLOCATE(GVEC(3,NGL))
       CALL PLANEWAVE$GETR8A('GVEC',3*NGL,GVEC)
+      IF(VESPAW$GPU_ENABLED()) THEN
+        VDUMMY_R8(1)=0.D0
+        VDUMMY_C8(1)=(0.D0,0.D0)
+        CALL PLANEWAVE$GPU_TAU_TRY(0,NGL,NDIM,NBH,NB,NRL,F,GVEC,VDUMMY_R8 &
+     &                            ,PSIOFG,TAU,VDUMMY_C8,TGPUDONE)
+        IF(TGPUDONE) THEN
+          DEALLOCATE(GVEC)
+                               CALL TRACE$POP
+          RETURN
+        END IF
+      END IF
 !
 !     ==================================================================
 !     ==  FOR EACH CARTESIAN DIRECTION: D(PSI)/D(X_D) VIA i*G_D IN    ==
@@ -148,6 +162,7 @@
 !     **  OUTPUT -- THIS ROUTINE DOES NOT TOUCH THE ORDINARY LOCAL-     **
 !     **  POTENTIAL OR KINETIC-ENERGY TERMS AT ALL.                    **
 !     ******************************************************************
+      USE VESPAW_GPU_MODULE, ONLY : VESPAW$GPU_ENABLED
       IMPLICIT NONE
       INTEGER(4),INTENT(IN)  :: NGL          ! MAX # PLANE WAVES
       INTEGER(4),INTENT(IN)  :: NRL          ! # R-SPACE POINTS
@@ -160,8 +175,9 @@
       COMPLEX(8),ALLOCATABLE :: PSIOFR_D(:,:,:)
       COMPLEX(8),ALLOCATABLE :: WOFG_D(:,:,:)
       REAL(8)   ,ALLOCATABLE :: GVEC(:,:)
-      LOGICAL(4)              :: TINV
+      LOGICAL(4)              :: TINV,TGPUDONE
       INTEGER(4)              :: IBH,IR,IDIR,IG
+      REAL(8)                 :: VDUMMY_R8(1)
       COMPLEX(8),PARAMETER    :: CI=(0.D0,1.D0)
 !     ******************************************************************
                                CALL TRACE$PUSH('WAVES_TAUHPSI')
@@ -182,6 +198,16 @@
 !
       ALLOCATE(GVEC(3,NGL))
       CALL PLANEWAVE$GETR8A('GVEC',3*NGL,GVEC)
+      IF(VESPAW$GPU_ENABLED()) THEN
+        VDUMMY_R8(1)=0.D0
+        CALL PLANEWAVE$GPU_TAU_TRY(1,NGL,NDIM,NBH,NBH,NRL,VDUMMY_R8,GVEC &
+     &                            ,VTAU,PSIOFG,VDUMMY_R8,HTAUPSI,TGPUDONE)
+        IF(TGPUDONE) THEN
+          DEALLOCATE(GVEC)
+                               CALL TRACE$POP
+          RETURN
+        END IF
+      END IF
 !
       ALLOCATE(PSIOFG_D(NGL,NDIM,NBH))
       ALLOCATE(PSIOFR_D(NRL,NDIM,NBH))

@@ -1,0 +1,48 @@
+#########################################################################################
+##                                                                                     ##
+##  Parameter file for Linux + GNU Fortran + OpenBLAS + NVIDIA CUDA GPU Backend        ##
+##                                                                                     ##
+##  Configure & build on an NVIDIA GPU cluster node after `module load cuda openmpi`:  ##
+##    ./configure --with-parmfile=arch/parms.linux_gfortran_cuda                       ##
+##    make -j8 fast fast_parallel                                                      ##
+##                                                                                     ##
+##  Optionally add -DCPPVAR_MPI_CUDA_AWARE to CPPFLAGS when built against a            ##
+##  CUDA-aware MPI implementation (OpenMPI + UCX/GDR or MVAPICH2-GDR).                 ##
+##  Optionally set CUDADIR / NVCCFLAGS GPU architecture (e.g. -arch=sm_80 / sm_90).    ##
+##                                                                                     ##
+#########################################################################################
+#
+ARCH="linux_gfortran_cuda"
+TPARALLEL="T"
+TUPPERCASEMOD="F"
+SPECIAL="none"
+#
+BLASDIR="/usr"
+LAPACKDIR="/usr"
+FFTDIR="/usr"
+MPIDIR="/usr"
+CUDADIR="/usr/local/cuda"
+NVCC="${CUDADIR}/bin/nvcc"
+NVCCFLAGS="-O3 -arch=native -Xcompiler -fPIC -I${CUDADIR}/include"
+#
+FFT_HEADER="/usr/include/fftw3.f03"
+MPI_HEADER="/usr/include/mpif.h"
+#
+COMPILER_SCALAR="gfortran -DCPPVAR_COMPILER_G95 -I/usr/include -I/usr/include/hdf5/serial -I/usr/include/aarch64-linux-gnu -I/usr/include/aarch64-linux-gnu/hdf5/serial -I/usr/include/x86_64-linux-gnu -I/usr/include/x86_64-linux-gnu/hdf5/serial -I${CUDADIR}/include -fopenmp"
+COMPILER_PARALLEL="mpif90 -I/usr/include -I/usr/include/hdf5/serial -I/usr/include/aarch64-linux-gnu -I/usr/include/aarch64-linux-gnu/hdf5/serial -I/usr/include/x86_64-linux-gnu -I/usr/include/x86_64-linux-gnu/hdf5/serial -I${CUDADIR}/include -fopenmp"
+#
+FCFLAGS_NONE="-c "
+FCFLAGS_OPT="-c -O3 -march=native -funroll-loops -fomit-frame-pointer -fimplicit-none -std=legacy"
+FCFLAGS_PROF="-c -pg -O3 -funroll-loops"
+FCFLAGS_DBG="-c -g -fbounds-check -fimplicit-none"
+#
+LDFLAGS_SCALAR="-I${OBJDIR} -L${OBJDIR} -L${LAPACKDIR}/lib64 -L/usr/lib/aarch64-linux-gnu -L/usr/lib/aarch64-linux-gnu/hdf5/serial -L/usr/lib/x86_64-linux-gnu -L/usr/lib/x86_64-linux-gnu/hdf5/serial -L${CUDADIR}/lib64 -Wl,-rpath,${CUDADIR}/lib64"
+LDFLAGS_PARALLEL="-I${OBJDIR} -L${OBJDIR} -L${LAPACKDIR}/lib64 -L${MPIDIR}/lib64 -L/usr/lib/aarch64-linux-gnu -L/usr/lib/aarch64-linux-gnu/hdf5/serial -L/usr/lib/x86_64-linux-gnu -L/usr/lib/x86_64-linux-gnu/hdf5/serial -L${CUDADIR}/lib64 -Wl,-rpath,${CUDADIR}/lib64"
+#
+LIBS_SCALAR="-lcudart -lcufft -lcublas -lcusolver -lstdc++ -lopenblas -llapack -lhdf5_hl_fortran -lhdf5_fortran -lhdf5_hl -lhdf5 -lpthread -lm -fopenmp"
+LIBS_PARALLEL="-lcudart -lcufft -lcublas -lcusolver -lstdc++ -lopenblas -llapack -lhdf5_hl_fortran -lhdf5_fortran -lhdf5_hl -lhdf5 -lpthread -lm -fopenmp"
+#
+CPPFLAGS="-DCPPVAR_GPU_CUDA -DCPPVAR_FFT_CUFFT -DCPPVAR_BLAS_OPENBLAS -DCPPVAR_HDF5 -DCPPVAR_U77 -DCPPVAR_COMPILER_G95 "
+#
+FEXT="f90"
+

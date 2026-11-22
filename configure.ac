@@ -164,6 +164,30 @@ if test "$PARMFILE" != notset; then
   fi
   MPI_HEADER=`grep '^MPI_HEADER' $PARMFILE | cut -d'"' -f2`
   SPECIAL=`grep '^SPECIAL' $PARMFILE | cut -d'"' -f2`
+  CUDADIR=`grep '^CUDADIR' $PARMFILE | cut -d'"' -f2`
+  NVCC=`grep '^NVCC=' $PARMFILE | cut -d'"' -f2`
+  NVCCFLAGS=`grep '^NVCCFLAGS=' $PARMFILE | cut -d'"' -f2`
+  GPUOBJS=`grep '^GPUOBJS=' $PARMFILE | cut -d'"' -f2`
+  if test "x$GPUOBJS" = "x"; then
+    case "$CPPFLAGS" in
+      *CPPVAR_GPU_CUDA*)
+        if test "x$NVCC" = "x"; then
+          if test "x$CUDADIR" != "x"; then
+            NVCC="${CUDADIR}/bin/nvcc"
+          else
+            NVCC="nvcc"
+          fi
+        fi
+        if test "x$NVCCFLAGS" = "x"; then
+          NVCCFLAGS="-O3 -Xcompiler -fPIC"
+        fi
+        GPUOBJS='${OBJDIR}/vespaw_gpu_backend.o'
+        ;;
+      *)
+        GPUOBJS=""
+        ;;
+    esac
+  fi
   #  
   # compose final variables
   #
@@ -269,6 +293,10 @@ AC_SUBST(MPIDIR)
 AC_SUBST(FFT_HEADER)     
 AC_SUBST(LIBAR)     
 AC_SUBST(MPI_HEADER)     
+AC_SUBST(CUDADIR)
+AC_SUBST(NVCC)
+AC_SUBST(NVCCFLAGS)
+AC_SUBST(GPUOBJS)
 #
 #########################################################################
 ##                                                                     ##
