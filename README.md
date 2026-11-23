@@ -84,6 +84,61 @@ A calculation is started with `vespaw name.cntl` (control file
 `vespaw run input.yaml`; see [doc/USAGE.md](doc/USAGE.md) and the
 tutorial.
 
+## System requirements and demo
+
+**Operating systems.** Linux and macOS, on x86_64 or Apple Silicon. No
+special hardware is needed. Tested on:
+
+| System | Compiler and libraries |
+|---|---|
+| macOS 26.6, Apple M3 laptop (8 cores) | gfortran 15.1, OpenBLAS 0.3.29, FFTW 3.3.10, HDF5 1.14.5, Open MPI 5.0.7 (Homebrew) |
+| macOS 15, arm64 (CI) | gfortran, OpenBLAS, FFTW, HDF5, Open MPI (Homebrew) |
+| Ubuntu 24.04, x86_64 (CI) | gfortran, OpenBLAS, FFTW3, HDF5, Open MPI (system packages) |
+| Linux cluster (bwHPC JUSTUS 2) | environment modules |
+
+**Dependencies.**
+- Required: a Fortran compiler (gfortran 13 to 15 are tested), BLAS/LAPACK
+  (OpenBLAS), FFTW3, and HDF5 with the Fortran interface.
+- Optional: an MPI library for the parallel build; Python 3 for the test
+  suite, the YAML input and the Python API.
+
+`install.sh` installs whatever is missing ([doc/INSTALL.md](doc/INSTALL.md)).
+
+**Install time.** About 7 minutes on the M3 laptop above, with the
+libraries already installed. Building the serial and MPI versions takes
+about 5.5 minutes, and the demo below takes the rest. Installing the
+libraries first adds time that depends on the network.
+
+**Demo.** `install.sh` ends with a demo that checks the build. It runs the
+regression cases `pbe_atom` (a PBE atom) and `si8_gamma` (an 8-atom Si cell,
+solved with the Davidson, RMM-DIIS and CG eigensolvers and with
+Car–Parrinello dynamics), first serially and then on two MPI tasks. To run
+it again at any time:
+
+```sh
+python3 testsuite/run.py pbe_atom si8_gamma
+```
+
+*Expected output:*
+1. one line per run, giving its energy, iteration count and band gap;
+2. `[PASS]` lines comparing the energies and gaps with stored references
+   and with each other;
+3. a final line, `2/2 regression cases passed`.
+
+*Expected run time* on the laptop above: about 1 minute serially, and
+about 40 s for `si8_gamma` on two MPI tasks.
+
+The full suite (`python3 testsuite/run.py`) has 22 cases: functionals,
+DFT+U, hybrids, spin–orbit coupling, forces, relaxation and symmetry. It
+takes about 2 hours (1 h 53 min measured) on the same laptop, without the long runs marked
+optional.
+
+**Reproducing the results of the method paper** (arXiv:2611.20789).
+The input files, scripts and per-system results of every calculation in
+the paper are in the archive `inputs.zip`, with a README for each
+calculation. The archive comes with the paper's Supplementary
+Information and will also be archived on Zenodo.
+
 ## Documentation
 
 | | |
