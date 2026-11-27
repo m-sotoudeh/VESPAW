@@ -250,6 +250,7 @@ OBJECTS3 = \
            ${OBJDIR}/vespaw_kpoints.o \
            ${OBJDIR}/vespaw_vext.o \
            ${OBJDIR}/vespaw_onsite.o \
+           ${OBJDIR}/vespaw_fock.o \
            ${OBJDIR}/vespaw_vdw.o \
            ${OBJDIR}/vespaw_ci.o \
            ${OBJDIR}/vespaw_opteels.o \
@@ -1025,6 +1026,9 @@ endif
  ${OBJDIR}/vespaw_vdw.o : CONSTANTS_MODULE.mod
  ${OBJDIR}/vespaw_vdw.o : STRINGS_MODULE.mod
  VDW_MODULE.mod : ${OBJDIR}/vespaw_vdw.o
+ ## file:src/vespaw_fock.f90
+ ${OBJDIR}/vespaw_fock.o  :  MPE_MODULE.mod
+ FOCK_MODULE.mod :  ${OBJDIR}/vespaw_fock.o
  ## file:src/vespaw_onsite.f90
  ${OBJDIR}/vespaw_onsite.o : PERIODICTABLE_MODULE.mod
  ${OBJDIR}/vespaw_onsite.o : NSPH_SCAN_MODULE.mod

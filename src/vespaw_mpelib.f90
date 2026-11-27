@@ -1361,6 +1361,13 @@ END MODULE MPE_MODULE
 !     == NODES OF THE CORRESPONDING GROUP                              ==
 !     ===================================================================
       CALL MPE$BROADCAST(CID,1,ICOLOR)
+!     == APPEND AT THE END OF THE LIST: APPENDING DIRECTLY AFTER CID WOULD  ==
+!     == DROP A COMMUNICATOR CREATED EARLIER FROM THE SAME PARENT (E.G. 'K' ==
+!     == WHEN 'KX' IS SPLIT FROM 'MONOMER' AS WELL). COMM, NTASKS AND       ==
+!     == THISTASK STILL DESCRIBE CID.                                       ==
+      DO WHILE(ASSOCIATED(THIS%NEXT))
+        THIS=>THIS%NEXT
+      ENDDO
       ALLOCATE(THIS%NEXT)
       THIS=>THIS%NEXT
       THIS%ID=NEWCID

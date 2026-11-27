@@ -1,0 +1,88 @@
+{
+ "description": "Tutorial example 7: Si diamond, plane-wave hybrids PBE0 and HSE06 (25 Ry, CDUAL 4, 4x4x4 with symmetry), each restarted from the converged PBE state",
+ "inputs": [
+  "si.cntl",
+  "si.strc"
+ ],
+ "timeout": 1800,
+ "defaults": {},
+ "runs": {
+  "pbe": {
+   "subs": {
+    "@START@": "T",
+    "@FOCK@": ""
+   }
+  },
+  "pbe0": {
+   "stages": [
+    {
+     "subs": {
+      "@START@": "T",
+      "@FOCK@": ""
+     }
+    },
+    {
+     "subs": {
+      "@START@": "F",
+      "@FOCK@": "\n    !FOCK AEXX=0.25 !END"
+     }
+    }
+   ]
+  },
+  "hse06": {
+   "stages": [
+    {
+     "subs": {
+      "@START@": "T",
+      "@FOCK@": ""
+     }
+    },
+    {
+     "subs": {
+      "@START@": "F",
+      "@FOCK@": "\n    !FOCK AEXX=0.25 HFSCREEN=0.2 !END"
+     }
+    }
+   ]
+  }
+ },
+ "checks": [
+  {
+   "run": "pbe",
+   "quantity": "gap_ev",
+   "value": 0.6934,
+   "tol": 0.002,
+   "reference": "first run 2026-11-27; gaps equal to the VESPAW column of the VASP comparison (docs/FOCK_DESIGN.md, milestone 8)"
+  },
+  {
+   "run": "pbe0",
+   "quantity": "energy",
+   "value": -7.954993544730395,
+   "tol": 2e-06,
+   "reference": "first run 2026-11-27; gaps equal to the VESPAW column of the VASP comparison (docs/FOCK_DESIGN.md, milestone 8)"
+  },
+  {
+   "run": "pbe0",
+   "quantity": "gap_ev",
+   "value": 2.0491,
+   "tol": 0.002,
+   "reference": "first run 2026-11-27; gaps equal to the VESPAW column of the VASP comparison (docs/FOCK_DESIGN.md, milestone 8)"
+  },
+  {
+   "run": "hse06",
+   "quantity": "energy",
+   "value": -7.952067402369245,
+   "tol": 2e-06,
+   "reference": "first run 2026-11-27; gaps equal to the VESPAW column of the VASP comparison (docs/FOCK_DESIGN.md, milestone 8)"
+  },
+  {
+   "run": "hse06",
+   "quantity": "gap_ev",
+   "value": 1.333,
+   "tol": 0.002,
+   "reference": "first run 2026-11-27; gaps equal to the VESPAW column of the VASP comparison (docs/FOCK_DESIGN.md, milestone 8)"
+  }
+ ],
+ "agree": [],
+ "known_issues": {}
+}

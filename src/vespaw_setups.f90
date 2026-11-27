@@ -3557,6 +3557,11 @@ CALL TRACE$PASS('AFTER MAKEPARTIALWAVES')
 !     **************************************************************************
                             CALL TRACE$PUSH('SETUP$READ')
 !
+!     == SETUPS OF THE FOCK HYBRIDS ARE BUILT WITH THE PLAIN SEMILOCAL      ==
+!     == FUNCTIONAL (NO EXCHANGE SCALING, NO SHORT-RANGE WPBE: THE ATOM HAS ==
+!     == NO FOCK TERM), AS VASP USES ITS PBE DATASETS FOR HYBRIDS.          ==
+      CALL DFT$SETL4('HYBRIDOFF',.TRUE.)
+!
 !     ==========================================================================
 !     == THE ATOM SOLVER EVALUATES LDA/GGA FUNCTIONALS ONLY. FOR THE META-GGA ==
 !     == TYPES (20 SCAN-L, 21 SCAN, 22 R2SCAN) THE SETUPS ARE CONSTRUCTED     ==
@@ -3572,6 +3577,7 @@ CALL TRACE$PASS('AFTER MAKEPARTIALWAVES')
         CALL SETUP$UNSELECT()
       ENDDO
       IF(TMGGA) CALL DFT$SETI4('TYPE',ITYPE)
+      CALL DFT$SETL4('HYBRIDOFF',.FALSE.)
                             CALL TRACE$POP
       RETURN
       END

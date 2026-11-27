@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased
+
+- Plane-wave hybrid functionals: nonlocal PAW Fock exchange for PBE0,
+  HSE06, SCAN0 and r²SCAN0, block `!CONTROL!DFT!FOCK` (`AEXX`,
+  `HFSCREEN` or `MU`, `CORE`, `ACE`, `RCOMP`). Pair densities in plane
+  waves with PAW compensation charges, one-center and frozen-core
+  core–valence exchange, erfc screening with the short-range PBE
+  exchange hole for HSE06, the Born–von-Kármán treatment of the Coulomb
+  singularity, adaptively compressed exchange (19 times faster for
+  Si₈), k-points, space-group symmetry, collinear and non-collinear
+  spin, forces and stress, MPI over k-point groups. Works with all
+  eigensolvers and the variational mixer.
+- Validated against VASP 6.4.2: the band-gap shift from PBE to PBE0 and
+  HSE06 agrees within 0.3–2 % for Si, C, MgO and MnO, the PBE0
+  FM–AFM energy of MnO within 1 meV and of NiO within 10 meV. With the
+  HBS Ni setup the NiO shift is 9 % smaller than with the VASP Ni
+  POTCAR (see `doc/KNOWN_ISSUES.md`).
+- New regression case `si_hybrid` (PBE0 full mesh, symmetry and RMM-DIIS,
+  HSE06, finite-difference force) and tutorial example
+  `examples/tutorial/07_si_hybrid`.
+- MPI: fixed the creation of a second communicator split from the same
+  parent, which dropped the first one.
+- Not yet available with hybrids: `GAMMASUPER=T`, the onsite hybrids
+  (`!NTBO`) in the same run, B3LYP.
+
 ## 1.0.3 — 2026-11-21
 
 - Onsite hybrids: the swap term of PBE-SL0r is now applied also at

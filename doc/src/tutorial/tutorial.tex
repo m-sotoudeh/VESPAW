@@ -232,8 +232,9 @@ values are written \texttt{T} or \texttt{F}. Lines beginning with
   cutoff.
 \item \key{!DFT}: the density functional, e.g.\ \key{TYPE='PBE'} or
   \key{TYPE='PBEsol'} (the VASP tags such as \key{'PE'} and \key{'PS'}
-  are accepted as well), and the block \key{!NTBO} for the local
-  hybrid functionals.
+  are accepted as well), the block \key{!FOCK} for the plane-wave
+  hybrid functionals (PBE0, HSE06) and the block \key{!NTBO} for the
+  local hybrid functionals.
 \item \key{!PSIDYN}: how the electronic structure is optimized
   (\key{OPTIMIZER}, \key{MIXER} and the convergence criteria).
 \item \key{!MERMIN}: the electronic temperature, for metals.
@@ -658,8 +659,8 @@ construction warns about this (\texttt{INCOMPLETE SETUP}).
 \end{itemize}
 
 \background
-The local hybrid functionals are described in the chapter ``Local
-hybrid functionals'' of the theory book.
+The local hybrid functionals are described in the chapter ``Hybrid
+functionals'' of the theory book.
 
 \section{The input files}
 
@@ -705,6 +706,101 @@ shells, such as NiO and the manganites, it is large.
 \item Vary \key{HFWEIGHT} between 0.1 and 0.25 and follow the band gap.
 \item Replace PBE by r$^2$SCAN (\key{TYPE='R2SCAN' TSCANDELOC=T}) and
   keep the \key{!NTBO} block: this is the local hybrid r$^2$SCAN0r.
+\end{itemize}
+
+% =====================================================================
+\chapter{Silicon: plane-wave hybrid functionals}
+% =====================================================================
+\minitoc
+
+\goals
+\begin{itemize}
+\item Calculate band gaps with the hybrid functionals PBE0 and HSE06
+\item Start a hybrid calculation from a converged PBE calculation
+\item Know the cost of exact exchange and the settings it needs
+\end{itemize}
+
+\background
+Plane-wave hybrids replace a fraction of the semilocal exchange by the
+exact (Fock) exchange of all orbitals. They are described in the
+section ``Plane-wave hybrids: nonlocal Fock exchange'' of the theory
+book. Unlike the local hybrids of the previous chapter they act on all
+states, also on the $s$ and $p$ bands of a semiconductor, and they are
+much more expensive.
+
+\section{The input files}
+
+The directory is \file{examples/tutorial/07\_si\_hybrid}. The cell is that
+of the silicon chapter, with a $4\times4\times4$ mesh and space-group symmetry:
+\deck{../../../examples/tutorial/07_si_hybrid/si.strc}
+\deck{../../../examples/tutorial/07_si_hybrid/si.cntl}
+For PBE the placeholder \texttt{@FOCK@} is empty. For the hybrids it
+becomes
+\begin{verbatim}
+!FOCK AEXX=0.25 !END                  # PBE0
+!FOCK AEXX=0.25 HFSCREEN=0.2 !END     # HSE06
+\end{verbatim}
+inside the \key{!DFT} block. \key{AEXX} is the fraction of exact
+exchange. \key{HFSCREEN} is the range-separation parameter in
+1/\AA, with the same meaning as the VASP tag: only the short-range part
+of the exchange is exact, the long-range part stays PBE. With
+\key{TYPE='SCAN' TSCANDELOC=T} (or \key{'R2SCAN'}) the same block gives
+SCAN0 (r$^2$SCAN0).
+
+Two settings matter. \key{CDUAL=4.0}: the product of two orbitals
+contains plane waves up to four times the wave-function cutoff, and
+with a smaller \key{CDUAL} the exchange is truncated (VESPAW prints a
+warning). And the start: each hybrid run has two stages. The first is
+the PBE calculation, the second continues from its restart file with
+\key{START=F} and the \key{!FOCK} block. A hybrid started from random
+orbitals takes many more of its expensive iterations.
+
+\section{Results}
+
+\begin{shell}
+python3 doc/src/tutorial/check_examples.py 07_si_hybrid
+    pbe: E = -216.79329187 eV, 16 it, gap 0.6934 eV, 6 s
+    pbe0: E = -216.46640193 eV, 25 it, gap 2.0491 eV, 166 s
+    hse06: E = -216.38677754 eV, 25 it, gap 1.3330 eV, 176 s
+\end{shell}
+The iteration count of the hybrid runs includes the 16 PBE iterations of
+the first stage: the hybrids need 10 iterations from the PBE state. A
+hybrid iteration costs about 15 seconds here (four threads), against 0.3 seconds for PBE.
+\begin{center}
+\begin{tabular}{lccc}\toprule
+functional & gap VESPAW (eV) & gap VASP (eV) & experiment (eV) \\ \midrule
+PBE   & 0.693 & 0.693 & \\
+PBE0  & 2.049 & 2.060 & \\
+HSE06 & 1.333 & 1.343 & 1.17 \\ \bottomrule
+\end{tabular}
+\end{center}
+The VASP values are for the same cell and mesh (VASP~6.4.2, 400~eV). The
+gaps are the smallest gaps on the $4\times4\times4$ mesh, which does not
+contain the conduction-band minimum, and are therefore larger than the
+converged values. HSE06 is the common choice for the band gaps of
+semiconductors. PBE0, with the full long-range exchange, overestimates
+them.
+
+\paragraph{Cost and parallelization.} The cost of exact exchange grows
+with the square of the number of $k$-points and with the number of
+occupied bands. For larger cells and denser meshes run with MPI: the
+$k$-points are distributed over groups of tasks, and the exchange is
+parallel over these groups, not over OpenMP threads. For NiO and MnO
+with 36 $k$-points an HSE06 iteration costs 100 to 200 times a PBE
+iteration. When only the localized $d$ or $f$ states need exact
+exchange, the local hybrids of the previous chapter are far cheaper.
+
+\section{Things to try}
+\begin{itemize}
+\item Repeat PBE0 without symmetry (\key{SYMMETRY=F}). The energy is the
+  same, but the run takes longer.
+\item Compare \key{CDUAL=2} with \key{CDUAL=4}: how much does the gap
+  change, and what does the warning say?
+\item Converge the HSE06 gap with the $k$-point mesh and compare with the
+  experimental 1.17~eV.
+\item Run HSE06 with 4 MPI tasks
+  (\texttt{mpirun -np 4 vespaw\_fast\_mpi.x si.cntl}) and compare the
+  time per iteration.
 \end{itemize}
 
 % =====================================================================

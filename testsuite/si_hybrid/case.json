@@ -1,0 +1,98 @@
+{
+  "description": "Plane-wave PAW Fock exchange: Si2 (SI2 displaced 0.05 AA along x), 2x2x2, 25 Ry, CDUAL 4. PBE0 on the full mesh and with space-group symmetry, RMM-DIIS against Davidson, HSE06, and the PBE0 force against a finite difference of the energy",
+  "inputs": [
+    "si.cntl",
+    "si.strc"
+  ],
+  "timeout": 900,
+  "defaults": {
+    "@NSTEP@": "60",
+    "@PSIDYN@": "OPTIMIZER='DAV' MIXER='VARIATIONAL' SAFEORTHO=T STOP=T EDIFF=1.E-10 MIXTOL=1.E-12",
+    "@SYM@": "T",
+    "@FOCKX@": "",
+    "@X2@": "1.4075000000"
+  },
+  "runs": {
+    "pbe0_full": {
+      "subs": {
+        "@SYM@": "F"
+      }
+    },
+    "pbe0_sym": {
+      "subs": {}
+    },
+    "pbe0_rmm": {
+      "subs": {
+        "@PSIDYN@": "OPTIMIZER='RMM' MIXER='VARIATIONAL' SAFEORTHO=T STOP=T EDIFF=1.E-10 MIXTOL=1.E-12"
+      }
+    },
+    "hse06_sym": {
+      "subs": {
+        "@FOCKX@": "HFSCREEN=0.2"
+      }
+    },
+    "pbe0_xp": {
+      "subs": {
+        "@X2@": "1.4175000000"
+      }
+    },
+    "pbe0_xm": {
+      "subs": {
+        "@X2@": "1.3975000000"
+      }
+    }
+  },
+  "checks": [
+    {
+      "run": "pbe0_sym",
+      "quantity": "energy",
+      "value": -7.8773172282468265,
+      "tol": 2e-06,
+      "reference": "2026-11-25: symmetry (8 operations) and full mesh -214.35272168 eV both; Si8 Gamma PBE0/HSE06 gaps validated against VASP 6.4.2 (docs/FOCK_DESIGN.md)"
+    },
+    {
+      "run": "pbe0_sym",
+      "quantity": "gap_ev",
+      "value": 2.0337,
+      "tol": 0.002,
+      "reference": "same runs"
+    },
+    {
+      "run": "hse06_sym",
+      "quantity": "energy",
+      "value": -7.8714979300836045,
+      "tol": 2e-06,
+      "reference": "first run of this case 2026-11-27 (HFSCREEN=0.2 = mu 0.1058/bohr, as VASP HSE06); HSE06 frozen-orbital Si8 E_x matches the CDUAL 8 value to 2e-7 H, Si/C/MgO gaps within 1-2% of the VASP hybrid shift (docs/FOCK_DESIGN.md milestone 8)"
+    }
+  ],
+  "agree": [
+    {
+      "runs": [
+        "pbe0_full",
+        "pbe0_sym",
+        "pbe0_rmm"
+      ],
+      "quantity": "energy",
+      "tol": 2e-06
+    },
+    {
+      "runs": [
+        "pbe0_full",
+        "pbe0_sym"
+      ],
+      "quantity": "force:SI2:x",
+      "tol": 2e-06
+    }
+  ],
+  "fd": [
+    {
+      "quantity": "force:SI2:x",
+      "run": "pbe0_sym",
+      "plus": "pbe0_xp",
+      "minus": "pbe0_xm",
+      "step": 0.018897261246257704,
+      "factor": -1.0,
+      "tol": 2e-05
+    }
+  ]
+}

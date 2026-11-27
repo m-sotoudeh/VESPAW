@@ -76,6 +76,13 @@ MODULE DFT_MODULE
 !                                             ! SCAN EXCHANGE (ONSITE/AUGMENTATION ONLY)
       REAL(8)              :: SCALEX=1.D0     ! SCALES EXCHANGE CONTRIBUTION
 !                                             ! USED FOR HYBRID FUNCTIONALS
+      REAL(8)              :: SCALEXHYB=1.D0  ! EXCHANGE SCALING OF THE PLANE-WAVE
+!                                             ! FOCK HYBRIDS (1-AEXX), SET BY READIN_DFT
+      REAL(8)              :: HYBSRA=0.D0     ! HSE: FRACTION OF SHORT-RANGE WPBE
+!                                             ! EXCHANGE THAT IS REMOVED (=AEXX)
+      REAL(8)              :: HYBMU=0.D0      ! HSE: SCREENING PARAMETER [1/BOHR]
+      LOGICAL(4)           :: THYBOFF=.FALSE. ! HYBRID SEMILOCAL TERMS SWITCHED OFF
+!                                             ! (WHILE THE ATOMIC SETUPS ARE BUILT)
       INTEGER(4),PARAMETER :: NDESCRIPTION=5
       CHARACTER(128)       :: DESCRIPTION(NDESCRIPTION)
       END MODULE DFT_MODULE
@@ -539,6 +546,15 @@ MODULE DFT_MODULE
       IF(SCALEX.NE.1.D0) THEN
          CALL REPORT$R8VAL(NFIL,'EXCHANGE CONTRIBUTION SCALED BY FACTOR ',SCALEX,'')
       END IF
+      IF(HYBSRA.NE.0.D0) THEN
+         CALL REPORT$R8VAL(NFIL,'HSE: SHORT-RANGE WPBE EXCHANGE REMOVED, FRACTION ' &
+     &                    ,HYBSRA,'')
+         CALL REPORT$R8VAL(NFIL,'HSE: SCREENING PARAMETER MU ',HYBMU,'1/BOHR')
+      END IF
+      IF(SCALEXHYB.NE.1.D0) THEN
+         CALL REPORT$R8VAL(NFIL,'SEMILOCAL EXCHANGE SCALED (FOCK HYBRID) BY ' &
+     &                    ,SCALEXHYB,'')
+      END IF
       DO I=1,NDESCRIPTION
         IF(LEN(TRIM(DESCRIPTION(I))).EQ.0) CYCLE
         CALL REPORT$STRING(NFIL,TRIM(DESCRIPTION(I)))
@@ -686,6 +702,8 @@ MODULE DFT_MODULE
         TSPIN=VAL
       ELSE IF(ID.EQ.'XCONLY') THEN
         TCORRELATION=.NOT.VAL
+      ELSE IF(ID.EQ.'HYBRIDOFF') THEN
+        THYBOFF=VAL
       ELSE
         CALL ERROR$MSG('IDENTIFIER NOT RECOGNIZED')
         CALL ERROR$CHVAL('ID',ID)
@@ -716,6 +734,10 @@ MODULE DFT_MODULE
         VAL=TSCANL
       ELSE IF(ID.EQ.'TSCAN') THEN
         VAL=TSCAN
+      ELSE IF(ID.EQ.'HYBSR') THEN
+!       == HSE SHORT-RANGE WPBE ACTIVE: ONE-CENTER XC MUST USE THE ANGULAR  ==
+!       == QUADRATURE (FIRST DERIVATIVES ONLY)                              ==
+        VAL=(HYBSRA.NE.0.D0.AND..NOT.THYBOFF)
       ELSE IF(ID.EQ.'CORRELATION') THEN
 !       == MIRRORS THE "AND.TCORRELATION" GATING ALREADY APPLIED TO EVERY ==
 !       == CORRELATION MODULE'S CONTRIBUTION IN DFT/DFT2/DFT3 (SEE E.G.  ==
@@ -742,25 +764,49 @@ MODULE DFT_MODULE
       TGRA_=TGRA
       RETURN          
       END
-!!$!
-!!$!     ...1.........2.........3.........4.........5.........6.........7.........8
-!!$      SUBROUTINE DFT$SETR8(ID,VAL)
-!!$!     **************************************************************************
-!!$!     **************************************************************************
-!!$      USE DFT_MODULE
-!!$      IMPLICIT NONE
-!!$      CHARACTER(*),INTENT(IN) :: ID
-!!$      LOGICAL(4)  ,INTENT(IN) :: VAL
-!!$!     **************************************************************************
-!!$      IF(ID.EQ.'SCALEX') THEN
-!!$        SCALEX=VAL
-!!$      ELSE
-!!$        CALL ERROR$MSG('IDENTIFIER NOT RECOGNIZED')
-!!$        CALL ERROR$CHVAL('ID',ID)
-!!$        CALL ERROR$STOP('DFT$SETR8')
-!!$      END IF
-!!$      RETURN
-!!$      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE DFT$SETR8(ID,VAL)
+!     **************************************************************************
+!     **  'SCALEXHYB': FACTOR ON THE SEMILOCAL EXCHANGE OF THE PLANE-WAVE      **
+!     **  FOCK HYBRIDS (PBE0: 1-AEXX). APPLIES TO DFT, DFT2 AND DFT3, I.E. TO  **
+!     **  THE PLANE-WAVE GRID AND TO THE ONE-CENTER TERMS (AE AND PS).         **
+!     **************************************************************************
+      USE DFT_MODULE
+      IMPLICIT NONE
+      CHARACTER(*),INTENT(IN) :: ID
+      REAL(8)     ,INTENT(IN) :: VAL
+!     **************************************************************************
+      IF(ID.EQ.'SCALEXHYB') THEN
+        SCALEXHYB=VAL
+      ELSE IF(ID.EQ.'HYBSRA') THEN
+        HYBSRA=VAL
+      ELSE IF(ID.EQ.'HYBMU') THEN
+        HYBMU=VAL
+      ELSE
+        CALL ERROR$MSG('IDENTIFIER NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID',ID)
+        CALL ERROR$STOP('DFT$SETR8')
+      END IF
+      RETURN
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE DFT$GETR8(ID,VAL)
+      USE DFT_MODULE
+      IMPLICIT NONE
+      CHARACTER(*),INTENT(IN)  :: ID
+      REAL(8)     ,INTENT(OUT) :: VAL
+!     **************************************************************************
+      IF(ID.EQ.'SCALEXHYB') THEN
+        VAL=SCALEXHYB
+      ELSE
+        CALL ERROR$MSG('IDENTIFIER NOT RECOGNIZED')
+        CALL ERROR$CHVAL('ID',ID)
+        CALL ERROR$STOP('DFT$GETR8')
+      END IF
+      RETURN
+      END
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE DFT(RHOT,RHOS,GRHOT2,GRHOS2,GRHOST &
@@ -787,8 +833,11 @@ MODULE DFT_MODULE
       REAL(8)               :: DEXC(5)
       REAL(8)               :: EXC1
       REAL(8)               :: DEXC1(5)
+      REAL(8)               :: XFAC
 !     ***************************************************************************
       IF(.NOT.TINI) CALL DFT_INITIALIZE
+      XFAC=SCALEX
+      IF(.NOT.THYBOFF) XFAC=SCALEX*SCALEXHYB
 !     == META-GGAS HAVE THEIR OWN ROUTINES; HERE THEY WOULD GIVE ZERO =========
       IF(TSCAN.OR.TSCANL) THEN
         CALL ERROR$MSG('META-GGA (SCAN-L, SCAN, R2SCAN) CANNOT BE EVALUATED BY DFT')
@@ -840,8 +889,15 @@ MODULE DFT_MODULE
 !     ==================================================================
       IF(TX) THEN 
         CALL EXCHANGE$EVAL1(VAL,EXC1,DEXC1)
-        EXC=EXC+EXC1*SCALEX
-        DEXC=DEXC+DEXC1*SCALEX
+        EXC=EXC+EXC1*XFAC
+        DEXC=DEXC+DEXC1*XFAC
+      END IF
+!
+!     == HSE: E_X^PBE - AEXX E_X^WPBE,SR(MU) (+ AEXX E_X^HF,SR FROM FOCK) =====
+      IF(TX.AND.HYBSRA.NE.0.D0.AND..NOT.THYBOFF) THEN
+        CALL WPBE$SR(HYBMU,VAL,EXC1,DEXC1)
+        EXC=EXC-HYBSRA*EXC1
+        DEXC=DEXC-HYBSRA*DEXC1
       END IF
 !
 !     ==================================================================
@@ -954,8 +1010,18 @@ MODULE DFT_MODULE
       REAL(8)   ,INTENT(OUT):: D2EXC(5,5)  ! D2EXC/(DVAL(I)DVAL(J))
       REAL(8)               :: VAL(5)
       REAL(8)               :: EXC1,DEXC1(5),D2EXC1(5,5)
+      REAL(8)               :: XFAC
 !     ******************************************************************
       IF(.NOT.TINI) CALL DFT_INITIALIZE
+      XFAC=SCALEX
+      IF(.NOT.THYBOFF) XFAC=SCALEX*SCALEXHYB
+!     == THE SHORT-RANGE WPBE (HSE) IS TABULATED AND HAS FIRST DERIVATIVES ==
+!     == ONLY: ONE-CENTER TERMS MUST USE THE ANGULAR QUADRATURE (DFT)       ==
+      IF(HYBSRA.NE.0.D0.AND..NOT.THYBOFF) THEN
+        CALL ERROR$MSG('HSE SHORT-RANGE EXCHANGE NEEDS FIRST DERIVATIVES ONLY')
+        CALL ERROR$MSG('(ANGULARXC=EXACT); HIGHER DERIVATIVES ARE NOT AVAILABLE')
+        CALL ERROR$STOP('DFT2')
+      END IF
 !
 !     ==================================================================
 !     == INITIALIZE VALUES                                            ==
@@ -992,9 +1058,9 @@ MODULE DFT_MODULE
 !     ==================================================================
       IF(TX) THEN
         CALL EXCHANGE$EVAL2(VAL,EXC1,DEXC1,D2EXC1)
-        EXC=EXC+EXC1*SCALEX
-        DEXC(:)=DEXC(:)+DEXC1(:)*SCALEX
-        D2EXC(:,:)=D2EXC(:,:)+D2EXC1(:,:)*SCALEX
+        EXC=EXC+EXC1*XFAC
+        DEXC(:)=DEXC(:)+DEXC1(:)*XFAC
+        D2EXC(:,:)=D2EXC(:,:)+D2EXC1(:,:)*XFAC
       END IF
 !
 !     ==================================================================
@@ -1117,8 +1183,18 @@ MODULE DFT_MODULE
       REAL(8)   ,INTENT(OUT):: D3EXC(5,5,5)! D3EXC/(DVAL(I)DVAL(J),DVAL(K))
       REAL(8)               :: VAL(5)
       REAL(8)               :: EXC1,DEXC1(5),D2EXC1(5,5),D3EXC1(5,5,5)
+      REAL(8)               :: XFAC
 !     ******************************************************************
       IF(.NOT.TINI) CALL DFT_INITIALIZE
+      XFAC=SCALEX
+      IF(.NOT.THYBOFF) XFAC=SCALEX*SCALEXHYB
+!     == THE SHORT-RANGE WPBE (HSE) IS TABULATED AND HAS FIRST DERIVATIVES ==
+!     == ONLY: ONE-CENTER TERMS MUST USE THE ANGULAR QUADRATURE (DFT)       ==
+      IF(HYBSRA.NE.0.D0.AND..NOT.THYBOFF) THEN
+        CALL ERROR$MSG('HSE SHORT-RANGE EXCHANGE NEEDS FIRST DERIVATIVES ONLY')
+        CALL ERROR$MSG('(ANGULARXC=EXACT); HIGHER DERIVATIVES ARE NOT AVAILABLE')
+        CALL ERROR$STOP('DFT3')
+      END IF
 !
 !     ==================================================================
 !     == INITIALIZE VALUES                                            ==
@@ -1156,10 +1232,10 @@ MODULE DFT_MODULE
 !     ==================================================================
       IF(TX) THEN
         CALL EXCHANGE$EVAL3(VAL,EXC1,DEXC1,D2EXC1,D3EXC1)
-        EXC=EXC+EXC1*SCALEX
-        DEXC(:)=DEXC(:)+DEXC1(:)*SCALEX
-        D2EXC(:,:)=D2EXC(:,:)+D2EXC1(:,:)*SCALEX
-        D3EXC(:,:,:)=D3EXC(:,:,:)+D3EXC1(:,:,:)*SCALEX
+        EXC=EXC+EXC1*XFAC
+        DEXC(:)=DEXC(:)+DEXC1(:)*XFAC
+        D2EXC(:,:)=D2EXC(:,:)+D2EXC1(:,:)*XFAC
+        D3EXC(:,:,:)=D3EXC(:,:,:)+D3EXC1(:,:,:)*XFAC
       END IF
 !
 !     ==================================================================
@@ -7448,3 +7524,353 @@ END MODULE LYP88_MODULE
       END
 
 
+!
+!.......................................................................
+MODULE WPBE_MODULE
+!***********************************************************************
+!**  SHORT-RANGE PBE EXCHANGE OF THE HSE FUNCTIONAL                   **
+!**                                                                   **
+!**  E_X^SR = INT RHO EPS_X^LDA(RHO) F(S,NU), NU=MU/KF, FROM THE      **
+!**  ERNZERHOF-PERDEW MODEL HOLE (J.CHEM.PHYS.109,3313(1998)) WITH    **
+!**  THE PARAMETERS AND THE SUM-RULE NORMALIZATION OF HEYD,SCUSERIA,  **
+!**  ERNZERHOF (J.CHEM.PHYS.118,8207(2003)):                          **
+!**    F(S,NU) = -8/9 INT_0^INF Y J(S,Y) ERFC(NU Y) DY                 **
+!**    J = A/Y^2 EXP(-Z Y^2)[(1+AY^2)EXP(-D Y^2)-1]/(1+AY^2)           **
+!**      + (B + C(1+S^2 F(S)) Y^2 + C4(S) Y^4) EXP(-(D+Z) Y^2)          **
+!**    Z=S^2 H(S), A=4A/9, C4 FROM INT Y^2 J DY = -3PI/4 (CLOSED FORM) **
+!**  LARGE S AS VASP: S -> 8.5728844-18.79622316/S^2 FOR S>8.3.       **
+!**  THE INTEGRAL USES THE EXACT ERFC (VASP AND LIBXC USE A FIT,      **
+!**  ABOUT 1E-6 IN F) AND A DOUBLE-EXPONENTIAL RULE (1E-13).          **
+!**  F IS TABULATED ON S IN [0,SMAXT], T=NU/(1+NU) IN [0,1] AND        **
+!**  INTERPOLATED BY HERMITE BICUBICS (NODE DERIVATIVES FROM 5-POINT   **
+!**  DIFFERENCES); ENERGY AND POTENTIAL USE THE SAME INTERPOLANT.     **
+!**  CHECKED AGAINST VASP 6.4.2 EXCHWPBE_R COMPILED AS A STANDALONE   **
+!**  ORACLE: AGREEMENT 3E-7 (THE ERFC FIT). LIBXC 7 GGA_X_WPBEH HAS A  **
+!**  1.3E-4 JUMP AT S=1 AND IS NOT USED AS A REFERENCE.               **
+!***********************************************************************
+IMPLICIT NONE
+LOGICAL(4)          :: TINI=.FALSE.
+REAL(8),PARAMETER   :: DS=0.01D0, DT=0.002D0
+REAL(8),PARAMETER   :: SMAXT=8.58D0
+INTEGER(4),PARAMETER:: NS=859, NT=501       ! 0..SMAXT, 0..1
+REAL(8)             :: TAB(4,NS,NT)          ! F, F_S, F_T, F_ST
+END MODULE WPBE_MODULE
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      REAL(8) FUNCTION WPBE_DIRECT(S,NU)
+!     **************************************************************************
+!     **  F(S,NU) BY DOUBLE-EXPONENTIAL QUADRATURE (Y=EXP(PI/2 SINH(TAU)))   **
+!     **************************************************************************
+      IMPLICIT NONE
+      REAL(8),INTENT(IN) :: S,NU
+      REAL(8),PARAMETER  :: A=1.0161144D0,B=-0.37170836D0,C=-0.077215461D0
+      REAL(8),PARAMETER  :: D=0.57786348D0
+      REAL(8),PARAMETER  :: HA1=0.00979681D0,HA2=0.0410834D0,HA3=0.187440D0
+      REAL(8),PARAMETER  :: HA4=0.00120824D0,HA5=0.0347188D0
+      REAL(8),PARAMETER  :: FC1=6.4753871D0,FC2=0.47965830D0
+      REAL(8),PARAMETER  :: H=0.05D0,TAUMAX=4.5D0
+      REAL(8)            :: PI,SPI,AA,HS,FS,Z,LAM,X,N0,C4,TAU,Y,Y2,W,J,SUMF
+      INTEGER(4)         :: I,N
+!     **************************************************************************
+      PI=4.D0*ATAN(1.D0)
+      SPI=SQRT(PI)
+      AA=4.D0*A/9.D0
+      HS=(HA1*S**2+HA2*S**4)/(1.D0+HA3*S**4+HA4*S**5+HA5*S**6)
+      FS=FC1*HS+FC2
+      Z=S**2*HS
+      LAM=D+Z
+      X=Z/AA
+!     == SUM RULE INT Y^2 J DY = -3PI/4 FIXES THE Y^4 COEFFICIENT C4 ========
+!     == (INT E^{-ZY^2}/(1+AY^2) DY = PI/(2 SQRT A) E^X ERFC(SQRT X), X=Z/A) ==
+      N0=-A*PI/(2.D0*SQRT(AA))*ERFC_SCALED(SQRT(X)) &
+     &   +A*SPI/(2.D0*SQRT(LAM))+B*SPI/(4.D0*LAM**1.5D0) &
+     &   +C*(1.D0+S**2*FS)*3.D0*SPI/(8.D0*LAM**2.5D0)
+      C4=(-0.75D0*PI-N0)/(15.D0*SPI/(16.D0*LAM**3.5D0))
+      N=NINT(TAUMAX/H)
+      SUMF=0.D0
+      DO I=-N,N
+        TAU=H*REAL(I,KIND=8)
+        Y=EXP(0.5D0*PI*SINH(TAU))
+        W=H*Y*0.5D0*PI*COSH(TAU)
+        Y2=Y*Y
+        J=A/Y2*EXP(-Z*Y2)*(EXPM1_(-D*Y2)+AA*Y2*EXP(-D*Y2))/(1.D0+AA*Y2) &
+     &   +(B+C*(1.D0+S**2*FS)*Y2+C4*Y2*Y2)*EXP(-LAM*Y2)
+        SUMF=SUMF+W*Y*J*ERFC(NU*Y)
+      ENDDO
+      WPBE_DIRECT=-8.D0/9.D0*SUMF
+      RETURN
+      CONTAINS
+        REAL(8) FUNCTION EXPM1_(V)
+        REAL(8),INTENT(IN) :: V
+        IF(ABS(V).LT.1.D-5) THEN
+          EXPM1_=V*(1.D0+V*(0.5D0+V/6.D0))
+        ELSE
+          EXPM1_=EXP(V)-1.D0
+        END IF
+        END FUNCTION EXPM1_
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WPBE_INITIALIZE
+!     **************************************************************************
+!     **  TABLE OF F AND THE NODE DERIVATIVES F_S, F_T, F_ST                  **
+!     **************************************************************************
+      USE WPBE_MODULE
+      IMPLICIT NONE
+      REAL(8),EXTERNAL :: WPBE_DIRECT
+      REAL(8)          :: S,T,NU
+      REAL(8),ALLOCATABLE :: FX(:,:)
+      INTEGER(4)       :: I,J
+      CHARACTER(16)    :: CENV
+!     **************************************************************************
+      ALLOCATE(FX(NS,NT))
+!$OMP PARALLEL DO PRIVATE(I,J,S,T,NU) SCHEDULE(DYNAMIC)
+      DO J=1,NT
+        T=DT*REAL(J-1,KIND=8)
+        DO I=1,NS
+          S=DS*REAL(I-1,KIND=8)
+          IF(J.EQ.NT) THEN
+            FX(I,J)=0.D0                 ! NU=INFINITY
+          ELSE
+            NU=T/(1.D0-T)
+            FX(I,J)=WPBE_DIRECT(S,NU)
+          END IF
+        ENDDO
+      ENDDO
+!$OMP END PARALLEL DO
+      TAB(1,:,:)=FX
+!     == F_S: F IS EVEN IN S (MIRROR AT S=0) =================================
+      DO J=1,NT
+        DO I=1,NS
+          TAB(2,I,J)=WPBE_D5(NS,FX(:,J),I,DS,.TRUE.)
+        ENDDO
+      ENDDO
+!     == F_T AND F_ST ==========================================================
+      DO I=1,NS
+        DO J=1,NT
+          TAB(3,I,J)=WPBE_D5(NT,FX(I,:),J,DT,.FALSE.)
+          TAB(4,I,J)=WPBE_D5(NT,TAB(2,I,:),J,DT,.FALSE.)
+        ENDDO
+      ENDDO
+      DEALLOCATE(FX)
+      TINI=.TRUE.
+!     == SELF TEST: INTERPOLANT VS DIRECT QUADRATURE ==========================
+      CALL GET_ENVIRONMENT_VARIABLE('VESPAW_WPBE_TEST',CENV)
+      IF(TRIM(CENV).EQ.'1') CALL WPBE_SELFTEST()
+      RETURN
+      CONTAINS
+!       ........................................................................
+        REAL(8) FUNCTION WPBE_D5(N,F,I,H,TEVEN)
+!       == FIRST DERIVATIVE, 5-POINT STENCIL; EVEN MIRROR AT THE LOWER END   ==
+!       == IF TEVEN, ONE-SIDED 5-POINT STENCILS AT OPEN ENDS                  ==
+        INTEGER(4),INTENT(IN) :: N,I
+        REAL(8)   ,INTENT(IN) :: F(N),H
+        LOGICAL(4),INTENT(IN) :: TEVEN
+        REAL(8)               :: FM2,FM1,FP1,FP2
+        IF(I.GE.3.AND.I.LE.N-2) THEN
+          WPBE_D5=(F(I-2)-8.D0*F(I-1)+8.D0*F(I+1)-F(I+2))/(12.D0*H)
+        ELSE IF(TEVEN.AND.I.LE.2) THEN
+          FP1=F(I+1); FP2=F(I+2)
+          IF(I.EQ.1) THEN
+            FM1=F(2); FM2=F(3)
+          ELSE
+            FM1=F(1); FM2=F(2)
+          END IF
+          WPBE_D5=(FM2-8.D0*FM1+8.D0*FP1-FP2)/(12.D0*H)
+        ELSE IF(I.LE.2) THEN
+          IF(I.EQ.1) THEN
+            WPBE_D5=(-25.D0*F(1)+48.D0*F(2)-36.D0*F(3)+16.D0*F(4)-3.D0*F(5))/(12.D0*H)
+          ELSE
+            WPBE_D5=(-3.D0*F(1)-10.D0*F(2)+18.D0*F(3)-6.D0*F(4)+F(5))/(12.D0*H)
+          END IF
+        ELSE IF(I.EQ.N) THEN
+          WPBE_D5=(25.D0*F(N)-48.D0*F(N-1)+36.D0*F(N-2)-16.D0*F(N-3)+3.D0*F(N-4))/(12.D0*H)
+        ELSE
+          WPBE_D5=(3.D0*F(N)+10.D0*F(N-1)-18.D0*F(N-2)+6.D0*F(N-3)-F(N-4))/(12.D0*H)
+        END IF
+        END FUNCTION WPBE_D5
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WPBE_INTERPOLATE(S,T,F,FS,FT)
+!     **************************************************************************
+!     **  HERMITE BICUBIC INTERPOLANT AND ITS EXACT DERIVATIVES              **
+!     **************************************************************************
+      USE WPBE_MODULE
+      IMPLICIT NONE
+      REAL(8),INTENT(IN)  :: S,T
+      REAL(8),INTENT(OUT) :: F,FS,FT
+      REAL(8)             :: U,V,HU(4),DHU(4),HV(4),DHV(4)
+      INTEGER(4)          :: I,J,II,JJ,K,L
+      REAL(8)             :: CS,CT
+!     **************************************************************************
+      I=MIN(MAX(INT(S/DS)+1,1),NS-1)
+      J=MIN(MAX(INT(T/DT)+1,1),NT-1)
+      U=(S-DS*REAL(I-1,KIND=8))/DS
+      V=(T-DT*REAL(J-1,KIND=8))/DT
+      CALL BASIS(U,HU,DHU)
+      CALL BASIS(V,HV,DHV)
+!     == HU(1),HU(2): VALUE WEIGHTS AT NODES I,I+1; HU(3),HU(4): SLOPE WEIGHTS ==
+      F=0.D0; FS=0.D0; FT=0.D0
+      DO K=0,1
+        II=I+K
+        DO L=0,1
+          JJ=J+L
+          F =F +HU(1+K)*HV(1+L)*TAB(1,II,JJ)+HU(3+K)*DS*HV(1+L)*TAB(2,II,JJ) &
+     &         +HU(1+K)*HV(3+L)*DT*TAB(3,II,JJ)+HU(3+K)*DS*HV(3+L)*DT*TAB(4,II,JJ)
+          FS=FS+DHU(1+K)*HV(1+L)*TAB(1,II,JJ)+DHU(3+K)*DS*HV(1+L)*TAB(2,II,JJ) &
+     &         +DHU(1+K)*HV(3+L)*DT*TAB(3,II,JJ)+DHU(3+K)*DS*HV(3+L)*DT*TAB(4,II,JJ)
+          FT=FT+HU(1+K)*DHV(1+L)*TAB(1,II,JJ)+HU(3+K)*DS*DHV(1+L)*TAB(2,II,JJ) &
+     &         +HU(1+K)*DHV(3+L)*DT*TAB(3,II,JJ)+HU(3+K)*DS*DHV(3+L)*DT*TAB(4,II,JJ)
+        ENDDO
+      ENDDO
+      FS=FS/DS
+      FT=FT/DT
+      RETURN
+      CONTAINS
+        SUBROUTINE BASIS(X,HB,DHB)
+        REAL(8),INTENT(IN)  :: X
+        REAL(8),INTENT(OUT) :: HB(4),DHB(4)
+        HB(1)=2.D0*X**3-3.D0*X**2+1.D0      ! H00
+        HB(2)=-2.D0*X**3+3.D0*X**2          ! H01
+        HB(3)=X**3-2.D0*X**2+X              ! H10
+        HB(4)=X**3-X**2                     ! H11
+        DHB(1)=6.D0*X**2-6.D0*X
+        DHB(2)=-6.D0*X**2+6.D0*X
+        DHB(3)=3.D0*X**2-4.D0*X+1.D0
+        DHB(4)=3.D0*X**2-2.D0*X
+        END SUBROUTINE BASIS
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WPBE_UNPOL(MU,RHO,SIG,E,ER,ES)
+!     **************************************************************************
+!     **  E = RHO EPS_X^LDA(RHO) F(S,NU) FOR THE UNPOLARIZED DENSITY RHO AND   **
+!     **  SIG=|GRAD RHO|^2; ER=DE/DRHO, ES=DE/DSIG                             **
+!     **************************************************************************
+      USE WPBE_MODULE
+      IMPLICIT NONE
+      REAL(8),INTENT(IN)  :: MU,RHO,SIG
+      REAL(8),INTENT(OUT) :: E,ER,ES
+      REAL(8),PARAMETER   :: STRANS=8.3D0,SMAX=8.5728844D0,SCONST=18.79622316D0
+      REAL(8),PARAMETER   :: RHOMIN=1.D-14
+      REAL(8)             :: PI,CX,KF,EU,S,SE,DSE,NU,T,F,FS,FT,FNU,SB
+!     **************************************************************************
+      E=0.D0; ER=0.D0; ES=0.D0
+      IF(RHO.LT.RHOMIN) RETURN
+      PI=4.D0*ATAN(1.D0)
+      CX=-0.75D0*(3.D0/PI)**(1.D0/3.D0)
+      KF=(3.D0*PI**2*RHO)**(1.D0/3.D0)
+      EU=CX*RHO**(4.D0/3.D0)
+      S=SQRT(MAX(SIG,0.D0))/(2.D0*KF*RHO)
+      IF(S.GT.STRANS) THEN
+        SE=SMAX-SCONST/S**2
+        DSE=2.D0*SCONST/S**3
+      ELSE
+        SE=S
+        DSE=1.D0
+      END IF
+      NU=MU/KF
+      T=NU/(1.D0+NU)
+      CALL WPBE_INTERPOLATE(SE,T,F,FS,FT)
+      FS=FS*DSE                          ! DF/DS
+      FNU=FT/(1.D0+NU)**2                ! DF/DNU
+      E=EU*F
+!     == S ~ RHO^(-4/3), NU ~ RHO^(-1/3) =====================================
+      ER=4.D0/3.D0*EU/RHO*F+EU*(FS*(-4.D0/3.D0)*S/RHO+FNU*(-1.D0/3.D0)*NU/RHO)
+!     == DS/DSIG = 1/(2 (2KF RHO)^2 S); FS/S IS FINITE (F EVEN IN S) ==========
+      SB=MAX(S,1.D-6)
+      IF(S.LT.1.D-6) THEN
+        CALL WPBE_INTERPOLATE(SB,T,F,FS,FT)
+      END IF
+      ES=EU*FS/SB/(2.D0*(2.D0*KF*RHO)**2)
+      RETURN
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WPBE$SR(MU,VAL,E,DE)
+!     **************************************************************************
+!     **  SHORT-RANGE WPBE EXCHANGE IN THE VARIABLES OF DFT                   **
+!     **  VAL=(RHOT,RHOS,|GRAD RHOT|^2,|GRAD RHOS|^2,GRAD RHOS.GRAD RHOT)      **
+!     **  SPIN SCALING E[RU,RD] = 1/2 E[2RU] + 1/2 E[2RD]                      **
+!     **************************************************************************
+      USE WPBE_MODULE, ONLY : TINI
+      IMPLICIT NONE
+      REAL(8),INTENT(IN)  :: MU
+      REAL(8),INTENT(IN)  :: VAL(5)
+      REAL(8),INTENT(OUT) :: E
+      REAL(8),INTENT(OUT) :: DE(5)
+      REAL(8)             :: RU,RD,SU,SD,EU,ED,PU,PD,QU,QD
+!     **************************************************************************
+      IF(.NOT.TINI) THEN
+!$OMP CRITICAL (WPBE_INIT)
+        IF(.NOT.TINI) CALL WPBE_INITIALIZE
+!$OMP END CRITICAL (WPBE_INIT)
+      END IF
+      RU=0.5D0*(VAL(1)+VAL(2))
+      RD=0.5D0*(VAL(1)-VAL(2))
+      SU=0.25D0*(VAL(3)+2.D0*VAL(5)+VAL(4))
+      SD=0.25D0*(VAL(3)-2.D0*VAL(5)+VAL(4))
+      CALL WPBE_UNPOL(MU,2.D0*RU,4.D0*SU,EU,PU,QU)
+      CALL WPBE_UNPOL(MU,2.D0*RD,4.D0*SD,ED,PD,QD)
+      E=0.5D0*(EU+ED)
+!     == DE/DRU = E_RHO(2RU,4SU), DE/DSU = 2 E_SIG(2RU,4SU) ======================
+      QU=2.D0*QU
+      QD=2.D0*QD
+      DE(1)=0.5D0*(PU+PD)
+      DE(2)=0.5D0*(PU-PD)
+      DE(3)=0.25D0*(QU+QD)
+      DE(4)=0.25D0*(QU+QD)
+      DE(5)=0.5D0*(QU-QD)
+      RETURN
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WPBE_SELFTEST()
+!     **************************************************************************
+!     **  VESPAW_WPBE_TEST=1: INTERPOLANT VS DIRECT QUADRATURE, AND THE        **
+!     **  DERIVATIVES OF WPBE$SR VS FINITE DIFFERENCES                         **
+!     **************************************************************************
+      USE WPBE_MODULE
+      IMPLICIT NONE
+      REAL(8),EXTERNAL :: WPBE_DIRECT
+      REAL(8)          :: S,T,F,FS,FT,ERRMAX,R(2),VAL(5),VALP(5),E,DE(5),EP,EM,DEX(5),H
+      REAL(8)          :: ERRD
+      INTEGER(4)       :: K,I
+!     **************************************************************************
+      ERRMAX=0.D0
+      CALL RANDOM_SEED()
+      DO K=1,2000
+        CALL RANDOM_NUMBER(R)
+        S=R(1)*8.57D0
+        T=R(2)*0.999D0
+        CALL WPBE_INTERPOLATE(S,T,F,FS,FT)
+        ERRMAX=MAX(ERRMAX,ABS(F-WPBE_DIRECT(S,T/(1.D0-T))))
+      ENDDO
+      WRITE(*,'("WPBE SELFTEST: MAX |INTERPOLANT-DIRECT| (2000 POINTS)=",ES10.2)')ERRMAX
+!     == DERIVATIVES (SPIN POLARIZED POINT) ====================================
+      VAL=(/0.3D0,0.08D0,0.05D0,0.01D0,0.012D0/)
+      CALL WPBE$SR(0.105835D0,VAL,E,DE)
+      ERRD=0.D0
+      DO I=1,5
+        H=1.D-6*MAX(ABS(VAL(I)),1.D-3)
+        VALP=VAL; VALP(I)=VAL(I)+H
+        CALL WPBE$SR(0.105835D0,VALP,EP,DEX)
+        VALP=VAL; VALP(I)=VAL(I)-H
+        CALL WPBE$SR(0.105835D0,VALP,EM,DEX)
+        DEX(I)=(EP-EM)/(2.D0*H)
+        WRITE(*,'("WPBE SELFTEST: DE(",I1,")=",ES20.12," FD=",ES20.12)')I,DE(I),DEX(I)
+        ERRD=MAX(ERRD,ABS(DE(I)-DEX(I)))
+      ENDDO
+      WRITE(*,'("WPBE SELFTEST: MAX |DE-FD|=",ES10.2)')ERRD
+!     == VALUES FOR THE COMPARISON WITH THE VASP ORACLE (UNPOLARIZED) ==========
+      DO I=1,6
+        S=REAL(I-1,KIND=8)*0.6D0
+        VAL=0.D0
+        VAL(1)=0.09D0
+        VAL(3)=(2.D0*(3.D0*(4.D0*ATAN(1.D0))**2*0.09D0)**(1.D0/3.D0)*0.09D0*S)**2
+        CALL WPBE$SR(0.105835D0,VAL,E,DE)
+        WRITE(*,'("WPBE ORACLE RHO=0.09 S=",F5.2," EPS=",ES24.16)')S,E/0.09D0
+      ENDDO
+      RETURN
+      END

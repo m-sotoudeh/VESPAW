@@ -107,3 +107,12 @@ Validate a setup for your system before production use; the setups in
   `MIXER='PULAY'` or `'ANDERSON'` the printed energy belongs to the
   mixed density and can lie below the true minimum. Use the default
   variational mixer when energies must be compared at the µHa level.
+- **Plane-wave hybrids: cost and setups.** Fock exchange costs about
+  100 to 200 times a PBE step per SCF iteration (NiO and MnO, 36
+  k-points), and the pair loop is parallel over MPI k-point groups, not
+  over OpenMP threads: run hybrids with MPI. The hybrid shift of a
+  localized d shell depends on the setup: with the HBS Ni setup the
+  PBE0/HSE06 gap shift of NiO is 0.36 eV (9 %) smaller than with the VASP
+  Ni POTCAR, although Si, C, MgO and MnO agree within 2 %. Start a
+  hybrid from a converged PBE restart. `CDUAL` below 4 truncates the
+  pair densities (a warning is printed).

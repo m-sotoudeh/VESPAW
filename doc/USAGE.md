@@ -95,7 +95,7 @@ system:
 
 electronic:
   xc:
-    functional: PBE          # any TYPE name, or PBE0R / PBE-SL0R / SCAN0R
+    functional: PBE          # any TYPE name, PBE0 / HSE06 / SCAN0 / R2SCAN0, or PBE0R / PBE-SL0R / SCAN0R
   basis:
     wavefunction_cutoff: 25 Ry
   kpoints:

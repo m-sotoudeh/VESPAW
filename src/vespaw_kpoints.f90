@@ -340,6 +340,41 @@ END MODULE SYMMETRY_MODULE
       END
 !
 !     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE SYMMETRY$GETOPS(NOPX,NAT,NOPOUT,IROTOUT,TAUOUT,CROTOUT,MAPOUT)
+!     **************************************************************************
+!     **  RETURNS THE SPACE-GROUP OPERATIONS X'=IROT X+TAU (RELATIVE COORD.), **
+!     **  THEIR CARTESIAN ROTATIONS AND THE ATOM MAP. NOPOUT=0 IF SYMMETRY    **
+!     **  IS OFF OR NOT YET SET UP.                                           **
+!     **************************************************************************
+      USE SYMMETRY_MODULE
+      IMPLICIT NONE
+      INTEGER(4),INTENT(IN)  :: NOPX
+      INTEGER(4),INTENT(IN)  :: NAT
+      INTEGER(4),INTENT(OUT) :: NOPOUT
+      INTEGER(4),INTENT(OUT) :: IROTOUT(3,3,NOPX)
+      REAL(8)   ,INTENT(OUT) :: TAUOUT(3,NOPX)
+      REAL(8)   ,INTENT(OUT) :: CROTOUT(3,3,NOPX)
+      INTEGER(4),INTENT(OUT) :: MAPOUT(NAT,NOPX)
+!     **************************************************************************
+      NOPOUT=0
+      IF(.NOT.TON.OR.NOP.LT.1) RETURN
+      IF(NOP.GT.NOPX.OR.NAT.NE.NATSYM) THEN
+        CALL ERROR$MSG('ARRAY SIZES INCONSISTENT')
+        CALL ERROR$I4VAL('NOP',NOP)
+        CALL ERROR$I4VAL('NOPX',NOPX)
+        CALL ERROR$I4VAL('NAT',NAT)
+        CALL ERROR$I4VAL('NATSYM',NATSYM)
+        CALL ERROR$STOP('SYMMETRY$GETOPS')
+      END IF
+      NOPOUT=NOP
+      IROTOUT(:,:,1:NOP)=IROT
+      TAUOUT(:,1:NOP)=TAU
+      CROTOUT(:,:,1:NOP)=CROT
+      MAPOUT(:,1:NOP)=MAPAT
+      RETURN
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE SYMMETRY$FIND(RBAS,NAT,R,ISPECIES)
 !     **************************************************************************
 !     **  FINDS ALL OPERATIONS (IROT,TAU) THAT MAP THE LATTICE ONTO ITSELF    **

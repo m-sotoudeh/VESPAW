@@ -1361,8 +1361,134 @@ CALL TRACE$PASS('DONE')
 
         CALL LINKEDLIST$SELECT(LL_CNTL,'..')
       END IF
+!
+!     ==========================================================================
+!     == PLANE-WAVE FOCK EXCHANGE  !CONTROL!DFT!FOCK (docs/FOCK_DESIGN.md)    ==
+!     ==   AEXX      FRACTION OF EXACT EXCHANGE (DEFAULT 0.25)                ==
+!     ==   MU        ERFC SCREENING [1/BOHR] (DEFAULT 0 = BARE COULOMB)       ==
+!     ==   HFSCREEN  SAME IN 1/ANGSTROM, AS VASP (HSE06: 0.2)                 ==
+!     ==   RCOMP     RADIUS OF THE COMPENSATION CHARGES [BOHR]                ==
+!     ==   CORE      CORE-VALENCE EXCHANGE (DEFAULT T)                        ==
+!     ==========================================================================
+      CALL LINKEDLIST$SELECT(LL_CNTL,'~')
+      CALL LINKEDLIST$SELECT(LL_CNTL,'CONTROL')
+      CALL LINKEDLIST$SELECT(LL_CNTL,'DFT')
+      CALL LINKEDLIST$EXISTL(LL_CNTL,'FOCK',1,TCHK)
+      IF(TCHK) THEN
+        CALL LINKEDLIST$SELECT(LL_CNTL,'FOCK')
+        CALL READIN_BLOCKON(LL_CNTL,TCHK)
+        IF(TCHK) THEN
+          CALL FOCK$SETL4('ON',.TRUE.)
+          CALL LINKEDLIST$EXISTD(LL_CNTL,'AEXX',1,TCHK1)
+          IF(TCHK1) THEN
+            CALL LINKEDLIST$GET(LL_CNTL,'AEXX',1,SVAR)
+            CALL FOCK$SETR8('AEXX',SVAR)
+          END IF
+          CALL LINKEDLIST$EXISTD(LL_CNTL,'MU',1,TCHK1)
+          CALL LINKEDLIST$EXISTD(LL_CNTL,'HFSCREEN',1,TCHK2)
+          IF(TCHK1.AND.TCHK2) THEN
+            CALL ERROR$MSG('SPECIFY EITHER MU OR HFSCREEN IN !CONTROL!DFT!FOCK')
+            CALL ERROR$STOP('READIN_DFT')
+          END IF
+          IF(TCHK1) THEN
+            CALL LINKEDLIST$GET(LL_CNTL,'MU',1,SVAR)
+            CALL FOCK$SETR8('MU',SVAR)
+          END IF
+          IF(TCHK2) THEN
+            CALL LINKEDLIST$GET(LL_CNTL,'HFSCREEN',1,SVAR)
+            CALL FOCK$SETR8('MU',SVAR*0.529177210903D0) ! 1/ANGSTROM -> 1/BOHR
+          END IF
+!         == RADIUS [BOHR] OF THE COMPENSATION CHARGES OF THE PAIR DENSITIES ==
+!         == (DEFAULT 0.6*RBOX OF EACH SETUP, SEE FOCK_SPECIES)               ==
+          CALL LINKEDLIST$EXISTD(LL_CNTL,'RCOMP',1,TCHK1)
+          IF(TCHK1) THEN
+            CALL LINKEDLIST$GET(LL_CNTL,'RCOMP',1,SVAR)
+            CALL FOCK$SETR8('RCOMP',SVAR)
+          END IF
+!         == CORE-VALENCE EXCHANGE FROM THE FROZEN ATOMIC CORE (DEFAULT T) ====
+          CALL LINKEDLIST$EXISTD(LL_CNTL,'CORE',1,TCHK1)
+          IF(TCHK1) THEN
+            CALL LINKEDLIST$GET(LL_CNTL,'CORE',1,TCHK2)
+            CALL FOCK$SETL4('CORE',TCHK2)
+          END IF
+!         == ADAPTIVELY COMPRESSED EXCHANGE (DEFAULT T) ======================
+          CALL LINKEDLIST$EXISTD(LL_CNTL,'ACE',1,TCHK1)
+          IF(TCHK1) THEN
+            CALL LINKEDLIST$GET(LL_CNTL,'ACE',1,TCHK2)
+            CALL FOCK$SETL4('ACE',TCHK2)
+          END IF
+!         == SEMILOCAL EXCHANGE OF THE HYBRID (MILESTONE 3) ====================
+          CALL READIN_FOCKXSCALE(ILDA)
+        END IF
+      END IF
 
                           CALL TRACE$POP
+      RETURN
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE READIN_FOCKXSCALE(ILDA)
+!     **************************************************************************
+!     **  SEMILOCAL EXCHANGE OF THE PLANE-WAVE FOCK HYBRIDS                   **
+!     **    PBE0 (AND ANY GGA, MU=0): E_XC = E_XC^GGA - AEXX E_X^GGA + AEXX E_X^HF **
+!     **    (VASP ALDAX=AGGAX=1-AEXX). THE FACTOR 1-AEXX ACTS IN DFT/DFT2/DFT3. **
+!     **    HSE (PBE, MU>0): E_XC = E_XC^PBE - AEXX E_X^WPBE,SR(MU)           **
+!     **      + AEXX E_X^HF,SR(MU). THE SHORT-RANGE WPBE IS TABULATED WITH    **
+!     **      FIRST DERIVATIVES ONLY, SO THE ONE-CENTER XC USES THE ANGULAR   **
+!     **      QUADRATURE (ANGULARXC='EXACT' IS SET HERE).                     **
+!     **    SCAN0/R2SCAN0 (TYPES 21/22, TSCANDELOC=T, MU=0): THE META-GGA     **
+!     **      EXCHANGE IS SCALED BY 1-AEXX (VASP AMGGAX) IN SCAN_X_FX.        **
+!     **  B3LYP: NOT IMPLEMENTED.                                             **
+!     **  VESPAW_FOCK_XSCALE=0 KEEPS THE FULL SEMILOCAL EXCHANGE (FOCK ADDED  **
+!     **  ON TOP, MILESTONE 1/2 TEST MODE).                                   **
+!     **************************************************************************
+      IMPLICIT NONE
+      INTEGER(4),INTENT(IN) :: ILDA
+      REAL(8)               :: AEXX,MU
+      LOGICAL(4)            :: TCHK
+      CHARACTER(16)         :: CENV
+!     **************************************************************************
+      CALL FOCK$GETR8('AEXX',AEXX)
+      CALL FOCK$GETR8('MU',MU)
+      CALL LMTO$GETL4('ON',TCHK)
+      IF(TCHK) THEN
+        CALL ERROR$MSG('PLANE-WAVE FOCK EXCHANGE (!DFT!FOCK) AND THE ONSITE')
+        CALL ERROR$MSG('HYBRID (!DFT!NTBO) CANNOT BE COMBINED')
+        CALL ERROR$STOP('READIN_FOCKXSCALE')
+      END IF
+      CALL GET_ENVIRONMENT_VARIABLE('VESPAW_FOCK_XSCALE',CENV)
+      IF(TRIM(CENV).EQ.'0') THEN
+        CALL DFT$SETR8('SCALEXHYB',1.D0)
+        RETURN
+      END IF
+      IF(MU.GT.0.D0) THEN
+        IF(ILDA.NE.10) THEN
+          CALL ERROR$MSG('SCREENED HYBRID (HSE) IS DEFINED FOR PBE ONLY (TYPE=10)')
+          CALL ERROR$I4VAL('TYPE',ILDA)
+          CALL ERROR$STOP('READIN_FOCKXSCALE')
+        END IF
+        CALL DFT$SETR8('SCALEXHYB',1.D0)
+        CALL DFT$SETR8('HYBSRA',AEXX)
+        CALL DFT$SETR8('HYBMU',MU)
+        CALL AUGMENTATION_XC$SETEXACT(.TRUE.)
+        RETURN
+      END IF
+      IF(ILDA.EQ.10.OR.ILDA.EQ.11.OR.ILDA.EQ.12.OR.ILDA.EQ.13.OR.ILDA.EQ.14 &
+     &   .OR.ILDA.EQ.1.OR.ILDA.EQ.2) THEN
+        CALL DFT$SETR8('SCALEXHYB',1.D0-AEXX)
+      ELSE IF(ILDA.EQ.21.OR.ILDA.EQ.22) THEN
+        CALL POTENTIAL$GETL4('TSCANDELOC',TCHK)
+        IF(.NOT.TCHK) THEN
+          CALL ERROR$MSG('SCAN0/R2SCAN0 NEEDS THE GLOBAL SCAN (!DFT TSCANDELOC=T)')
+          CALL ERROR$STOP('READIN_FOCKXSCALE')
+        END IF
+        CALL SCAN$SETXSCALE(1.D0-AEXX)
+      ELSE
+        CALL ERROR$MSG('FOCK HYBRID NOT AVAILABLE FOR THIS FUNCTIONAL TYPE')
+        CALL ERROR$MSG('(LDA/GGA TYPES 1,2,10-14, SCAN 21 AND R2SCAN 22)')
+        CALL ERROR$I4VAL('TYPE',ILDA)
+        CALL ERROR$STOP('READIN_FOCKXSCALE')
+      END IF
       RETURN
       END
 !

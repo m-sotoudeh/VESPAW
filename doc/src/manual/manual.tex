@@ -1084,6 +1084,25 @@ parameterization of the Ceperley Alder quantum Monte Carlo calculation}
     r$^2$SCAN0r: {\tt TYPE='R2SCAN' TSCANDELOC=T} with {\tt !NTBO}; as
     SCAN0r, with r$^2$SCAN everywhere and in the onsite double counting.
 
+    \underline{Plane-wave hybrids} (nonlocal exact exchange of all
+    orbitals, block {\tt !CONTROL!DFT!FOCK}):
+
+    PBE0 \cite{adamo99_jcp110_6158}: {\tt TYPE='PBE'} with
+    {\tt !FOCK AEXX=0.25 !END}; any LDA or GGA type can be combined with
+    {\tt AEXX} in the same way (PBE0-like, the semilocal exchange is scaled
+    by $1-a_x$);
+
+    HSE06 \cite{heyd03_jcp118_8207,krukau06_jcp125_224106}:
+    {\tt TYPE='PBE'} with {\tt !FOCK AEXX=0.25 HFSCREEN=0.2 !END}; the
+    short-range PBE exchange is that of the HSE exchange hole, as in VASP;
+    defined for PBE only;
+
+    SCAN0 and r$^2$SCAN0: {\tt TYPE='SCAN'} or {\tt 'R2SCAN'} with
+    {\tt TSCANDELOC=T} and {\tt !FOCK AEXX=0.25 !END}.
+
+    Band-gap shifts relative to PBE agree with VASP~6.4.2 within 0.3--2\%
+    for Si, C, MgO and MnO. B3LYP is not implemented.
+
     The PAW setups of the meta-GGAs (types 20, 21, 22) are constructed with
     PBE, as for VASP. The kinetic-energy density contains the pseudized
     core contribution in the plane-wave part and the core kinetic-energy
@@ -1168,6 +1187,88 @@ at short distances.}
 \vformat{logical}
 \vrules{optional}
 \vdefault{F}}
+
+%----------------------------------------------------------------------
+\block{!CONTROL!DFT!FOCK}
+%----------------------------------------------------------------------
+\brules{optional} \bdescr{Plane-wave hybrid functionals (PBE0, HSE06,
+  SCAN0, r$^2$SCAN0): adds the nonlocal Fock exchange of all occupied
+  orbitals, scaled by {\tt AEXX}, and scales the semilocal exchange of
+  {\tt !CONTROL!DFT TYPE} by $1-${\tt AEXX}. The pair densities are
+  expanded in plane waves with PAW compensation charges; the one-center
+  exchange of the partial waves and the exchange with the frozen atomic
+  core are added in the atomic spheres. The exchange operator is applied
+  in the adaptively compressed form (ACE), rebuilt in every
+  self-consistency step, and works with all eigensolvers
+  ({\tt OPTIMIZER='DAV'}, {\tt 'RMM'}, {\tt 'CG'}, {\tt 'EDFT'}) and the
+  variational mixer. k-point meshes use the Bloch--von-K\'arm\'an
+  correction of the Coulomb singularity, as VASP; space-group symmetry
+  ({\tt !KPOINTS SYMMETRY=T}), collinear and noncollinear spin, forces and
+  stress are supported. With MPI, the k-points are distributed over
+  equal groups of tasks, and the pair loop is parallel over these
+  groups, not over OpenMP threads. The cost per iteration is two orders
+  of magnitude above that of the semilocal functional: start from a
+  converged semilocal restart. Use {\tt !FOURIER CDUAL=4} (the default)
+  or larger: smaller values truncate the pair densities and a warning is
+  printed. Not compatible with the onsite hybrids
+  ({\tt !CONTROL!DFT!NTBO}) and with {\tt GAMMASUPER=T}. Example:
+  \texttt{regression/si\_hybrid}.}
+
+\mbax{\key{AEXX}
+%
+\vdescr{fraction $a_x$ of exact exchange.}
+%
+\vformat{real}
+\vrules{optional}
+\vdefault{0.25}}
+
+\mbax{\key{HFSCREEN}
+%
+\vdescr{range-separation parameter $\mu$ of the erfc-screened
+  interaction in 1/\AA, as the VASP tag (HSE06: 0.2). Screened hybrids
+  are defined for {\tt TYPE='PBE'} only. Exclusive with {\tt MU}.}
+%
+\vformat{real}
+\vrules{optional}
+\vdefault{0 (unscreened Coulomb)}}
+
+\mbax{\key{MU}
+%
+\vdescr{the same range-separation parameter in 1/$a_0$.}
+%
+\vformat{real}
+\vrules{optional}
+\vdefault{0}}
+
+\mbax{\key{CORE}
+%
+\vdescr{includes the exact exchange between the valence states and the
+  frozen atomic core states of the setups.}
+%
+\vformat{logical}
+\vrules{optional}
+\vdefault{T}}
+
+\mbax{\key{ACE}
+%
+\vdescr{applies the exchange operator in the adaptively compressed form
+  (one projector per occupied orbital, rebuilt in every SCF step). With
+  {\tt ACE=F} the full operator is applied to every trial vector, which
+  gives the same result at a much higher cost (Si$_8$: 19 times).}
+%
+\vformat{logical}
+\vrules{optional}
+\vdefault{T}}
+
+\mbax{\key{RCOMP}
+%
+\vdescr{radius in $a_0$ of the compensation charges of the pair
+  densities. The default, 0.6 times the box radius of each setup, should
+  not be changed except for tests.}
+%
+\vformat{real}
+\vrules{optional}
+\vdefault{0.6\,RBOX}}
 
 %----------------------------------------------------------------------
 \block{!CONTROL!DFT!NTBO}

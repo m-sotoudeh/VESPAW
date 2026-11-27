@@ -1243,7 +1243,7 @@ The original work on the subject of this chapter is found in
 Refs.~\cite{bloechl94_prb50_17953,KresseJoubert1999,koelling77_jpc10_3107,egerton07_ultramicroscopy107_565}.
 
 % =====================================================================
-\chapter{Local hybrid functionals}\label{chap:hybrids}
+\chapter{Hybrid functionals}\label{chap:hybrids}
 \minitoc
 \section{Introduction}
 % =====================================================================
@@ -1254,9 +1254,12 @@ plane-wave basis exact exchange is one to two orders of magnitude more
 expensive than a GGA. Local hybrids of the \pbezero\
 type~\cite{bloechl11_prb84_205101,sotoudeh17_prb95_235150} keep only the
 onsite part of the exchange correction, evaluated in a basis of local
-orbitals, at nearly semilocal cost.
+orbitals, at nearly semilocal cost. VESPAW provides both: the
+conventional plane-wave hybrids PBE0, HSE06 and SCAN0
+(Sec.~\ref{sec:fock}), which treat the exchange of all orbitals, and
+the local hybrids (Secs.~\ref{sec:pbe0r}--\ref{sec:scan0r}).
 
-\section{Hybrid functionals}
+\section{The adiabatic connection and hybrids}
 
 The adiabatic connection, Eq.~\eqref{eq:adiabatic}, writes the
 exchange-correlation energy as an integral of $U_{\mathrm{xc}}^\lambda$
@@ -1284,6 +1287,111 @@ transition-metal oxides they open the gaps that semilocal functionals
 close, because exact exchange stabilizes occupied orbitals relative to
 empty orbitals of the same character, and removes the self-interaction
 of the localized $d$ and $f$ electrons.
+
+\section{Plane-wave hybrids: nonlocal Fock exchange}\label{sec:fock}
+
+The exact exchange energy of the Kohn--Sham determinant is
+\begin{equation}
+  E_x^{\mathrm{HF}}=-\frac12\sum_\sigma\sum_{n\bm k,m\bm q}
+  f_{n\bm k\sigma}f_{m\bm q\sigma}
+  \int d^3r\int d^3r'\,
+  \frac{\rho_{n\bm k,m\bm q}(\bm r)\,\rho^*_{n\bm k,m\bm q}(\bm r')}
+       {|\bm r-\bm r'|},
+  \qquad
+  \rho_{n\bm k,m\bm q}(\bm r)=\psi^*_{m\bm q\sigma}(\bm r)\psi_{n\bm k\sigma}(\bm r),
+  \label{eq:ehf}
+\end{equation}
+with occupations $f$ that contain the $k$-point weight. It enters the
+hybrid of Eq.~\eqref{eq:hybrid} with the weight \key{AEXX}, and the
+semilocal exchange of the functional is scaled by $1-a_x$. For HSE06 the
+Coulomb interaction is split with the error function,
+$1/r=\mathrm{erfc}(\mu r)/r+\mathrm{erf}(\mu r)/r$, and only the
+short-range part is treated exactly~\cite{heyd03_jcp118_8207},
+\begin{equation}
+  E_{\mathrm{xc}}^{\mathrm{HSE}}=E_{\mathrm{xc}}^{\mathrm{PBE}}
+  +a_x\bigl(E_x^{\mathrm{HF,SR}}(\mu)-E_x^{\mathrm{PBE,SR}}(\mu)\bigr),
+\end{equation}
+with $a_x=\frac14$ and $\mu=0.2$~\AA$^{-1}$ (\key{HFSCREEN}, HSE06
+\cite{krukau06_jcp125_224106}). The short-range PBE exchange is obtained
+from the exchange hole of Ernzerhof and Perdew~\cite{ernzerhof98_jcp109_3313},
+integrated with the erfc kernel, as in VASP. For SCAN0 and r$^2$SCAN0
+the exchange enhancement factor of the meta-GGA is scaled by $1-a_x$.
+
+\paragraph{PAW decomposition.} The PAW transformation writes the pair
+density as a smooth part plus one-center corrections, as for the
+density itself (Chap.~\ref{chap:paw}),
+\begin{equation}
+  \rho_{nm}=\tilde\rho_{nm}+\hat\rho_{nm}
+  +\sum_R\bigl(\rho^1_{nm,R}-\tilde\rho^1_{nm,R}-\hat\rho_{nm,R}\bigr),
+  \qquad
+  \hat\rho_{nm,R}=\sum_{ij}\braket{\tilde\psi_m}{\pt_i}\braket{\pt_j}{\tilde\psi_n}
+  \sum_L Q_{ij,L}\,g_{R,L}(\bm r),
+\end{equation}
+where the compensation charges $g_L$ restore the multipole moments
+$Q_{ij,L}$ of the one-center pair densities. The smooth part
+$\tilde\rho_{nm}+\hat\rho_{nm}$ is expanded in plane waves on the density
+grid, and its interaction is evaluated as
+$\frac{4\pi}{\Omega}\sum_{\bm G}|\rho(\bm G)|^2/|\bm k-\bm q+\bm G|^2$.
+The product of two orbitals with cutoff $E_{\mathrm{PW}}$ needs the
+cutoff $4E_{\mathrm{PW}}$, so the pair densities are exact for
+\key{CDUAL}$\ge4$. The one-center corrections give a fixed
+four-index tensor per setup, built from the all-electron and pseudo
+partial waves, which is contracted with the one-center density
+matrices and enters the Hamiltonian $\Delta H_{ij}$ of the atom, like
+the onsite terms of the local hybrids. The exchange of the valence
+states with the frozen atomic core adds
+$-a_x\sum_{ij}D_{ji}\sum_c(\phi_i\phi_c|\phi_c\phi_j)$, a term linear in
+the density matrix. This decomposition follows
+Ref.~\cite{paier05_jcp122_234102}, and the screened kernel is used in
+all terms for HSE06.
+
+\paragraph{Singularity.} For $\bm k=\bm q$ the $\bm G=0$ term of the
+Coulomb kernel diverges. As in VASP it is replaced by the exact
+contribution of the Born--von-K\'arm\'an supercell defined by the
+$k$-point mesh, the Ewald sum of a compensated point charge, so that
+the exchange energy converges with the mesh like that of an insulator
+\cite{gygi86_prb34_4405}. The screened kernel of HSE06 is finite at
+$\bm G=0$.
+
+\paragraph{The operator.} The derivative of Eq.~\eqref{eq:ehf} with
+respect to $\bra{\psi_n}$ is a nonlocal operator $\hat V_x$, applied
+to the trial vectors of the eigensolvers. Building $\hat V_x\ket\psi$
+needs one pair density and two Fourier transforms per occupied orbital
+and $k$-point pair, which dominates the cost. In the adaptively
+compressed form~\cite{lin16_jctc12_2242} the operator is evaluated once
+per self-consistency step on the occupied orbitals,
+$W_n=\hat V_x\psi_n$, and replaced by the low-rank operator
+\begin{equation}
+  \hat V_x^{\mathrm{ACE}}=-\sum_{n}\ket{\xi_n}\bra{\xi_n},
+  \qquad
+  \xi = W L^{-\dagger},\quad LL^\dagger=-M,\quad M_{mn}=\braket{\psi_m}{W_n},
+\end{equation}
+which agrees with $\hat V_x$ on the occupied space. It is cheap to apply
+and is rebuilt from the current orbitals in every step (\key{ACE=T}).
+For Si$_8$ with PBE0 this reduces the run time 19-fold at identical
+energy and iteration count. In the variational optimizer
+(Chap.~\ref{chap:variational}) the exchange operator is a function of the
+orbitals, as the onsite term of the local hybrids, and is rebuilt from
+the output state of each trial Hamiltonian.
+
+\paragraph{Symmetry, spin and parallelization.} With
+\key{SYMMETRY=T} only the irreducible $k$-points are stored. The orbitals
+of the other members of each star are generated by rotating the
+plane-wave coefficients and the projections; time reversal is included.
+For non-collinear spinors the pair density sums over both spinor
+components. With MPI the $k$-points are distributed over groups of
+tasks of equal size, and the occupied orbitals of all groups are
+gathered once per step. Forces and stress contain, in addition to the
+projector terms, the derivative of the compensation charges and of the
+kernel with respect to strain.
+
+\paragraph{Accuracy and cost.} Compared with VASP~6.4.2 at the same
+lattice constants, the change of the band gap from PBE to the hybrid
+agrees within 0.3--2\% for Si, C, MgO and MnO; for NiO it is 9\% smaller
+with the HBS Ni setup, an effect of the $d$ partial waves of the setup.
+A self-consistency step of HSE06 costs 100 to 200 times a PBE step for
+NiO and MnO with 36 $k$-points, which is the reason for the local
+hybrids that follow.
 
 \section{Local orbitals}
 
@@ -1334,7 +1442,7 @@ then changed with the number of projectors (NiO \pbezero\ gap 3.96,
 are converged (2.99, 3.00, 3.00~eV). The old fit can be restored with the
 environment variable \texttt{VESPAW\_NTBO\_OLDPROJ=1} for comparison.
 
-\section{\pbezero}
+\section{\pbezero}\label{sec:pbe0r}
 
 \pbezero\ keeps only the onsite terms of the PBE0 exchange correction,
 \begin{equation}
@@ -1471,7 +1579,7 @@ meaning of an inverse screening.
 
 \section*{Further reading}
 The original work on the subject of this chapter is found in
-Refs.~\cite{becke93_jcp98_1372,perdew96_jcp105_9982,adamo99_jcp110_6158,bloechl11_prb84_205101,sotoudeh17_prb95_235150,dudarev98_prb57_1505}.
+Refs.~\cite{becke93_jcp98_1372,perdew96_jcp105_9982,adamo99_jcp110_6158,heyd03_jcp118_8207,krukau06_jcp125_224106,paier05_jcp122_234102,lin16_jctc12_2242,bloechl11_prb84_205101,sotoudeh17_prb95_235150,dudarev98_prb57_1505}.
 
 % =====================================================================
 \chapter{Self-consistency: the variational optimizer}\label{chap:variational}
@@ -2106,6 +2214,7 @@ File & Content \\
 \texttt{vespaw\_augmentation.f90} & one-center (PAW sphere) terms \\
 \texttt{vespaw\_setups.f90} & setup construction and tests \\
 \texttt{vespaw\_lmto.f90} & local orbitals, \pbezero, \pbeslzero, \scanzero \\
+\texttt{vespaw\_fock.f90} & plane-wave Fock exchange (PBE0, HSE06, SCAN0), ACE \\
 \texttt{vespaw\_scantau.f90}, \texttt{vespaw\_scannsph.f90} & SCAN with orbital $\tau$, non-spherical one-center SCAN \\
 \texttt{vespaw\_dft.f90} & exchange-correlation functionals \\
 \texttt{vespaw\_atoms.f90}, \texttt{vespaw\_cell.f90} & ionic and cell dynamics \\
@@ -2152,6 +2261,11 @@ transforms are distributed over the tasks of the group. The density and
 the plane-wave potential live on a second layout, in which the grid is
 split over \emph{all} tasks. Densities and one-center density matrices are
 summed over the $k$-groups; forces and stress over all tasks.
+With plane-wave Fock exchange the groups have equal size, so that a
+task of one group has a partner with the same plane-wave slice in every
+other group. The occupied orbitals are gathered over these partners
+once per step, and the exchange of each local $k$-point with all
+others is computed in its own group.
 
 The methods added in VESPAW were written for one task and had to be made
 consistent with this layout:
@@ -2220,7 +2334,8 @@ tests of forces and stress, and a list of known issues. The cases cover
 PBE Si (all optimizers), hot Al (metal, Mermin), Si$_8$ at $\Gamma$, NiO
 AFM (PBE, PBE+$U$, \pbezero, \pbeslzero, \scanzero, TSCAN), MgO
 \pbeslzero, TSCAN Si, spin--orbit Si, a polar slab with dipole
-correction, space-group symmetry, and forces and stress. Every change to the code should leave the suite passing.
+correction, space-group symmetry, forces and stress, and the plane-wave
+hybrids PBE0 and HSE06 (\texttt{si\_hybrid}). Every change to the code should leave the suite passing.
 
 \backmatter
 \bibliographystyle{unsrtnat}

@@ -1172,10 +1172,12 @@ END MODULE WAVES_MODULE
       INTEGER(4)             :: NRL,NR1L,NR1START,NR2,NR3
       LOGICAL(4)             :: TINV
       LOGICAL(4)             :: TSCANDELOCCHK
+      LOGICAL(4)             :: TCHK       ! FOCK EXCHANGE ON
       INTEGER(4)             :: NFILO
       INTEGER(4)             :: LNX
       INTEGER(4)             :: NTASKS,THISTASK
       INTEGER(4),ALLOCATABLE :: ICOLOR(:)
+      INTEGER(4),ALLOCATABLE :: ICOLORX(:) ! RANK INSIDE THE K-GROUP (FOCK)
       LOGICAL(4),ALLOCATABLE :: TINVARR(:)
       LOGICAL(4)             :: TKGROUP
       INTEGER(4)             :: I,J,K
@@ -1232,8 +1234,21 @@ END MODULE WAVES_MODULE
       ALLOCATE(KMAP(NKPT))
       ALLOCATE(ICOLOR(NTASKS))
       CALL WAVES_KDISTRIBUTE(NTASKS,NKPT,TINVARR,ICOLOR,KMAP)
+!     == FOCK EXCHANGE: K-GROUPS OF EQUAL SIZE, SO THAT ALL GROUPS HAVE THE ==
+!     == SAME REAL-SPACE LAYOUT AND THE OCCUPIED ORBITALS CAN BE EXCHANGED  ==
+!     == BETWEEN TASKS OF EQUAL RANK (COMMUNICATOR 'KX', ONE TASK PER GROUP)==
+      CALL FOCK$GETL4('ON',TCHK)
+      IF(TCHK) CALL WAVES_KDISTRIBUTEFOCK(NTASKS,NKPT,TINVARR,ICOLOR,KMAP)
       DEALLOCATE(TINVARR)
       CALL MPE$NEW('MONOMER','K',NTASKS,ICOLOR)
+      IF(TCHK) THEN
+        ALLOCATE(ICOLORX(NTASKS))
+        DO I=1,NTASKS
+          ICOLORX(I)=COUNT(ICOLOR(1:I).EQ.ICOLOR(I))
+        ENDDO
+        CALL MPE$NEW('MONOMER','KX',NTASKS,ICOLORX)
+        DEALLOCATE(ICOLORX)
+      END IF
       DEALLOCATE(ICOLOR)
       NKPTL=0
       DO IKPT=1,NKPT
@@ -1405,7 +1420,17 @@ END MODULE WAVES_MODULE
           NULLIFY(THIS%EXPECTVAL)
         ENDDO
       ENDDO
-!     
+!
+!     ==================================================================
+!     ==  PLANE-WAVE FOCK EXCHANGE (docs/FOCK_DESIGN.md). MILESTONE 1  ==
+!     ==  IS GAMMA ONLY, COLLINEAR, WITHOUT TSUPER STORAGE.            ==
+!     ==================================================================
+      CALL FOCK$GETL4('ON',TCHK)
+      IF(TCHK) THEN
+        CALL WAVES_FOCKCHECK()
+        CALL FOCK$INITIALIZE(RBAS,EPWRHO,NR1START,NR1L,NR2,NR3)
+      END IF
+!
 !     ==================================================================
 !     ==  REPORT DATA ABOUT FFTS                                      ==
 !     ==================================================================
@@ -1789,6 +1814,9 @@ END MODULE WAVES_MODULE
 !     ==================================================================
       IF(TFIRST.OR.TSTRESS) THEN
         CALL WAVES_UPDATEGSET()
+!       == PAIR-DENSITY SETS OF THE PLANE-WAVE FOCK EXCHANGE (NO-OP IF THE ==
+!       == CELL DID NOT CHANGE)                                            ==
+        CALL FOCK$NEWCELL(RBAS)
       END IF
 !
 !     ==================================================================
@@ -1866,6 +1894,14 @@ END MODULE WAVES_MODULE
       CALL ENERGYLIST$SET('PS  KINETIC',EKIN)
       CALL ENERGYLIST$ADD('AE  KINETIC',EKIN)
       CALL ENERGYLIST$ADD('TOTAL ENERGY',EKIN)
+!
+!     ==========================================================================
+!     == PLANE-WAVE FOCK EXCHANGE: SNAPSHOT OF THE ORBITALS THAT BUILD THIS   ==
+!     == DENSITY AND ITS EXCHANGE ENERGY. THE OPERATOR APPLIED IN WAVES_HPSI  ==
+!     == AND WAVES$HPSI IS TAKEN FROM THIS SNAPSHOT (CURRENT-STATE OPERATOR, ==
+!     == docs/FOCK_DESIGN.md SEC. 5).                                         ==
+!     ==========================================================================
+      CALL WAVES_FOCKETOT()
 !
 !     ==========================================================================
 !     == ONE-CENTER DENSITY MATRICES                                          ==
@@ -2082,6 +2118,17 @@ END MODULE WAVES_MODULE
         CALL ENERGYLIST$ADD('TOTAL ENERGY',EONSU+EONSSO)
       END IF
 !
+!     ==========================================================================
+!     == PLANE-WAVE PAW FOCK EXCHANGE: ONE-CENTER (AE-PS) PART, A FUNCTIONAL  ==
+!     == OF THE ONE-CENTER DENSITY MATRIX LIKE DFT+U                          ==
+!     ==========================================================================
+      CALL FOCK$GETL4('ON',TCHK)
+      IF(TCHK) THEN
+        CALL FOCK$ONECENTER(LMNXX,NDIMD,NAT,DENMAT,DH,SVAR1)
+        CALL ENERGYLIST$ADD('FOCK EXCHANGE',SVAR1)
+        CALL ENERGYLIST$ADD('TOTAL ENERGY',SVAR1)
+      END IF
+!
 !     ===================================================================
 !     ==  SUBTRACT AVERAGE ELECTROSTATIC POTENTIAL =====================
 !     ==  TO ACCOUNT FOR BACKGROUND DENSITY ============================
@@ -2263,6 +2310,16 @@ END MODULE WAVES_MODULE
         STRESS1(:,:)=0.D0
         CALL WAVES$FORCE(NAT,LMNXX,NDIMD,DH,FORCE,STRESS1)
         STRESS=STRESS+STRESS1
+!       == PLANE-WAVE FOCK EXCHANGE: COMPENSATION CHARGES MOVING WITH THE   ==
+!       == ATOMS, KERNEL, SHAPES AND G=0 TERM UNDER STRAIN                  ==
+        CALL FOCK$GETL4('ON',TCHK)
+        IF(TCHK) THEN
+          ALLOCATE(FORCET(3,NAT))
+          CALL FOCK$FORCE(NAT,TSTRESS,FORCET,STRESS1)
+          FORCE=FORCE+FORCET
+          IF(TSTRESS) STRESS=STRESS+STRESS1
+          DEALLOCATE(FORCET)
+        END IF
 !WRITE(*,FMT='("PRO STRESS ",3F15.7)')STRESS1(1,:)
 !WRITE(*,FMT='("PRO STRESS ",3F15.7)')STRESS1(2,:)
 !WRITE(*,FMT='("PRO STRESS ",3F15.7)')STRESS1(3,:)
@@ -2575,6 +2632,201 @@ CALL TIMING$CLOCKOFF('W:EXPECT')
       DEALLOCATE(R)
                               CALL TIMING$CLOCKOFF('WAVES$ETOT')
                               CALL TRACE$POP
+      RETURN
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WAVES_FOCKCHECK()
+!     **************************************************************************
+!     **  RESTRICTIONS OF THE PLANE-WAVE FOCK EXCHANGE AND THE K MESH         **
+!     **  (CALLED BY WAVES$INITIALIZE BEFORE FOCK$INITIALIZE)                 **
+!     **************************************************************************
+      USE WAVES_MODULE, ONLY : NKPT,NDIM,LGAMMASUPER,EPWPSI,EPWRHO
+      IMPLICIT NONE
+      REAL(8),ALLOCATABLE :: XK(:,:),WK(:)
+      INTEGER(4)          :: NFILO,NKDIV(3),NKPTK
+!     **************************************************************************
+!     == PAIR DENSITIES ARE EXACT ONLY FOR EPWRHO>=4*EPWPSI (CDUAL>=4, THE   ==
+!     == DEFAULT), WHICH CORRESPONDS TO VASP PRECFOCK=ACCURATE. A SMALLER    ==
+!     == CDUAL TRUNCATES THEM (CONSISTENTLY IN ENERGY AND OPERATOR).         ==
+      IF(EPWRHO.LT.4.D0*EPWPSI-1.D-8) THEN
+        CALL FILEHANDLER$UNIT('PROT',NFILO)
+        WRITE(NFILO,FMT='("WARNING: FOCK EXCHANGE WITH CDUAL=",F6.3," < 4:"' &
+     &   //'," PAIR DENSITIES ARE TRUNCATED (VASP PRECFOCK=ACCURATE NEEDS CDUAL=4)")') &
+     &   EPWRHO/EPWPSI
+      END IF
+!     == K-GROUPS: WAVES_KDISTRIBUTEFOCK MADE THEM EQUAL IN SIZE, AND THE    ==
+!     == SNAPSHOT IS GATHERED OVER 'KX' (FOCK$SNAPSHOTGATHER)               ==
+!     == SPACE-GROUP SYMMETRY: FOCK$SETKMESH REBUILDS THE FULL MESH FROM THE ==
+!     == STARS OF THE IRREDUCIBLE POINTS (CHECKED AGAINST THEIR WEIGHTS)     ==
+      IF(LGAMMASUPER) THEN
+        CALL ERROR$MSG('FOCK EXCHANGE: GAMMASUPER STORAGE IS NOT IMPLEMENTED')
+        CALL ERROR$STOP('WAVES_FOCKCHECK')
+      END IF
+      ALLOCATE(XK(3,NKPT))
+      ALLOCATE(WK(NKPT))
+      CALL DYNOCC$GETR8A('XK',3*NKPT,XK)
+      CALL KPOINTS$GETI4('NKPT',NKPTK)
+      IF(NKPTK.NE.NKPT) THEN
+        CALL ERROR$MSG('INCONSISTENT NUMBER OF K-POINTS (KPOINTS VS DYNOCC)')
+        CALL ERROR$I4VAL('NKPT',NKPT)
+        CALL ERROR$I4VAL('NKPT(KPOINTS)',NKPTK)
+        CALL ERROR$STOP('WAVES_FOCKCHECK')
+      END IF
+      CALL KPOINTS$GETR8A('WKPT',NKPT,WK)
+      CALL KPOINTS$GETI4A('DIV',3,NKDIV)
+      IF(NKPT.EQ.1.AND.MAXVAL(ABS(XK)).LT.1.D-10) NKDIV=1
+      CALL FOCK$SETKMESH(NKPT,XK,WK,NKDIV)
+      DEALLOCATE(XK,WK)
+      RETURN
+      END
+!
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WAVES_FOCKETOT()
+!     **************************************************************************
+!     **  STORES THE CURRENT ORBITALS IN THE FOCK OBJECT AND ADDS THE FOCK    **
+!     **  EXCHANGE ENERGY TO THE ENERGY LIST.                                 **
+!     **  VESPAW_FOCK_CHECK=1: ALSO EVALUATES 1/2 SUM_N F_N <PSI_N|V_X|PSI_N> **
+!     **  WITH FOCK$APPLY AND PRINTS BOTH (OPERATOR/ENERGY CONSISTENCY).      **
+!     **************************************************************************
+      USE MPE_MODULE
+      USE WAVES_MODULE, ONLY : NKPT,NKPTL,NSPIN,NDIM,THIS,GSET,MAP,WAVES_SELECTWV
+      IMPLICIT NONE
+      LOGICAL(4)            :: TON
+      INTEGER(4)            :: NAT,NPRO
+      REAL(8)   ,ALLOCATABLE:: RPOS(:,:)
+      COMPLEX(8),ALLOCATABLE:: PJ(:,:,:),HPJ(:,:,:)
+      INTEGER(4)            :: NBX,IKPT,ISPIN,NGL,NBH,NB,IBH,NRL,IB,IDIM
+      REAL(8)   ,ALLOCATABLE:: OCC(:,:,:)
+      REAL(8)               :: EX,EXCHECK,RWEIGHT,EXPAIR
+      COMPLEX(8),ALLOCATABLE:: HPSI(:,:,:),PSI(:,:,:),PSIR(:,:),HPSIR(:,:)
+      LOGICAL(4),SAVE       :: TCHECKREAD=.FALSE.
+      LOGICAL(4),SAVE       :: TCHECK=.FALSE.
+      CHARACTER(16)         :: CENV
+      INTEGER(4)            :: NFILO
+      INTEGER(4)            :: NTASKSK,THISTASKK,NQFULL
+!     **************************************************************************
+      CALL FOCK$GETL4('ON',TON)
+      IF(.NOT.TON) RETURN
+                              CALL TRACE$PUSH('WAVES_FOCKETOT')
+      IF(.NOT.TCHECKREAD) THEN
+        CALL GET_ENVIRONMENT_VARIABLE('VESPAW_FOCK_CHECK',CENV)
+        TCHECK=(TRIM(CENV).EQ.'1')
+        TCHECKREAD=.TRUE.
+      END IF
+      CALL DYNOCC$GETI4('NB',NBX)
+      ALLOCATE(OCC(NBX,NKPTL,NSPIN))
+      CALL WAVES_DYNOCCGETR8A('OCC',NBX*NKPTL*NSPIN,OCC)
+      NAT=MAP%NAT
+      NPRO=MAP%NPRO
+      ALLOCATE(RPOS(3,NAT))
+      CALL ATOMLIST$GETR8A('R(0)',0,3*NAT,RPOS)
+      CALL FOCK$GETI4('NQFULL',NQFULL)
+      CALL FOCK$SNAPSHOTRESET(NSPIN,NDIM,NBX*NQFULL,NAT,NPRO,RPOS)
+      DEALLOCATE(RPOS)
+      DO IKPT=1,NKPTL
+        DO ISPIN=1,NSPIN
+          CALL WAVES_SELECTWV(IKPT,ISPIN)
+          CALL PLANEWAVE$SELECT(GSET%ID)
+          NGL=GSET%NGL
+          NBH=THIS%NBH
+          NB=THIS%NB
+          CALL FOCK$SNAPSHOT(GSET%ID,ISPIN,NGL,NDIM,NBH,NB,NPRO,GSET%TINV &
+     &                      ,OCC(:,IKPT,ISPIN),THIS%PSI0,THIS%PROJ)
+        ENDDO
+      ENDDO
+!     == OCCUPIED ORBITALS OF THE OTHER K-GROUPS ==============================
+      CALL FOCK$SNAPSHOTGATHER()
+!
+!     == W=V_X PSI FOR ALL BANDS OF EACH SET: ENERGY 1/2 SUM F <PSI|W> AND   ==
+!     == THE ACE OPERATOR (ONE EXACT APPLICATION PER SET)                    ==
+      DO IKPT=1,NKPTL
+        DO ISPIN=1,NSPIN
+          CALL WAVES_SELECTWV(IKPT,ISPIN)
+          CALL PLANEWAVE$SELECT(GSET%ID)
+          NGL=GSET%NGL
+          NBH=THIS%NBH
+          NB=THIS%NB
+          CALL FOCK$WBUILD(GSET%ID,ISPIN,NGL,NDIM,NBH,NB,NPRO,GSET%TINV &
+     &                    ,OCC(:,IKPT,ISPIN),THIS%PSI0,THIS%PROJ)
+        ENDDO
+      ENDDO
+!     == SUM OF THE ENERGY OVER THE K-GROUPS ===================================
+      CALL FOCK$WBUILDDONE()
+      CALL FOCK$GETR8('EPW',EX)
+      CALL ENERGYLIST$SET('FOCK EXCHANGE',EX)
+      CALL ENERGYLIST$ADD('TOTAL ENERGY',EX)
+!
+!     == CONSISTENCY CHECK OF OPERATOR AND ENERGY (DIAGNOSTIC) ================
+      IF(TCHECK) THEN
+        CALL MPE$QUERY('K',NTASKSK,THISTASKK)
+        EXCHECK=0.D0
+        DO IKPT=1,NKPTL
+          DO ISPIN=1,NSPIN
+            CALL WAVES_SELECTWV(IKPT,ISPIN)
+            CALL PLANEWAVE$SELECT(GSET%ID)
+            CALL PLANEWAVE$GETI4('NRL',NRL)
+            CALL PLANEWAVE$GETR8('RWEIGHT',RWEIGHT)
+            NGL=GSET%NGL
+            NBH=THIS%NBH
+            NB=THIS%NB
+            ALLOCATE(PSI(NGL,NDIM,NBH))
+            ALLOCATE(HPSI(NGL,NDIM,NBH))
+            ALLOCATE(PSIR(NRL,NBH))
+            ALLOCATE(HPSIR(NRL,NBH))
+            ALLOCATE(PJ(NDIM,NBH,NPRO))
+            ALLOCATE(HPJ(NDIM,NBH,NPRO))
+            PSI=THIS%PSI0
+            PJ=THIS%PROJ
+            HPSI=(0.D0,0.D0)
+            HPJ=(0.D0,0.D0)
+            CALL FOCK$APPLY(GSET%ID,ISPIN,NGL,NDIM,NBH,NPRO,PSI,PJ,HPSI,HPJ)
+            CALL PLANEWAVE$SELECT(GSET%ID)
+            DO IDIM=1,NDIM
+              CALL PLANEWAVE$FFT('GTOR',NBH,NGL,PSI(:,IDIM,:),NRL,PSIR)
+              CALL PLANEWAVE$FFT('GTOR',NBH,NGL,HPSI(:,IDIM,:),NRL,HPSIR)
+              DO IBH=1,NBH
+                IF(GSET%TINV) THEN
+                  IB=2*IBH-1
+                  EXCHECK=EXCHECK+0.5D0*OCC(IB,IKPT,ISPIN)*RWEIGHT &
+     &                 *SUM(REAL(PSIR(:,IBH),KIND=8)*REAL(HPSIR(:,IBH),KIND=8))
+                  IF(THISTASKK.EQ.1) EXCHECK=EXCHECK+0.5D0*OCC(IB,IKPT,ISPIN) &
+     &                 *SUM(REAL(PJ(IDIM,IBH,:),KIND=8)*REAL(HPJ(IDIM,IBH,:),KIND=8))
+                  IB=2*IBH
+                  IF(IB.LE.NB) THEN
+                    EXCHECK=EXCHECK+0.5D0*OCC(IB,IKPT,ISPIN)*RWEIGHT &
+     &                 *SUM(AIMAG(PSIR(:,IBH))*AIMAG(HPSIR(:,IBH)))
+                    IF(THISTASKK.EQ.1) EXCHECK=EXCHECK+0.5D0*OCC(IB,IKPT,ISPIN) &
+     &                 *SUM(AIMAG(PJ(IDIM,IBH,:))*AIMAG(HPJ(IDIM,IBH,:)))
+                  END IF
+                ELSE
+                  EXCHECK=EXCHECK+0.5D0*OCC(IBH,IKPT,ISPIN)*RWEIGHT &
+     &                 *REAL(SUM(CONJG(PSIR(:,IBH))*HPSIR(:,IBH)),KIND=8)
+                  IF(THISTASKK.EQ.1) EXCHECK=EXCHECK+0.5D0*OCC(IBH,IKPT,ISPIN) &
+     &                 *REAL(SUM(CONJG(PJ(IDIM,IBH,:))*HPJ(IDIM,IBH,:)),KIND=8)
+                END IF
+              ENDDO
+            ENDDO
+            DEALLOCATE(PSI)
+            DEALLOCATE(HPSI)
+            DEALLOCATE(PSIR)
+            DEALLOCATE(HPSIR)
+            DEALLOCATE(PJ)
+            DEALLOCATE(HPJ)
+          ENDDO
+        ENDDO
+        CALL MPE$COMBINE('K','+',EXCHECK)
+        CALL MPE$COMBINE('KX','+',EXCHECK)
+        CALL FOCK$ENERGY(EXPAIR)
+        CALL FILEHANDLER$UNIT('PROT',NFILO)
+        WRITE(*,FMT='("FOCK CHECK: PAIR FORMULA (GAMMA ONLY, ELSE 0)=",ES22.14)')EXPAIR
+        WRITE(NFILO,FMT='("FOCK CHECK: E_X=",ES22.14," 1/2SUM F<PSI|VX|PSI>=",ES22.14' &
+     &              //'," DIFF=",ES10.2)')EX,EXCHECK,EX-EXCHECK
+        WRITE(*,FMT='("FOCK CHECK: E_X=",ES22.14," 1/2SUM F<PSI|VX|PSI>=",ES22.14' &
+     &              //'," DIFF=",ES10.2)')EX,EXCHECK,EX-EXCHECK
+      END IF
+      DEALLOCATE(OCC)
+                              CALL TRACE$POP()
       RETURN
       END
 !
@@ -4885,6 +5137,9 @@ RETURN
       REAL(8)                :: SVAR
       REAL(8)                :: R(3,NAT)
       REAL(8)   ,PARAMETER   :: RSMALL=1.D-20
+      LOGICAL(4)             :: TFOCK       ! PLANE-WAVE FOCK EXCHANGE
+      COMPLEX(8),ALLOCATABLE :: HPJF(:,:,:) ! (1,NBH,NPRO) FOCK PROJECTOR PART
+      COMPLEX(8),ALLOCATABLE :: HPSIF(:,:,:)  ! (NGL,NDIM,NBH) (NOT USED)
 !     ******************************************************************
                               CALL TRACE$PUSH('WAVES$FORCE')
                               CALL TIMING$CLOCKON('W:FORCE')
@@ -4921,6 +5176,22 @@ RETURN
           NB=THIS%NB
           NBH=THIS%NBH
           NGL=GSET%NGL
+!
+!         == PLANE-WAVE FOCK EXCHANGE: DE/D<PSI|P> = F*HPJF, WITH HPJF THE   ==
+!         == PROJECTOR PART OF V_X|PSI> (COMPENSATION CHARGES OF THE PAIR    ==
+!         == DENSITIES). THE ONE-CENTER PART IS ALREADY IN DH, THE EXPLICIT  ==
+!         == DEPENDENCE ON R AND THE CELL IS IN FOCK$FORCE.                  ==
+          CALL FOCK$GETL4('ON',TFOCK)
+          IF(TFOCK) THEN
+            ALLOCATE(HPJF(NDIM,NBH,MAP%NPRO))
+            ALLOCATE(HPSIF(NGL,NDIM,NBH))
+            HPJF(:,:,:)=(0.D0,0.D0)
+            HPSIF(:,:,:)=(0.D0,0.D0)
+            CALL FOCK$APPLY(GSET%ID,ISPIN,NGL,NDIM,NBH,MAP%NPRO,THIS%PSI0 &
+     &                     ,THIS%PROJ,HPSIF,HPJF)
+            DEALLOCATE(HPSIF)
+            CALL PLANEWAVE$SELECT(GSET%ID)
+          END IF
 !
 !         ===============================================================
 !         ==                                                           ==
@@ -4978,6 +5249,11 @@ RETURN
               CALL WAVES_FORCE_ADDHTBC(NDIM,NBH,NB,LMNX,OCC(:,IKPT,ISPIN) &
      &                                ,THIS%HTBC_NEW(:,:,IPRO:IPRO+LMNX-1),DEDPROJ)
             END IF
+!           == ADD CONTRIBUTION FROM THE PLANE-WAVE FOCK EXCHANGE =============
+            IF(TFOCK) THEN
+              CALL WAVES_FORCE_ADDHTBC(NDIM,NBH,NB,LMNX,OCC(:,IKPT,ISPIN) &
+     &                                ,HPJF(:,:,IPRO:IPRO+LMNX-1),DEDPROJ)
+            END IF
 
 !           == |DE/DPRO>=|PSPSI>DEDPROJ ========================================
             ALLOCATE(DEDPRO(NGL,LMNX))
@@ -5000,6 +5276,7 @@ RETURN
             IPRO=IPRO+LMNX
             CALL SETUP$UNSELECT()
           ENDDO ! END OF LOOP OVER IAT
+          IF(TFOCK) DEALLOCATE(HPJF)
           DEALLOCATE(GIJ)
           DEALLOCATE(GVEC)
         ENDDO  ! END OF LOOP OVER ISPIN
@@ -5098,6 +5375,7 @@ RETURN
       INTEGER(4)             :: IB,NGAMMAHPSI
       REAL(8)   ,ALLOCATABLE :: XKHYB(:,:)
       COMPLEX(8),ALLOCATABLE :: HPROJHYB(:,:,:)
+      LOGICAL(4)             :: TFOCK
 !     **************************************************************************
                               CALL TRACE$PUSH('WAVES$HPSI')
                               CALL TIMING$CLOCKON('W:HPSI')
@@ -5189,6 +5467,10 @@ CALL TIMING$CLOCKOFF('W:HPSI.HPROJ')
 !         ==============================================================
 !         ==  ADD  |P>DH<P|PSI>                                       ==
 !         ==============================================================
+!         ==  PLANE-WAVE PAW FOCK EXCHANGE ==================================
+          CALL FOCK$GETL4('ON',TFOCK)
+          IF(TFOCK) CALL FOCK$APPLY(GSET%ID,ISPIN,NGL,NDIM,NBH,MAP%NPRO &
+     &                  ,THIS%PSI0,THIS%PROJ,THIS%HPSI,HPROJ)
 CALL TIMING$CLOCKON('W:HPSI.ADDPROJ')
           CALL WAVES_ADDPRO(MAP,GSET,NAT,R,NGL,NDIM,NBH,MAP%NPRO &
      &                     ,THIS%HPSI,HPROJ)
@@ -5324,6 +5606,7 @@ END IF
       LOGICAL(4)                 :: THYBRID
       REAL(8)   ,ALLOCATABLE     :: XK(:,:)
       COMPLEX(8),ALLOCATABLE     :: HPROJHYB(:,:,:)
+      LOGICAL(4)                 :: TFOCK
 !     **************************************************************************
 CALL TIMING$CLOCKON('W:HPSI.VPSI')
 !     == THIS IS THE H|PSI> OF THE CG/DAV/RMM/EDFT OPTIMIZERS (VESPAW_CG.F90). ==
@@ -5385,6 +5668,12 @@ CALL TIMING$CLOCKOFF('W:HPSI.HPROJ')
 !     ==========================================================================
 !     ==  ADD  |P>DH<P|PSI>                                                   ==
 !     ==========================================================================
+!
+!     ==  PLANE-WAVE PAW FOCK EXCHANGE (OPERATOR FROM THE CURRENT-STATE       ==
+!     ==  SNAPSHOT): PLANE-WAVE PART INTO HPSI, COMPENSATION PART INTO HPROJ  ==
+      CALL FOCK$GETL4('ON',TFOCK)
+      IF(TFOCK) CALL FOCK$APPLY(GSET%ID,ISPIN,NGL,NDIM,NBH,NPRO,PSI &
+     &                         ,PROJ,HPSI,HPROJ)
 CALL TIMING$CLOCKON('W:HPSI.ADDPRO')
       CALL WAVES_ADDPRO(MAP,GSET,NAT,R,NGL,NDIM,NBH,NPRO,HPSI,HPROJ)
 CALL TIMING$CLOCKOFF('W:HPSI.ADDPRO')
@@ -7234,6 +7523,51 @@ CALL TIMING$CLOCKOFF('W:HPSI.ADDPRO')
       RETURN
       END
 ! 
+!     ...1.........2.........3.........4.........5.........6.........7.........8
+      SUBROUTINE WAVES_KDISTRIBUTEFOCK(NTASKS,NKPT,TINV,ICOLOR,KMAP)
+!     **************************************************************************
+!     **  K-POINT DISTRIBUTION FOR THE PLANE-WAVE FOCK EXCHANGE: ALL K-GROUPS **
+!     **  HAVE THE SAME NUMBER OF TASKS (AND THEREFORE THE SAME REAL-SPACE    **
+!     **  LAYOUT). THE NUMBER OF GROUPS IS THE LARGEST DIVISOR OF NTASKS NOT  **
+!     **  LARGER THAN NKPT. THE K-POINTS ARE ASSIGNED GREEDILY TO THE LEAST   **
+!     **  LOADED GROUP (A TINV K-POINT COUNTS HALF).                          **
+!     **  ICOLOR AND KMAP AS IN WAVES_KDISTRIBUTE.                            **
+!     **************************************************************************
+      IMPLICIT NONE
+      INTEGER(4),INTENT(IN) :: NTASKS
+      INTEGER(4),INTENT(IN) :: NKPT
+      LOGICAL(4),INTENT(IN) :: TINV(NKPT)
+      INTEGER(4),INTENT(OUT):: ICOLOR(NTASKS)
+      INTEGER(4),INTENT(OUT):: KMAP(NKPT)
+      REAL(8)   ,ALLOCATABLE:: XLOAD(:)
+      INTEGER(4)            :: NG,MG,I,IKPT,IG,IPASS
+      REAL(8)               :: W
+!     **************************************************************************
+      NG=1
+      DO I=1,MIN(NTASKS,NKPT)
+        IF(MOD(NTASKS,I).EQ.0) NG=I
+      ENDDO
+      MG=NTASKS/NG
+      DO I=1,NTASKS
+        ICOLOR(I)=(I-1)/MG+1
+      ENDDO
+      ALLOCATE(XLOAD(NG))
+      XLOAD(:)=0.D0
+!     == COMPLEX K-POINTS FIRST, THEN THE TINV ONES =============================
+      DO IPASS=1,2
+        DO IKPT=1,NKPT
+          IF((IPASS.EQ.1).EQV.TINV(IKPT)) CYCLE
+          W=1.D0
+          IF(TINV(IKPT)) W=0.5D0
+          IG=MINLOC(XLOAD,1)
+          XLOAD(IG)=XLOAD(IG)+W
+          KMAP(IKPT)=(IG-1)*MG+1
+        ENDDO
+      ENDDO
+      DEALLOCATE(XLOAD)
+      RETURN
+      END
+!
 !     ...1.........2.........3.........4.........5.........6.........7.........8
       SUBROUTINE WAVES_KDISTRIBUTE(NTASKS,NKPT,TINV,ICOLOR,KMAP)
 !     **************************************************************************

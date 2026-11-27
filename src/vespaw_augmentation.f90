@@ -994,6 +994,7 @@ STOP
       LOGICAL(4)            :: TSCANL ! SCAN0R: USE SCAN-L EXCHANGE INSTEAD (DFT TYPE=20)
       LOGICAL(4)            :: TTSCANDELOC ! SCAN0R: REAL TAU-SCAN ONE-CENTER CORRECTION
       LOGICAL(4)            :: TGRA   ! SWITCH FOR GRADIENT CORRECTION
+      LOGICAL(4)            :: THYBSR ! HSE SHORT-RANGE WPBE ACTIVE (ANGULAR QUADRATURE)
       INTEGER(4)            :: NSPIN
       REAL(8)               :: EXC1
       REAL(8)               :: R(NR)
@@ -1069,7 +1070,8 @@ STOP
 !     ==========================================================================
 !     ==  EXACT ANGULAR QUADRATURE INSTEAD OF THE TAYLOR EXPANSION BELOW      ==
 !     ==========================================================================
-      IF(TXCEXACT.AND.LMRX.GT.1.AND.NDIMD.LE.2) THEN
+      CALL DFT$GETL4('HYBSR',THYBSR)
+      IF(TXCEXACT.AND.(LMRX.GT.1.OR.THYBSR).AND.NDIMD.LE.2) THEN
         CALL AUGMENTATION_XC_NSPH(GID,NR,LMRX,NDIMD,RHOIN,EXC,VXC)
         CALL TRACE$POP
         RETURN
@@ -3521,6 +3523,11 @@ REAL(8),PARAMETER  :: FX1=1.174D0 ! SINGLE-ORBITAL-LIMIT PREFACTOR (SUN ET AL. E
 !     == ALL CALLERS PASS S AND THE ALPHA OF SCAN; ALPHA-BAR FOLLOWS FROM ====
 !     == TAU_W/TAU_UNIF=(5/3)S**2:  ALPHA-BAR=ALPHA/(1+ETA*(5/3)S**2) =======
 LOGICAL(4)         :: TR2SCAN=.FALSE.
+!     == SCAN0 (PLANE-WAVE FOCK HYBRID): THE META-GGA EXCHANGE IS SCALED BY  ==
+!     == 1-AEXX (VASP AMGGAX). SCAN_X_FX IS THE ONLY ENTRY OF THE EXCHANGE  ==
+!     == (GRID, ONE-CENTER, ALL POTENTIALS BY DIFFERENCES OF IT), SO THE    ==
+!     == FACTOR IS APPLIED THERE. SET BY SCAN$SETXSCALE (READIN_FOCKXSCALE). ==
+REAL(8)            :: XSCALE=1.D0
 REAL(8),PARAMETER  :: R2ETA=1.D-3    ! REGULARIZATION OF ALPHA-BAR
 REAL(8),PARAMETER  :: R2DP2=0.361D0  ! DAMPING OF THE GRADIENT-EXPANSION TERMS
 !     == INTERPOLATION POLYNOMIAL FOR 0<=ALPHA-BAR<=2.5, EXCHANGE =============
@@ -3632,12 +3639,13 @@ CONTAINS
 !      *****************************************************************
        IF(TR2SCAN) THEN
          CALL R2SCAN_X_FX(S,ALPHA,FX)
+         FX=FX*XSCALE
          RETURN
        END IF
        CALL SCAN_X_GX(S,G)
        CALL SCAN_X_H1X(S,ALPHA,H)
        CALL SCAN_X_FALPHA(ALPHA,F)
-       FX=(H+F*(FX1-H))*G
+       FX=(H+F*(FX1-H))*G*XSCALE
        RETURN
        END SUBROUTINE SCAN_X_FX
 !
@@ -4234,6 +4242,19 @@ END MODULE SCAN_C_MODULE
       LOGICAL(4),INTENT(IN) :: TVAL
 !     ******************************************************************
       TR2SCAN=TVAL
+      RETURN
+      END
+!
+!     ..................................................................
+      SUBROUTINE SCAN$SETXSCALE(VAL)
+!     ******************************************************************
+!     **  SCALE OF THE (R2)SCAN EXCHANGE: 1-AEXX FOR SCAN0/R2SCAN0     **
+!     ******************************************************************
+      USE SCAN_X_MODULE, ONLY: XSCALE
+      IMPLICIT NONE
+      REAL(8),INTENT(IN) :: VAL
+!     ******************************************************************
+      XSCALE=VAL
       RETURN
       END
 !

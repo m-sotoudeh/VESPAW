@@ -86,6 +86,15 @@ _HYBRID_FUNCTIONALS = {
     "PBE-SL0R": ("PBE", {}, {"DCTYPE": "SCANL"}),
     "SCAN0R": ("SCAN", {"TSCANDELOC": True}, {}),
 }
+# Plane-wave hybrids (nonlocal Fock exchange, !CONTROL!DFT!FOCK): global
+# !DFT TYPE, extra !DFT keys, extra !FOCK keys. The weight (AEXX) defaults
+# to 0.25; CDUAL is raised to 4 so that the pair densities are exact.
+_FOCK_FUNCTIONALS = {
+    "PBE0": ("PBE", {}, {}),
+    "HSE06": ("PBE", {}, {"HFSCREEN": 0.2}),
+    "SCAN0": ("SCAN", {"TSCANDELOC": True}, {}),
+    "R2SCAN0": ("R2SCAN", {"TSCANDELOC": True}, {}),
+}
 # plain orbital-tau SCAN needs the delocalized (grid + one-center) evaluation
 _PLAIN_DFT_EXTRA = {"SCAN": {"TSCANDELOC": True}}
 
@@ -363,16 +372,28 @@ def validate_and_lower(cfg: Dict[str, Any], yaml_dir: Path) -> LoweredInput:
             _fail("electronic.xc.hybrid.weight",
                   f"expected a number in [0, 1], got {hybrid_weight!r}")
         dft_type, dft_extra, ntbo_extra = _HYBRID_FUNCTIONALS[functional]
+        fock_extra = None
+    elif functional in _FOCK_FUNCTIONALS:
+        if hybrid_weight is None:
+            hybrid_weight = 0.25
+        if not isinstance(hybrid_weight, (int, float)) or not (0.0 < hybrid_weight <= 1.0):
+            _fail("electronic.xc.hybrid.weight",
+                  f"expected a number in (0, 1], got {hybrid_weight!r}")
+        dft_type, dft_extra, fock_extra = _FOCK_FUNCTIONALS[functional]
+        ntbo_extra = None
     elif functional in _PLAIN_FUNCTIONALS:
         if hybrid_weight is not None:
             _fail("electronic.xc.hybrid.weight",
                   f"given, but '{functional_raw}' is not a hybrid functional "
-                  "(use PBE0r, PBE-SL0r or SCAN0r for onsite-hybrid mixing)")
+                  "(use PBE0r, PBE-SL0r or SCAN0r for onsite-hybrid mixing,"
+                  " PBE0, HSE06, SCAN0 or R2SCAN0 for plane-wave hybrids)")
         dft_type = functional
         dft_extra = _PLAIN_DFT_EXTRA.get(functional, {})
         ntbo_extra = None
+        fock_extra = None
     else:
-        known = ", ".join(sorted(_PLAIN_FUNCTIONALS | set(_HYBRID_FUNCTIONALS)))
+        known = ", ".join(sorted(_PLAIN_FUNCTIONALS | set(_HYBRID_FUNCTIONALS)
+                                 | set(_FOCK_FUNCTIONALS)))
         _fail("electronic.xc.functional",
               f"unknown functional '{functional_raw}' (known: {known})")
 
@@ -444,7 +465,8 @@ def validate_and_lower(cfg: Dict[str, Any], yaml_dir: Path) -> LoweredInput:
 
     cntl_text = _build_cntl(
         nstep=max_iter, epwpsi_ry=epwpsi_ry, dft_type=dft_type,
-        dft_extra=dft_extra, ntbo_extra=ntbo_extra, hybrid_weight=hybrid_weight,
+        dft_extra=dft_extra, ntbo_extra=ntbo_extra, fock_extra=fock_extra,
+        hybrid_weight=hybrid_weight,
         optimizer=optimizer, mixer=mixer, mixg0sq=mixg0sq,
         mixtol=mixtol, ediff_ha=ediff_ha, nrmmx=nrmmx, rmmdelay=rmmdelay,
         ions_mode=ions_mode, raw=cfg.get("raw"),
@@ -456,6 +478,7 @@ def validate_and_lower(cfg: Dict[str, Any], yaml_dir: Path) -> LoweredInput:
 def _build_cntl(*, nstep: int, epwpsi_ry: float, dft_type: str,
                  dft_extra: Dict[str, Any],
                  ntbo_extra: Optional[Dict[str, str]],
+                 fock_extra: Optional[Dict[str, Any]],
                  hybrid_weight: Optional[float], optimizer: str, mixer: str,
                  mixg0sq: Optional[float], mixtol: Optional[float],
                  ediff_ha: Optional[float], nrmmx: Optional[int],
@@ -469,7 +492,8 @@ def _build_cntl(*, nstep: int, epwpsi_ry: float, dft_type: str,
     generic.keys.update(NSTEP=nstep, DT=5.0, NWRITE=nwrite, START=True)
 
     fourier = control["FOURIER"] = Block("FOURIER")
-    fourier.keys.update({"EPWPSI": round(epwpsi_ry, 6), "CDUAL": 2.0})
+    fourier.keys.update({"EPWPSI": round(epwpsi_ry, 6),
+                         "CDUAL": 4.0 if fock_extra is not None else 2.0})
 
     dft = control["DFT"] = Block("DFT")
     dft.keys["TYPE"] = dft_type
@@ -479,6 +503,10 @@ def _build_cntl(*, nstep: int, epwpsi_ry: float, dft_type: str,
         ntbo.keys["MODUS"] = "HYBRID"
         ntbo.keys["HFWEIGHT"] = round(float(hybrid_weight), 6)
         ntbo.keys.update(ntbo_extra)
+    if fock_extra is not None:
+        fock = dft.child("FOCK")
+        fock.keys["AEXX"] = round(float(hybrid_weight), 6)
+        fock.keys.update(fock_extra)
 
     psidyn = control["PSIDYN"] = Block("PSIDYN")
     psidyn.keys.update(OPTIMIZER=optimizer, SAFEORTHO=True, STOP=True,

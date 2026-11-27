@@ -43,9 +43,15 @@ energy shows that a calculation had not converged.
   occupations as an independent variational reference.
 - **Functionals**, checked against libxc (to machine precision) and VASP:
   LDA (PZ, PW92), GGA (PBE, RPBE, PW91, revPBE, PBEsol, BLYP, BP86),
-  meta-GGA (SCAN and r²SCAN with orbital τ, SCAN-L), the local hybrids
-  PBE0r, PBE-SL0r, SCAN0r and r²SCAN0r, DFT+U. Selected by name (`TYPE='PBEsol'`) or by
-  the VASP tags (`'PS'`, `'RP'`, …).
+  meta-GGA (SCAN and r²SCAN with orbital τ, SCAN-L), DFT+U. Selected by
+  name (`TYPE='PBEsol'`) or by the VASP tags (`'PS'`, `'RP'`, …).
+- **Hybrid functionals**: plane-wave PAW Fock exchange for PBE0, HSE06,
+  SCAN0 and r²SCAN0 (`!DFT!FOCK AEXX=0.25 HFSCREEN=0.2 !END`), with
+  adaptively compressed exchange, k-points, symmetry, spin–orbit
+  spinors, forces, stress and MPI; band-gap shifts within 2 % of VASP
+  for Si, C, MgO and MnO. The local hybrids PBE0r, PBE-SL0r, SCAN0r and
+  r²SCAN0r add exact exchange inside the atomic spheres only, at nearly
+  semilocal cost.
 - **Physics**: collinear and non-collinear spin, spin–orbit coupling,
   finite electron temperature, dipole correction, forces and stress,
   Car–Parrinello molecular dynamics, space-group symmetry.
@@ -128,10 +134,10 @@ python3 testsuite/run.py pbe_atom si8_gamma
 *Expected run time* on the laptop above: about 1 minute serially, and
 about 40 s for `si8_gamma` on two MPI tasks.
 
-The full suite (`python3 testsuite/run.py`) has 22 cases: functionals,
-DFT+U, hybrids, spin–orbit coupling, forces, relaxation and symmetry. It
-takes about 2 hours (1 h 53 min measured) on the same laptop, without the long runs marked
-optional.
+The full suite (`python3 testsuite/run.py`) has 23 cases: functionals,
+DFT+U, local and plane-wave hybrids, spin–orbit coupling, forces,
+relaxation and symmetry. It takes about 2 hours (2 h 4 min measured) on
+the same laptop, without the long runs marked optional.
 
 **Reproducing the results of the method paper** (arXiv:2611.20789).
 The input files, scripts and per-system results of every calculation in
