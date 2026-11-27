@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.4 — 2026-11-27
 
 - Plane-wave hybrid functionals: nonlocal PAW Fock exchange for PBE0,
   HSE06, SCAN0 and r²SCAN0, block `!CONTROL!DFT!FOCK` (`AEXX`,
@@ -20,6 +20,8 @@
 - New regression case `si_hybrid` (PBE0 full mesh, symmetry and RMM-DIIS,
   HSE06, finite-difference force) and tutorial example
   `examples/tutorial/07_si_hybrid`.
+- README: separate entries for the plane-wave and the on-site hybrid
+  functionals.
 - MPI: fixed the creation of a second communicator split from the same
   parent, which dropped the first one.
 - Not yet available with hybrids: `GAMMASUPER=T`, the onsite hybrids

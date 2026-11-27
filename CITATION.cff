@@ -7,9 +7,9 @@ authors:
     orcid: "https://orcid.org/0000-0002-0970-5336"
     affiliation: "Helmholtz Institute Ulm (HIU) / Karlsruhe Institute of Technology (KIT)"
 license: GPL-3.0-only
-version: "1.0.3"
+version: "1.0.4"
 doi: "10.5281/zenodo.23295633"
-date-released: "2026-11-21"
+date-released: "2026-11-27"
 repository-code: "https://github.com/m-sotoudeh/VESPAW"
 keywords:
   - density functional theory

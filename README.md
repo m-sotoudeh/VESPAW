@@ -49,9 +49,14 @@ energy shows that a calculation had not converged.
   SCAN0 and r²SCAN0 (`!DFT!FOCK AEXX=0.25 HFSCREEN=0.2 !END`), with
   adaptively compressed exchange, k-points, symmetry, spin–orbit
   spinors, forces, stress and MPI; band-gap shifts within 2 % of VASP
-  for Si, C, MgO and MnO. The local hybrids PBE0r, PBE-SL0r, SCAN0r and
-  r²SCAN0r add exact exchange inside the atomic spheres only, at nearly
-  semilocal cost.
+  for Si, C, MgO and MnO.
+- **On-site hybrid functionals**: PBE0r, PBE-SL0r, SCAN0r and r²SCAN0r
+  (`!CONTROL!DFT!NTBO MODUS='HYBRID' HFWEIGHT=0.25 !END`) add exact
+  exchange only inside the atomic spheres, evaluated in a basis of
+  natural tight-binding orbitals, at nearly semilocal cost. Suited to
+  localized d electrons in transition-metal oxides and to cells of about
+  a hundred atoms. The operator acts in all eigensolvers, with forces,
+  stress and MPI.
 - **Physics**: collinear and non-collinear spin, spin–orbit coupling,
   finite electron temperature, dipole correction, forces and stress,
   Car–Parrinello molecular dynamics, space-group symmetry.
